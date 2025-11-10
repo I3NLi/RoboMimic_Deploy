@@ -91,6 +91,7 @@ if __name__ == "__main__":
                     state_cmd.q = qj.copy()
                     state_cmd.dq = dqj.copy()
                     state_cmd.gravity_ori = gravity_orientation.copy()
+                    state_cmd.base_quat = quat.copy()
                     state_cmd.ang_vel = omega.copy()
                     
                     FSM_controller.run()

@@ -15,6 +15,7 @@ class FSMStateName(Enum):
     SKILL_Dance = 7
     SKILL_KICK = 8
     SKILL_KungFu2 = 9
+    SKILL_BEYOND_MIMIC = 10
    
 
 @unique

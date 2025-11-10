@@ -133,6 +133,7 @@ class Controller:
             self.state_cmd.dq = self.dqj.copy()
             self.state_cmd.gravity_ori = gravity_orientation.copy()
             self.state_cmd.ang_vel = ang_vel.copy()
+            self.state_cmd.base_quat = quat
             
             self.FSM_controller.run()
             policy_output_action = self.policy_output.actions.copy()
