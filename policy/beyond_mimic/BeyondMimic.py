@@ -51,10 +51,67 @@ class BeyondMimic(FSMState):
             # load policy
             self.onnx_model = onnx.load(self.onnx_path)
             self.ort_session = onnxruntime.InferenceSession(self.onnx_path)
-            input = self.ort_session.get_inputs()
-            self.input_name = []
-            for i, inpt in enumerate(input):
-                self.input_name.append(inpt.name)
+            ort_inputs = self.ort_session.get_inputs()
+            self.input_name = [getattr(inpt, "name", inpt) for inpt in ort_inputs]
+
+            metadata = {p.key: p.value for p in self.onnx_model.metadata_props}
+            self.obs_names = self._parse_csv_list(metadata.get("observation_names", ""))
+            if not self.obs_names:
+                self.obs_names = [
+                    "command",
+                    "motion_anchor_ori_b",
+                    "base_ang_vel",
+                    "joint_pos",
+                    "joint_vel",
+                    "actions",
+                ]
+
+            obs_input_dim = None
+            if ort_inputs:
+                first = ort_inputs[0]
+                first_shape = getattr(first, "shape", None)
+                if first_shape:
+                    try:
+                        dim_val = first_shape[-1]
+                        if isinstance(dim_val, int) and dim_val > 0:
+                            obs_input_dim = dim_val
+                    except Exception:
+                        pass
+                if obs_input_dim is None:
+                    first_type = getattr(first, "type", None)
+                    tensor_type = getattr(first_type, "tensor_type", None)
+                    shape = getattr(tensor_type, "shape", None)
+                    dims = getattr(shape, "dim", None)
+                    if dims:
+                        obs_input_dim = dims[-1].dim_value
+
+            history_list = self._parse_csv_ints(metadata.get("observation_history_lengths", ""))
+            self.per_frame_dim = self._per_frame_dim_from_names(self.obs_names)
+            self.history_length = 1
+            if history_list and len(set(history_list)) == 1:
+                self.history_length = history_list[0]
+            elif obs_input_dim and self.per_frame_dim > 0 and obs_input_dim % self.per_frame_dim == 0:
+                self.history_length = obs_input_dim // self.per_frame_dim
+
+            if obs_input_dim:
+                self.num_obs = int(obs_input_dim)
+            else:
+                self.num_obs = int(self.per_frame_dim * self.history_length)
+
+            action_scale = self._parse_csv_floats(metadata.get("action_scale", ""))
+            if action_scale.size == self.num_actions:
+                self.action_scale_lab = action_scale
+
+            default_joint_pos = self._parse_csv_floats(metadata.get("default_joint_pos", ""))
+            if default_joint_pos.size == self.num_actions:
+                self.default_angles_lab = default_joint_pos
+
+            body_names = self._parse_csv_list(metadata.get("body_names", ""))
+            anchor_body_name = metadata.get("anchor_body_name", "")
+            if body_names and anchor_body_name in body_names:
+                self.anchor_body_idx = body_names.index(anchor_body_name)
+            else:
+                self.anchor_body_idx = 7
 
             print("BeyondMimic-like policy initializing ...")
     
@@ -72,7 +129,8 @@ class BeyondMimic(FSMState):
 
         self.qj_obs = np.zeros(self.num_actions, dtype=np.float32)
         self.dqj_obs = np.zeros(self.num_actions, dtype=np.float32)
-        self.obs = np.zeros(self.num_obs)
+        self.obs = np.zeros(self.num_obs, dtype=np.float32)
+        self.obs_history = np.zeros((self.history_length, self.per_frame_dim), dtype=np.float32)
 
         # self.action = np.zeros(self.num_actions)
 
@@ -154,6 +212,102 @@ class BeyondMimic(FSMState):
             
             return np.array([w, x, y, z])
 
+    def quat_apply_inverse(self, q, v):
+        q = np.array(q, dtype=np.float32)
+        v = np.array(v, dtype=np.float32)
+        q_conj = np.array([q[0], -q[1], -q[2], -q[3]], dtype=np.float32)
+        v_quat = np.array([0.0, v[0], v[1], v[2]], dtype=np.float32)
+        return self.quat_mul(self.quat_mul(q_conj, v_quat), q)[1:]
+
+    def _gravity_from_quat(self, q):
+        gravity_w = np.array([0.0, 0.0, -1.0], dtype=np.float32)
+        return self.quat_apply_inverse(q, gravity_w)
+
+    def _parse_csv_list(self, value: str):
+        if not value:
+            return []
+        return [v.strip() for v in value.split(',') if v.strip()]
+
+    def _parse_csv_floats(self, value: str):
+        if not value:
+            return np.array([], dtype=np.float32)
+        return np.array([float(v) for v in value.split(',') if v != ''], dtype=np.float32)
+
+    def _parse_csv_ints(self, value: str):
+        if not value:
+            return []
+        return [int(float(v)) for v in value.split(',') if v != '']
+
+    def _per_frame_dim_from_names(self, names):
+        dim = 0
+        for name in names:
+            if name == 'command':
+                dim += self.num_actions * 2
+            elif name in ('motion_anchor_ori_b',):
+                dim += 6
+            elif name in ('motion_anchor_pos_b',):
+                dim += 3
+            elif name in ('base_gravity', 'base_lin_vel', 'base_ang_vel'):
+                dim += 3
+            elif name in ('joint_pos', 'joint_vel', 'actions'):
+                dim += self.num_actions
+        return dim
+
+    def _pad_or_trim(self, obs, target_size):
+        if obs.size == target_size:
+            return obs
+        if obs.size < target_size:
+            return np.pad(obs, (0, target_size - obs.size))
+        return obs[:target_size]
+
+    def _term_vector(self, name, motion_anchor_ori_b, base_gravity, base_ang_vel, qj, dqj):
+        if name == 'command':
+            return np.concatenate((self.ref_joint_pos.squeeze(0), self.ref_joint_vel.squeeze(0)), axis=-1)
+        if name == 'motion_anchor_ori_b':
+            return motion_anchor_ori_b[:, :2].reshape(-1)
+        if name == 'motion_anchor_pos_b':
+            return np.zeros(3, dtype=np.float32)
+        if name == 'base_gravity':
+            return base_gravity
+        if name == 'base_lin_vel':
+            base_lin_vel = getattr(self.state_cmd, 'lin_vel', None)
+            if base_lin_vel is None:
+                return np.zeros(3, dtype=np.float32)
+            base_lin_vel = np.asarray(base_lin_vel, dtype=np.float32).reshape(-1)
+            if base_lin_vel.size != 3:
+                base_lin_vel = self._pad_or_trim(base_lin_vel, 3)
+            return base_lin_vel
+        if name == 'base_ang_vel':
+            base_ang_vel = np.asarray(base_ang_vel, dtype=np.float32).reshape(-1)
+            if base_ang_vel.size != 3:
+                base_ang_vel = self._pad_or_trim(base_ang_vel, 3)
+            return base_ang_vel
+        if name == 'joint_pos':
+            return qj
+        if name == 'joint_vel':
+            return dqj
+        if name == 'actions':
+            action_vec = self.action.squeeze(0).astype(np.float32)
+            return action_vec
+        return np.zeros(0, dtype=np.float32)
+
+    def _build_frame_obs(self, motion_anchor_ori_b, base_gravity, base_ang_vel, qj, dqj):
+        parts = []
+        for name in self.obs_names:
+            vec = self._term_vector(name, motion_anchor_ori_b, base_gravity, base_ang_vel, qj, dqj)
+            if vec.size:
+                parts.append(vec)
+        if not parts:
+            return np.zeros(self.per_frame_dim, dtype=np.float32)
+        return np.concatenate(parts, axis=-1).astype(np.float32)
+
+    def _append_history(self, frame_obs):
+        if self.history_length <= 1:
+            return frame_obs
+        self.obs_history = np.roll(self.obs_history, -1, axis=0)
+        self.obs_history[-1] = frame_obs
+        return self.obs_history.reshape(-1)
+
     def run(self):
         robot_quat = self.state_cmd.base_quat
         
@@ -171,7 +325,7 @@ class BeyondMimic(FSMState):
         temp1 = self.quat_mul(quat_roll, quat_pitch)
         temp2 = self.quat_mul(quat_yaw, temp1)
         robot_quat = self.quat_mul(robot_quat, temp2)
-        ref_anchor_ori_w = self.ref_body_quat_w[:, 7].squeeze(0)
+        ref_anchor_ori_w = self.ref_body_quat_w[:, self.anchor_body_idx].squeeze(0)
 
         # 在第一帧提取当前机器人yaw方向，与参考动作yaw方向做差（与beyond mimic一致）
         if(self.counter_step < 2):
@@ -184,32 +338,37 @@ class BeyondMimic(FSMState):
 
         motion_anchor_ori_b = self.matrix_from_quat(robot_quat).T @ self.init_to_world @ self.matrix_from_quat(ref_anchor_ori_w)
 
-        ang_vel = self.state_cmd.ang_vel
-        
+        ang_vel = np.asarray(self.state_cmd.ang_vel, dtype=np.float32).reshape(-1)
+        if ang_vel.size != 3:
+            ang_vel = self._pad_or_trim(ang_vel, 3)
         dqj = self.state_cmd.dq
-        
-        mimic_obs_buf = np.concatenate((self.ref_joint_pos.squeeze(0),
-                                        self.ref_joint_vel.squeeze(0),
-                                        motion_anchor_ori_b[:,:2].reshape(-1),
-                                        ang_vel,
-                                        qj,
-                                        dqj[self.mj2lab],
-                                        self.action.squeeze(0)),
-                                        axis=-1, dtype=np.float32)
-        
-        mimic_obs_tensor = torch.from_numpy(mimic_obs_buf).unsqueeze(0).cpu().numpy()
+        dqj = dqj[self.mj2lab]
+
+        base_gravity = getattr(self.state_cmd, "gravity_ori", None)
+        if base_gravity is None or len(base_gravity) != 3:
+            base_gravity = self._gravity_from_quat(robot_quat)
+        base_gravity = np.asarray(base_gravity, dtype=np.float32).reshape(-1)
+        if base_gravity.size != 3:
+            base_gravity = self._pad_or_trim(base_gravity, 3)
+
+        frame_obs = self._build_frame_obs(motion_anchor_ori_b, base_gravity, ang_vel, qj, dqj)
+        obs_input = self._append_history(frame_obs)
+        if obs_input.size != self.num_obs:
+            obs_input = self._pad_or_trim(obs_input, self.num_obs)
+
         observation = {}
 
         # obs0 是网络观测，obs1 是当前时间步，用于输出参考动作信息
-        observation[self.input_name[0]] = mimic_obs_tensor
+        observation[self.input_name[0]] = obs_input.reshape(1, -1).astype(np.float32)
         observation[self.input_name[1]] = np.array([[self.counter_step]], dtype=np.float32)
         outputs_result = self.ort_session.run(None, observation)
 
         # 处理多个输出
         self.action, self.ref_joint_pos, self.ref_joint_vel, _, self.ref_body_quat_w, _, _ = outputs_result
-        target_dof_pos_mj = np.zeros(29)
-        target_dof_pos_lab = self.action * self.action_scale_lab + self.default_angles_lab
-        target_dof_pos_mj[self.mj2lab] = target_dof_pos_lab.squeeze(0)
+        target_dof_pos_mj = np.zeros(self.num_actions, dtype=np.float32)
+        action_vec = self.action.squeeze(0).astype(np.float32)
+        target_dof_pos_lab = action_vec * self.action_scale_lab + self.default_angles_lab
+        target_dof_pos_mj[self.mj2lab] = target_dof_pos_lab
         
         self.policy_output.actions = target_dof_pos_mj
         self.policy_output.kps[self.mj2lab] = self.kps_lab
@@ -219,10 +378,9 @@ class BeyondMimic(FSMState):
         self.counter_step += 1
 
     def exit(self):
-        self.action = np.zeros(23, dtype=np.float32)
-        self.action_buf = np.zeros(23 * self.history_length, dtype=np.float32)
+        self.action = np.zeros(self.num_actions, dtype=np.float32)
+        self.obs_history = np.zeros((self.history_length, self.per_frame_dim), dtype=np.float32)
         self.ref_motion_phase = 0.
-        self.ref_motion_phase_buf = np.zeros(1 * self.history_length, dtype=np.float32)
         self.motion_time = 0
         self.counter_step = 0
         

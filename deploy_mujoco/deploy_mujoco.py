@@ -68,6 +68,8 @@ if __name__ == "__main__":
                     state_cmd.skill_cmd = FSMCommand.SKILL_3
                 if joystick.is_button_released(JoystickButton.Y) and joystick.is_button_pressed(JoystickButton.L1):
                     state_cmd.skill_cmd = FSMCommand.SKILL_4
+                if joystick.is_button_released(JoystickButton.B) and joystick.is_button_pressed(JoystickButton.L1):
+                    state_cmd.skill_cmd = FSMCommand.SKILL_5
                 
                 state_cmd.vel_cmd[0] = -joystick.get_axis_value(1)
                 state_cmd.vel_cmd[1] = -joystick.get_axis_value(0)
@@ -77,6 +79,10 @@ if __name__ == "__main__":
                 
                 tau = pd_control(policy_output_action, d.qpos[7:], kps, np.zeros_like(kps), d.qvel[6:], kds)
                 d.ctrl[:] = tau
+                # Apply mouse drag perturbations from the viewer in passive mode.
+                if hasattr(viewer, "pert"):
+                    d.xfrc_applied[:] = 0
+                    mujoco.mjv_applyPerturbForce(m, d, viewer.pert)
                 mujoco.mj_step(m, d)
                 sim_counter += 1
                 if sim_counter % control_decimation == 0:

@@ -118,6 +118,8 @@ class LocoMode(FSMState):
             return FSMStateName.SKILL_KICK
         elif(self.state_cmd.skill_cmd == FSMCommand.SKILL_4):
             return FSMStateName.SKILL_BEYOND_MIMIC
+        elif(self.state_cmd.skill_cmd == FSMCommand.SKILL_5):
+            return FSMStateName.JOINT_ZERO_CHECK
         elif(self.state_cmd.skill_cmd == FSMCommand.PASSIVE):
             return FSMStateName.PASSIVE
         else:

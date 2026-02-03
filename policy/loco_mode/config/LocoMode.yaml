@@ -1,4 +1,4 @@
-policy_path: "policy_29dof.pt"
+policy_path: "policy.pt"
 
 kps: [200, 200, 200,
       150, 150, 200,
