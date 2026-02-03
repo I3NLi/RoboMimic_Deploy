@@ -10,6 +10,7 @@ from policy.skill_cast.SkillCast import SkillCast
 from policy.kick.Kick import Kick
 from policy.kungfu2.KungFu2 import KungFu2
 from policy.beyond_mimic.BeyondMimic import BeyondMimic
+from policy.imu_calib.ImuCalib import ImuCalib
 from policy.joint_zero_check.JointZeroCheck import JointZeroCheck
 from FSM.FSMState import *
 import time
@@ -40,6 +41,7 @@ class FSM:
         self.kick_policy = Kick(state_cmd, policy_output)
         self.kungfu2_policy = KungFu2(state_cmd, policy_output)
         self.beyond_mimic_policy = BeyondMimic(state_cmd, policy_output)
+        self.imu_calib_policy = ImuCalib(state_cmd, policy_output, self.loco_policy)
         self.joint_zero_check_policy = JointZeroCheck(state_cmd, policy_output)
         
         print("initalized all policies!!!")
@@ -49,6 +51,25 @@ class FSM:
         
         
         
+
+    def _print_mode_hints(self, policy_name: FSMStateName):
+        hints = {
+            FSMStateName.PASSIVE: "[Hints] START=POS_RESET, R1+A=LOCO",
+            FSMStateName.FIXEDPOSE: "[Hints] R1+A=LOCO, L3=PASSIVE",
+            FSMStateName.LOCOMODE: "[Hints] R1+X=SKILL_1, R1+Y=SKILL_2, R1+B=SKILL_3, L1+Y=SKILL_4, L1+B=SKILL_5, L1+X=SKILL_6, L3=PASSIVE",
+            FSMStateName.SKILL_Dance: "[Hints] R1+A=LOCO, L3=PASSIVE",
+            FSMStateName.SKILL_KungFu: "[Hints] R1+A=LOCO, L3=PASSIVE",
+            FSMStateName.SKILL_KICK: "[Hints] R1+A=LOCO, L3=PASSIVE",
+            FSMStateName.SKILL_KungFu2: "[Hints] R1+A=LOCO, L3=PASSIVE",
+            FSMStateName.SKILL_BEYOND_MIMIC: "[Hints] R1+A=LOCO, L3=PASSIVE",
+            FSMStateName.JOINT_ZERO_CHECK: "[Hints] R1+A=LOCO, L3=PASSIVE",
+            FSMStateName.IMU_CALIB: "[Hints] 自动回到LOCO 或 L3=PASSIVE",
+            FSMStateName.SKILL_COOLDOWN: "[Hints] 自动回到LOCO 或 L3=PASSIVE",
+        }
+        msg = hints.get(policy_name)
+        if msg:
+            print(msg)
+
     def run(self):
         start_time = time.time()
         if(self.FSMmode == FSMMode.NORMAL): 
@@ -61,6 +82,7 @@ class FSM:
                 self.cur_policy.exit()
                 self.get_next_policy(nextPolicyName)
                 print("Switched to ", self.cur_policy.name_str)
+                self._print_mode_hints(self.cur_policy.name)
         
         elif(self.FSMmode == FSMMode.CHANGE):
             self.cur_policy.enter()
@@ -101,6 +123,8 @@ class FSM:
             self.cur_policy = self.kungfu2_policy
         elif((policy_name == FSMStateName.SKILL_BEYOND_MIMIC)):
             self.cur_policy = self.beyond_mimic_policy
+        elif((policy_name == FSMStateName.IMU_CALIB)):
+            self.cur_policy = self.imu_calib_policy
         elif((policy_name == FSMStateName.JOINT_ZERO_CHECK)):
             self.cur_policy = self.joint_zero_check_policy
         else:
