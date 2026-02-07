@@ -32,10 +32,18 @@ class BeyondMimic(FSMState):
             self.default_angles_lab =  np.array(config["default_angles_lab"], dtype=np.float32)
             self.mj2lab =  np.array(config["mj2lab"], dtype=np.int32)
             self.tau_limit =  np.array(config["tau_limit"], dtype=np.float32)
+            self.tau_limit_scale = float(config.get("tau_limit_scale", 1.0))
             self.num_actions = config["num_actions"]
             self.num_obs = config["num_obs"]
             self.action_scale_lab = np.array(config["action_scale_lab"], dtype=np.float32)
             self.motion_length = config["motion_length"]
+
+            self.kps_mj = np.zeros_like(self.kps_lab)
+            self.kds_mj = np.zeros_like(self.kds_lab)
+            self.tau_limit_mj = np.zeros_like(self.tau_limit)
+            self.kps_mj[self.mj2lab] = self.kps_lab
+            self.kds_mj[self.mj2lab] = self.kds_lab
+            self.tau_limit_mj[self.mj2lab] = self.tau_limit
             
             self.qj_obs = np.zeros(self.num_actions, dtype=np.float32)
             self.dqj_obs = np.zeros(self.num_actions, dtype=np.float32)
@@ -369,10 +377,21 @@ class BeyondMimic(FSMState):
         action_vec = self.action.squeeze(0).astype(np.float32)
         target_dof_pos_lab = action_vec * self.action_scale_lab + self.default_angles_lab
         target_dof_pos_mj[self.mj2lab] = target_dof_pos_lab
+
+        qj_mj = np.asarray(self.state_cmd.q, dtype=np.float32)
+        dqj_mj = np.asarray(self.state_cmd.dq, dtype=np.float32)
+        tau_limit = self.tau_limit_mj * self.tau_limit_scale
+        kp = self.kps_mj
+        kd = self.kds_mj
+        tau = (target_dof_pos_mj - qj_mj) * kp + (0.0 - dqj_mj) * kd
+        tau = np.clip(tau, -tau_limit, tau_limit)
+        safe_kp = np.where(kp > 1e-6, kp, 1.0)
+        target_dof_pos_mj_limited = qj_mj + (tau + kd * dqj_mj) / safe_kp
+        target_dof_pos_mj = np.where(kp > 1e-6, target_dof_pos_mj_limited, target_dof_pos_mj)
         
         self.policy_output.actions = target_dof_pos_mj
-        self.policy_output.kps[self.mj2lab] = self.kps_lab
-        self.policy_output.kds[self.mj2lab] = self.kds_lab
+        self.policy_output.kps = self.kps_mj.copy()
+        self.policy_output.kds = self.kds_mj.copy()
         
         # update motion phase
         self.counter_step += 1

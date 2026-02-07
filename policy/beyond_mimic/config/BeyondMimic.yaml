@@ -1,5 +1,4 @@
-onnx_path: "2026-02-03_13-15-46_dance1_subject2+Tracking-Flat-G1-Wo-State-Estimation-v0.onnx"
-# onnx_path: "2026-01-30_22-34-20_motion+Tracking-Flat-G1-Wo-State-Estimation-v0.onnx"
+onnx_path: "2026-02-06_21-51-45_dance1_subject2+Tracking-Flat-G1-Wo-State-Estimation-v0 copy.onnx"
 
 motion_length: 140 
 
@@ -14,6 +13,8 @@ tau_limit: [88.0,  88.0, 88.0,
                                        5.0,  5.0,
                                        5.0,  5.0
            ]
+
+tau_limit_scale: 0.8
 
 kp_lab: [40.179, 40.179, 40.179, 99.098, 99.098, 28.501, 
           40.179, 40.179, 28.501, 99.098, 99.098, 14.251, 
