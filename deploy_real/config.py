@@ -8,6 +8,7 @@ class Config:
         
         current_dir = os.path.dirname(os.path.abspath(__file__))
         mujoco_yaml_path = os.path.join(current_dir, "config", "real.yaml")
+        safety_yaml_path = os.path.join(current_dir, "config", "safety.yaml")
         with open(mujoco_yaml_path, "r") as f:
             config = yaml.load(f, Loader=yaml.FullLoader)
             self.net = config["net"]
@@ -16,4 +17,5 @@ class Config:
             self.lowstate_topic = config["lowstate_topic"]
             self.control_dt = config["control_dt"]
             self.error_over_time = config["error_over_time"]
+        self.safety_yaml_path = safety_yaml_path
             

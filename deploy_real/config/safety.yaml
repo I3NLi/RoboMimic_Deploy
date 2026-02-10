@@ -1,0 +1,22 @@
+enable: true
+dry_run: false
+log_events: true
+command_hold_frames: 3
+
+# action limits
+max_action_abs: 3.5
+max_action_delta: 0.25
+
+# gain limits
+max_kp: 300.0
+max_kd: 20.0
+max_kp_delta: 50.0
+max_kd_delta: 5.0
+
+# damping fallback
+damping_kd: 8.0
+
+# fault handling
+fault_hold_steps: 25
+fault_latch_seconds: 1.0
+max_faults_before_latch: 3

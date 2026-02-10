@@ -117,13 +117,18 @@ python deploy_mujoco/deploy_mujoco.py
 ## 4. Real Robot Operation Instructions
 
 1. Power on the robot and suspend it (e.g., with a harness). and then hold L2+R2
-
 2. Run the deploy_real program:
 ```bash
 python deploy_real/deploy_real.py
 ```
 3. Press the ​​Start​​ button to enter position control mode.
 4. Subsequent operations are the same as in simulation.
+
+---
+## Debug Safety (New)
+- `deploy_real/config/safety.yaml` and `deploy_mujoco/config/safety.yaml` control safety limits.
+- Default enables action/gain clamping, hold-to-confirm for mode switches, and damping fallback on faults.
+- Set `dry_run: true` for compute-only (no command output).
 
 ---
 ## Important Notes

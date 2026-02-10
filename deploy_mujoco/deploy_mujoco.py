@@ -14,6 +14,7 @@ from common.ctrlcomp import *
 from FSM.FSM import *
 from common.utils import get_gravity_orientation
 from common.joystick import JoyStick, JoystickButton
+from common.safety import load_safety_config, SafetyFilter, HoldToConfirm
 
 
 
@@ -29,6 +30,9 @@ if __name__ == "__main__":
         xml_path = os.path.join(PROJECT_ROOT, config["xml_path"])
         simulation_dt = config["simulation_dt"]
         control_decimation = config["control_decimation"]
+
+    safety_yaml_path = os.path.join(current_dir, "config", "safety.yaml")
+    safety_cfg = load_safety_config(safety_yaml_path)
         
     m = mujoco.MjModel.from_xml_path(xml_path)
     d = mujoco.MjData(m)
@@ -43,6 +47,8 @@ if __name__ == "__main__":
     state_cmd = StateAndCmd(num_joints)
     policy_output = PolicyOutput(num_joints)
     FSM_controller = FSM(state_cmd, policy_output)
+    safety = SafetyFilter(num_joints, safety_cfg)
+    command_gate = HoldToConfirm(safety_cfg.command_hold_frames)
     
     joystick = JoyStick()
     Running = True
@@ -56,22 +62,42 @@ if __name__ == "__main__":
                 joystick.update()
                 if joystick.is_button_released(JoystickButton.L3):
                     state_cmd.skill_cmd = FSMCommand.PASSIVE
-                if joystick.is_button_released(JoystickButton.START):
+                if command_gate.trigger("POS_RESET", joystick.is_button_pressed(JoystickButton.START)):
                     state_cmd.skill_cmd = FSMCommand.POS_RESET
-                if joystick.is_button_released(JoystickButton.A) and joystick.is_button_pressed(JoystickButton.R1):
+                if command_gate.trigger(
+                    "LOCO",
+                    joystick.is_button_pressed(JoystickButton.A) and joystick.is_button_pressed(JoystickButton.R1),
+                ):
                     state_cmd.skill_cmd = FSMCommand.LOCO
-                if joystick.is_button_released(JoystickButton.X) and joystick.is_button_pressed(JoystickButton.R1):
+                if command_gate.trigger(
+                    "SKILL_1",
+                    joystick.is_button_pressed(JoystickButton.X) and joystick.is_button_pressed(JoystickButton.R1),
+                ):
                     state_cmd.skill_cmd = FSMCommand.SKILL_1
-                if joystick.is_button_released(JoystickButton.Y) and joystick.is_button_pressed(JoystickButton.R1):
+                if command_gate.trigger(
+                    "SKILL_2",
+                    joystick.is_button_pressed(JoystickButton.Y) and joystick.is_button_pressed(JoystickButton.R1),
+                ):
                     state_cmd.skill_cmd = FSMCommand.SKILL_2
                 if joystick.is_button_released(JoystickButton.B) and joystick.is_button_pressed(JoystickButton.R1):
                     state_cmd.skill_cmd = FSMCommand.SKILL_3
-                if joystick.is_button_released(JoystickButton.Y) and joystick.is_button_pressed(JoystickButton.L1):
+                if command_gate.trigger(
+                    "SKILL_4",
+                    joystick.is_button_pressed(JoystickButton.Y) and joystick.is_button_pressed(JoystickButton.L1),
+                ):
                     state_cmd.skill_cmd = FSMCommand.SKILL_4
                 if joystick.is_button_released(JoystickButton.B) and joystick.is_button_pressed(JoystickButton.L1):
                     state_cmd.skill_cmd = FSMCommand.SKILL_5
-                if joystick.is_button_released(JoystickButton.X) and joystick.is_button_pressed(JoystickButton.L1):
+                if command_gate.trigger(
+                    "SKILL_6",
+                    joystick.is_button_pressed(JoystickButton.X) and joystick.is_button_pressed(JoystickButton.L1),
+                ):
                     state_cmd.skill_cmd = FSMCommand.SKILL_6
+                if command_gate.trigger(
+                    "SKILL_7",
+                    joystick.is_button_pressed(JoystickButton.A) and joystick.is_button_pressed(JoystickButton.L1),
+                ):
+                    state_cmd.skill_cmd = FSMCommand.SKILL_7
                 
                 state_cmd.vel_cmd[0] = -joystick.get_axis_value(1)
                 state_cmd.vel_cmd[1] = -joystick.get_axis_value(0)
@@ -80,7 +106,10 @@ if __name__ == "__main__":
                 step_start = time.time()
                 
                 tau = pd_control(policy_output_action, d.qpos[7:], kps, np.zeros_like(kps), d.qvel[6:], kds)
-                d.ctrl[:] = tau
+                if safety_cfg.dry_run:
+                    d.ctrl[:] = 0
+                else:
+                    d.ctrl[:] = tau
                 # Apply mouse drag perturbations from the viewer in passive mode.
                 if hasattr(viewer, "pert"):
                     d.xfrc_applied[:] = 0
@@ -106,6 +135,17 @@ if __name__ == "__main__":
                     policy_output_action = policy_output.actions.copy()
                     kps = policy_output.kps.copy()
                     kds = policy_output.kds.copy()
+
+                    policy_output_action, kps, kds, force_damping = safety.filter_actions(
+                        policy_output_action, kps, kds
+                    )
+                    if force_damping:
+                        policy_output_action = d.qpos[7:].copy()
+                        kps = np.zeros_like(kps)
+                        kds = np.ones_like(kds) * safety_cfg.damping_kd
+                    if safety_cfg.dry_run:
+                        kps = np.zeros_like(kps)
+                        kds = np.zeros_like(kds)
             except ValueError as e:
                 print(str(e))
             
