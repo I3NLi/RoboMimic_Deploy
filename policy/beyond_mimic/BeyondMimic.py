@@ -66,6 +66,9 @@ class BeyondMimic(FSMState):
             self.input_name = [getattr(inpt, "name", inpt) for inpt in ort_inputs]
 
             metadata = {p.key: p.value for p in self.onnx_model.metadata_props}
+            meta_motion_len = self._get_meta_int(metadata, ["motion_length", "motion_len", "traj_length"])
+            if meta_motion_len is not None:
+                self.motion_length = int(meta_motion_len)
             self.obs_names = self._parse_csv_list(metadata.get("observation_names", ""))
             if not self.obs_names:
                 self.obs_names = [
@@ -252,6 +255,17 @@ class BeyondMimic(FSMState):
             return []
         return [int(float(v)) for v in value.split(',') if v != '']
 
+    def _get_meta_int(self, metadata: dict, keys: list[str]) -> int | None:
+        for key in keys:
+            raw = metadata.get(key, "")
+            if raw is None:
+                continue
+            try:
+                return int(float(str(raw).strip()))
+            except (ValueError, TypeError):
+                continue
+        return None
+
     def _per_frame_dim_from_names(self, names):
         dim = 0
         for name in names:
@@ -321,6 +335,11 @@ class BeyondMimic(FSMState):
         self.obs_history = np.roll(self.obs_history, -1, axis=0)
         self.obs_history[-1] = frame_obs
         return self.obs_history.reshape(-1)
+
+    def _is_action_complete(self) -> bool:
+        if self.motion_length <= 0:
+            return False
+        return self.counter_step >= self.motion_length
 
     def run(self):
         paused = getattr(self.state_cmd, "pause", False)
@@ -438,6 +457,9 @@ class BeyondMimic(FSMState):
 
     
     def checkChange(self):
+        if self._is_action_complete():
+            self.state_cmd.skill_cmd = FSMCommand.INVALID
+            return FSMStateName.SKILL_COOLDOWN
         if(self.state_cmd.skill_cmd == FSMCommand.LOCO):
             self.state_cmd.skill_cmd = FSMCommand.INVALID
             return FSMStateName.SKILL_COOLDOWN

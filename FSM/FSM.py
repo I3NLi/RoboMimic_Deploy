@@ -103,9 +103,14 @@ class FSM:
         if self.paused and not self._is_mimic_policy():
             self._set_pause(False)
         if self.paused:
-            # While paused, ignore commands and block mode switching,
-            # but keep running inference in the current policy.
-            self.state_cmd.skill_cmd = FSMCommand.INVALID
+            # If user sends a command while paused, exit pause to allow mode switch.
+            if self.state_cmd.skill_cmd != FSMCommand.INVALID:
+                self._set_pause(False)
+            else:
+                # While paused, ignore commands and block mode switching,
+                # but keep running inference in the current policy.
+                self.state_cmd.skill_cmd = FSMCommand.INVALID
+
         if(self.FSMmode == FSMMode.NORMAL): 
             self.cur_policy.run()
             if not self.paused:
