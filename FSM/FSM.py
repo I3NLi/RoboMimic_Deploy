@@ -31,6 +31,7 @@ class FSM:
         self.next_policy : FSMState
         
         self.FSMmode = FSMMode.NORMAL
+        self.paused = False
         
         self.passive_mode = PassiveMode(state_cmd, policy_output)
         self.fixed_pose_1 = FixedPose(state_cmd, policy_output)
@@ -55,6 +56,7 @@ class FSM:
         
 
     def _print_mode_hints(self, policy_name: FSMStateName):
+        pause_hint = " UP=PAUSE"
         hints = {
             FSMStateName.PASSIVE: "[Hints] START=POS_RESET, R1+A=LOCO",
             FSMStateName.FIXEDPOSE: "[Hints] R1+A=LOCO, L3=PASSIVE",
@@ -71,22 +73,52 @@ class FSM:
         }
         msg = hints.get(policy_name)
         if msg:
-            print(msg)
+            if policy_name in (FSMStateName.SKILL_BEYOND_MIMIC, FSMStateName.SKILL_TRACK_MIMIC):
+                print(msg + pause_hint)
+            else:
+                print(msg)
+
+    def _is_mimic_policy(self) -> bool:
+        return self.cur_policy.name in (FSMStateName.SKILL_BEYOND_MIMIC, FSMStateName.SKILL_TRACK_MIMIC)
+
+    def _set_pause(self, enable: bool):
+        self.paused = bool(enable)
+        self.state_cmd.pause = self.paused
+        if self.paused:
+            print("[Pause] ON: freeze reference frame.")
+        else:
+            print("[Pause] OFF: resume policy updates.")
 
     def run(self):
         start_time = time.time()
+        # Handle pause toggle command.
+        if self.state_cmd.skill_cmd == FSMCommand.PAUSE:
+            self.state_cmd.skill_cmd = FSMCommand.INVALID
+            if self._is_mimic_policy():
+                self._set_pause(not self.paused)
+            else:
+                # Ignore pause outside mimic-like policies.
+                self._set_pause(False)
+
+        if self.paused and not self._is_mimic_policy():
+            self._set_pause(False)
+        if self.paused:
+            # While paused, ignore commands and block mode switching,
+            # but keep running inference in the current policy.
+            self.state_cmd.skill_cmd = FSMCommand.INVALID
         if(self.FSMmode == FSMMode.NORMAL): 
             self.cur_policy.run()
-            nextPolicyName = self.cur_policy.checkChange()
-            
-            if(nextPolicyName != self.cur_policy.name):
-                # change policy
-                self.FSMmode = FSMMode.CHANGE
-                self.cur_policy.exit()
-                self.get_next_policy(nextPolicyName)
-                print("Switched to ", self.cur_policy.name_str)
-                self._print_mode_hints(self.cur_policy.name)
-        
+            if not self.paused:
+                nextPolicyName = self.cur_policy.checkChange()
+                
+                if(nextPolicyName != self.cur_policy.name):
+                    # change policy
+                    self.FSMmode = FSMMode.CHANGE
+                    self.cur_policy.exit()
+                    self.get_next_policy(nextPolicyName)
+                    print("Switched to ", self.cur_policy.name_str)
+                    self._print_mode_hints(self.cur_policy.name)
+
         elif(self.FSMmode == FSMMode.CHANGE):
             self.cur_policy.enter()
             self.FSMmode = FSMMode.NORMAL

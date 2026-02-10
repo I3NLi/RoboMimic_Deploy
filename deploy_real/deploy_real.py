@@ -109,6 +109,8 @@ class Controller:
             
             if self.remote_controller.is_button_pressed(KeyMap.F1):
                 self.state_cmd.skill_cmd = FSMCommand.PASSIVE
+            if self.remote_controller.is_button_released(KeyMap.up):
+                self.state_cmd.skill_cmd = FSMCommand.PAUSE
             if self.command_gate.trigger(
                 "POS_RESET", self.remote_controller.is_button_pressed(KeyMap.start)
             ):

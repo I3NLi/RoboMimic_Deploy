@@ -21,6 +21,9 @@ class BeyondMimic(FSMState):
         self.motion_phase = 0
         self.counter_step = 0
         self.ref_motion_phase = 0
+        self._paused_ref_joint_pos = None
+        self._paused_ref_joint_vel = None
+        self._paused_ref_body_quat_w = None
         
         current_dir = os.path.dirname(os.path.abspath(__file__))
         config_path = os.path.join(current_dir, "config", "BeyondMimic.yaml")
@@ -127,6 +130,9 @@ class BeyondMimic(FSMState):
         self.ref_motion_phase = 0.
         self.motion_time = 0
         self.counter_step = 0
+        self._paused_ref_joint_pos = None
+        self._paused_ref_joint_vel = None
+        self._paused_ref_body_quat_w = None
 
         observation = {}
         observation[self.input_name[0]] = np.zeros((1, self.num_obs), dtype=np.float32)
@@ -317,6 +323,23 @@ class BeyondMimic(FSMState):
         return self.obs_history.reshape(-1)
 
     def run(self):
+        paused = getattr(self.state_cmd, "pause", False)
+        if paused:
+            if self._paused_ref_joint_pos is None:
+                self._paused_ref_joint_pos = self.ref_joint_pos.copy()
+                self._paused_ref_joint_vel = self.ref_joint_vel.copy()
+                self._paused_ref_body_quat_w = self.ref_body_quat_w.copy()
+            if self._paused_ref_body_quat_w is not None:
+                self.ref_body_quat_w = self._paused_ref_body_quat_w
+            if self._paused_ref_joint_pos is not None:
+                self.ref_joint_pos = self._paused_ref_joint_pos
+            if self._paused_ref_joint_vel is not None:
+                self.ref_joint_vel = self._paused_ref_joint_vel
+        else:
+            if self._paused_ref_joint_pos is not None:
+                self._paused_ref_joint_pos = None
+                self._paused_ref_joint_vel = None
+                self._paused_ref_body_quat_w = None
         robot_quat = self.state_cmd.base_quat
         
         qj = self.state_cmd.q[self.mj2lab]
@@ -372,7 +395,11 @@ class BeyondMimic(FSMState):
         outputs_result = self.ort_session.run(None, observation)
 
         # 处理多个输出
-        self.action, self.ref_joint_pos, self.ref_joint_vel, _, self.ref_body_quat_w, _, _ = outputs_result
+        self.action = outputs_result[0]
+        if not paused:
+            self.ref_joint_pos = outputs_result[1]
+            self.ref_joint_vel = outputs_result[2]
+            self.ref_body_quat_w = outputs_result[4]
         target_dof_pos_mj = np.zeros(self.num_actions, dtype=np.float32)
         action_vec = self.action.squeeze(0).astype(np.float32)
         target_dof_pos_lab = action_vec * self.action_scale_lab + self.default_angles_lab
@@ -394,7 +421,8 @@ class BeyondMimic(FSMState):
         self.policy_output.kds = self.kds_mj.copy()
         
         # update motion phase
-        self.counter_step += 1
+        if not paused:
+            self.counter_step += 1
 
     def exit(self):
         self.action = np.zeros(self.num_actions, dtype=np.float32)
@@ -402,6 +430,9 @@ class BeyondMimic(FSMState):
         self.ref_motion_phase = 0.
         self.motion_time = 0
         self.counter_step = 0
+        self._paused_ref_joint_pos = None
+        self._paused_ref_joint_vel = None
+        self._paused_ref_body_quat_w = None
         
         print("exited")
 

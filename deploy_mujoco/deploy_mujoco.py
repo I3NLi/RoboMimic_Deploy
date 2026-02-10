@@ -62,6 +62,8 @@ if __name__ == "__main__":
                 joystick.update()
                 if joystick.is_button_released(JoystickButton.L3):
                     state_cmd.skill_cmd = FSMCommand.PASSIVE
+                if joystick.is_button_released(JoystickButton.UP):
+                    state_cmd.skill_cmd = FSMCommand.PAUSE
                 if command_gate.trigger("POS_RESET", joystick.is_button_pressed(JoystickButton.START)):
                     state_cmd.skill_cmd = FSMCommand.POS_RESET
                 if command_gate.trigger(
