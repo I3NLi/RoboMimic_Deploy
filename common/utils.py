@@ -18,6 +18,7 @@ class FSMStateName(Enum):
     SKILL_BEYOND_MIMIC = 10
     JOINT_ZERO_CHECK = 11
     IMU_CALIB = 12
+    SKILL_TRACK_MIMIC = 13
    
 
 @unique
@@ -32,6 +33,7 @@ class FSMCommand(Enum):
     SKILL_4 = 8
     SKILL_5 = 9
     SKILL_6 = 10
+    SKILL_7 = 11
     
     
     
@@ -56,5 +58,4 @@ def scale_values(values, target_ranges):
         scaled_val = (val + 1) * (new_max - new_min) / 2 + new_min
         scaled.append(scaled_val)
     return np.array(scaled)
-
 

@@ -162,6 +162,8 @@ class LocoMode(FSMState):
             return FSMStateName.JOINT_ZERO_CHECK
         elif(self.state_cmd.skill_cmd == FSMCommand.SKILL_6):
             return FSMStateName.IMU_CALIB
+        elif(self.state_cmd.skill_cmd == FSMCommand.SKILL_7):
+            return FSMStateName.SKILL_TRACK_MIMIC
         elif(self.state_cmd.skill_cmd == FSMCommand.PASSIVE):
             return FSMStateName.PASSIVE
         else:

@@ -10,6 +10,7 @@ from policy.skill_cast.SkillCast import SkillCast
 from policy.kick.Kick import Kick
 from policy.kungfu2.KungFu2 import KungFu2
 from policy.beyond_mimic.BeyondMimic import BeyondMimic
+from policy.track_mimic.BeyondMimic import TrackMimic
 from policy.imu_calib.ImuCalib import ImuCalib
 from policy.joint_zero_check.JointZeroCheck import JointZeroCheck
 from FSM.FSMState import *
@@ -41,6 +42,7 @@ class FSM:
         self.kick_policy = Kick(state_cmd, policy_output)
         self.kungfu2_policy = KungFu2(state_cmd, policy_output)
         self.beyond_mimic_policy = BeyondMimic(state_cmd, policy_output)
+        self.track_mimic_policy = TrackMimic(state_cmd, policy_output)
         self.imu_calib_policy = ImuCalib(state_cmd, policy_output, self.loco_policy)
         self.joint_zero_check_policy = JointZeroCheck(state_cmd, policy_output)
         
@@ -56,12 +58,13 @@ class FSM:
         hints = {
             FSMStateName.PASSIVE: "[Hints] START=POS_RESET, R1+A=LOCO",
             FSMStateName.FIXEDPOSE: "[Hints] R1+A=LOCO, L3=PASSIVE",
-            FSMStateName.LOCOMODE: "[Hints] R1+X=SKILL_1, R1+Y=SKILL_2, R1+B=SKILL_3, L1+Y=SKILL_4, L1+B=SKILL_5, L1+X=SKILL_6, L3=PASSIVE",
+            FSMStateName.LOCOMODE: "[Hints] R1+X=SKILL_1, R1+Y=SKILL_2, R1+B=SKILL_3, L1+Y=SKILL_4, L1+B=SKILL_5, L1+X=SKILL_6, L1+A=SKILL_7, L3=PASSIVE",
             FSMStateName.SKILL_Dance: "[Hints] R1+A=LOCO, L3=PASSIVE",
             FSMStateName.SKILL_KungFu: "[Hints] R1+A=LOCO, L3=PASSIVE",
             FSMStateName.SKILL_KICK: "[Hints] R1+A=LOCO, L3=PASSIVE",
             FSMStateName.SKILL_KungFu2: "[Hints] R1+A=LOCO, L3=PASSIVE",
             FSMStateName.SKILL_BEYOND_MIMIC: "[Hints] R1+A=LOCO, L3=PASSIVE",
+            FSMStateName.SKILL_TRACK_MIMIC: "[Hints] R1+A=LOCO, L3=PASSIVE",
             FSMStateName.JOINT_ZERO_CHECK: "[Hints] R1+A=LOCO, L3=PASSIVE",
             FSMStateName.IMU_CALIB: "[Hints] 自动回到LOCO 或 L3=PASSIVE",
             FSMStateName.SKILL_COOLDOWN: "[Hints] 自动回到LOCO 或 L3=PASSIVE",
@@ -123,6 +126,8 @@ class FSM:
             self.cur_policy = self.kungfu2_policy
         elif((policy_name == FSMStateName.SKILL_BEYOND_MIMIC)):
             self.cur_policy = self.beyond_mimic_policy
+        elif((policy_name == FSMStateName.SKILL_TRACK_MIMIC)):
+            self.cur_policy = self.track_mimic_policy
         elif((policy_name == FSMStateName.IMU_CALIB)):
             self.cur_policy = self.imu_calib_policy
         elif((policy_name == FSMStateName.JOINT_ZERO_CHECK)):
