@@ -17,7 +17,7 @@ class LocoMode(FSMState):
         self.name_str = "Loco_mode"
         
         current_dir = os.path.dirname(os.path.abspath(__file__))
-        config_path = os.path.join(current_dir, "config", "LocoMode.yaml")
+        config_path = os.path.join(current_dir, "config", "LocoMode_lowKp.yaml")
         with open(config_path, "r") as f:
             config = yaml.load(f, Loader=yaml.FullLoader)
             self.policy_path = os.path.join(current_dir, "model", config["policy_path"])

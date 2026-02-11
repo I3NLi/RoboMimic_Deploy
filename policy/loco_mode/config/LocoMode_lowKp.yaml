@@ -1,4 +1,18 @@
-policy_path: "policy_orignal.pt"
+policy_path: "policy.pt"
+
+# 说明：
+# - kps 与 kds 使用相同的“环行/索引顺序”（policy order）。
+# - 该顺序与 joint2motor_idx 一一对应：policy index -> motor index。
+# - 下方映射基于 g1_29dof_rev_1_0.xml 的电机顺序。
+#   policy_idx : joint_name (motor_idx)
+#   0:left_hip_pitch(0) 1:right_hip_pitch(6) 2:waist_yaw(12)
+#   3:left_hip_roll(1) 4:right_hip_roll(7) 5:waist_roll(13)
+#   6:left_hip_yaw(2) 7:right_hip_yaw(8) 8:waist_pitch(14)
+#   9:left_knee(3) 10:right_knee(9) 11:left_shoulder_pitch(15) 12:right_shoulder_pitch(22)
+#   13:left_ankle_pitch(4) 14:right_ankle_pitch(10) 15:left_shoulder_roll(16) 16:right_shoulder_roll(23)
+#   17:left_ankle_roll(5) 18:right_ankle_roll(11) 19:left_shoulder_yaw(17) 20:right_shoulder_yaw(24)
+#   21:left_elbow(18) 22:right_elbow(25) 23:left_wrist_roll(19) 24:right_wrist_roll(26)
+#   25:left_wrist_pitch(20) 26:right_wrist_pitch(27) 27:left_wrist_yaw(21) 28:right_wrist_yaw(28)
 
 kps: [40.179, 40.179, 14.251,
       40.179, 40.179, 28.501,
