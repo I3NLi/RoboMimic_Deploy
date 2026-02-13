@@ -29,3 +29,7 @@
 - 2026-02-13 11:33 CST | cron 50+ guard: verified deploy_mujoco.py path, no code changes this round
 ## 2026-02-13 11:35 Asia/Shanghai
 - User: 你理解的只是这个项目的一部分子功能。你看一下 nav 中的内容，再告诉我你对它们以及整个项目的理解。
+[2026-02-13 11:40 CST] Cron guard tick referenced deploy_mujoco.py for parity checks; cap 50 enforced, no repo changes.
+## 2026-02-13 12:05 CST
+- User: 在三个项目里增加 T1 支持，配置从 HoloMotion/GMR 获取。
+- Assistant: MuJoCo 配置新增 `robot_model` 与 `robot_xml_map`，支持 `t1_serial` 指向 HoloMotion/GMR 的 `T1_serial.xml`；窗口菜单新增机器人模型选择（N 键，重启生效）。

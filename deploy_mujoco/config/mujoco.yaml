@@ -1,3 +1,13 @@
+# Default fallback xml path (used when robot_model is not set/found).
 xml_path: "g1_description/scene.xml"
+
+# Active robot model profile.
+robot_model: "g1"
+
+# Robot model -> xml mapping. Relative paths are resolved from PROJECT_ROOT.
+robot_xml_map:
+  g1: "g1_description/scene.xml"
+  t1_serial: "/home/hiyio/HoloMotion/thirdparties/GMR/assets/booster_t1/T1_serial.xml"
+
 simulation_dt: 0.003
 control_decimation: 7
