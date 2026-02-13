@@ -62,3 +62,7 @@
 - 结果：检测到轮次已封顶(50)，本轮仅记录 guard 日志，不做代码改动。
 - 2026-02-13 13:35 CST | cron 轮询：作为对齐参考仓库，仅核对 deploy_mujoco/deploy_mujoco.py 路径存在；任务已封顶50轮，本轮不做代码变更。
 - 2026-02-13 13:42 CST [cron] Round 50+ Guard 执行：确认 deploy_mujoco.py 参考路径有效，已达50轮仅守护记录。
+[2026-02-13 13:50 CST] Cron触发：MuJoCo 夜间迭代对齐任务。读取到迭代轮次已达 50/50，执行封顶保护，未进行代码改动。
+
+- [2026-02-13 13:56 Asia/Shanghai] Cron MuJoCo夜间迭代：已达50轮上限，执行Guard记录，仅追加workspace/memory日志，无代码改动。
+2026-02-13 14:04 CST [cron] MuJoCo overnight iteration trigger: round cap reached (50/50), guard-only run, no code changes; appended guard record to workspace memory/mujoco-overnight-iterations-2026-02-12.md.
