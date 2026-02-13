@@ -21,3 +21,4 @@
 - Trigger: cron 55e04435-311b-4e9b-a619-2a5b3f780140（MuJoCo 夜间迭代）
 - User request: 单轮迭代；若达50轮则停止改代码，仅记录守护状态。
 - Action: 读取迭代日志与现状；确认已达50轮上限；执行可用验证（deploy脚本路径、mujoco_wasm可访问、时间戳）；未改代码；追加 Round 50+ Guard 记录到 workspace/memory/mujoco-overnight-iterations-2026-02-12.md。
+- 2026-02-13 10:56 CST [cron] MuJoCo 迭代守护：确认 deploy_mujoco/deploy_mujoco.py 仍为有效参考路径；50轮后本轮无代码改动。
