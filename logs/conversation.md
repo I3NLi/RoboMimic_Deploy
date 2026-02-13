@@ -160,3 +160,4 @@
 - 2026-02-13 19:43 CST｜[cron] MuJoCo 夜间迭代守护轮：确认 deploy_mujoco/deploy_mujoco.py 参考路径存在；按50轮封顶规则未做代码改动。
 
 [2026-02-13 19:50 CST] cron触发：MuJoCo夜间迭代任务。检测到轮次已达50，按规则未改代码，仅追加guard记录：已达50轮，等待晨报。
+[2026-02-13 19:57 CST] cron guard tick: Mujoco overnight iteration reached 50 cap; no code changes; validated SimulationPage.vue/deploy_mujoco.py/web_fetch mujoco_wasm; logged wait-for-morning-report.
