@@ -70,3 +70,10 @@
 
 - 2026-02-13 14:18 CST [cron] MuJoCo夜间迭代触发：轮次已封顶(50/50)，执行Guard流程，仅核对现状并追加“已达50轮，等待晨报”日志，无代码改动。
 - [2026-02-13 14:26 CST] Cron迭代触发：对齐任务达到50轮上限；本轮未改代码，仅写入守护状态“已达50轮，等待晨报”。
+
+- [2026-02-13 14:40 CST] Cron迭代触发：作为对齐参考仓库仅做只读核对（deploy_mujoco.py存在，deploy_Mujoco.py不存在）；任务已达50轮，Guard-only。
+[2026-02-13 14:47 CST] Cron 55e04435 guard run: reached 50 rounds, no code changes, appended overnight iteration guard entry.
+- 2026-02-13 15:02 CST｜cron 轮询：MuJoCo 夜间迭代任务 Guard 轮，确认 deploy_mujoco/deploy_mujoco.py 路径存在且 deploy_Mujoco.py 不存在；不做代码改动。
+- 2026-02-13 15:09 CST [cron] MuJoCo 夜间迭代守护轮：确认 deploy_mujoco/deploy_mujoco.py 存在、deploy_Mujoco.py 不存在（路径大小写差异），本轮按 50 轮封顶规则不做代码改动。
+
+- 2026-02-13 15:16 CST | cron 55e04435 | MuJoCo 夜间迭代：轮次已达50，仅执行Guard记录，无代码改动。
