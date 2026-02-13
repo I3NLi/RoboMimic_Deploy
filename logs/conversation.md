@@ -132,3 +132,8 @@
 - 结果：路径存在（`deploy_path_ok`）。
 2026-02-13 18:09 CST [cron] MuJoCo overnight guard: 50轮已达上限，本轮仅核对文件与站点可达性并追加守护日志，无代码改动。
 - 2026-02-13 18:16 CST [cron] MuJoCo overnight guard round: reached 50-cap, no code change; validations passed (simulation_page_ok, deploy_path_ok, mujoco_wasm 200 MuJoCo Demo).
+
+## 2026-02-13 18:23 CST — MuJoCo Overnight Cron Guard
+- 任务：夜间迭代守护（50轮封顶后仅记录，不改代码）。
+- 执行：核对 deploy_mujoco/deploy_mujoco.py 存在，确认 deploy_Mujoco.py 路径不存在（沿用小写路径）。
+- 结果：无代码改动，状态维持“已达50轮，等待晨报”。
