@@ -182,3 +182,6 @@
 - Assistant: 本轮为封顶守护（50/50），未对 deploy 代码做修改；验证 deploy_mujoco.py 路径可用并记录守护结果。
 [2026-02-13 21:23 CST] Cron guard轮次：已达50轮，未改代码；完成可用性验证并追加 memory/mujoco-overnight-iterations-2026-02-12.md 守护记录。
 - 2026-02-13 21:30 CST [cron] MuJoCo overnight guard round: reached cap 50/50, no code changes; verified SimulationPage.vue + deploy_mujoco.py paths and mujoco_wasm availability (HTTP 200 MuJoCo Demo); logged scores 9.2/8.0/9.0 and waiting morning report.
+- 2026-02-13 21:38 CST | cron guard触发：轮次已封顶(50/50)，验证 deploy_mujoco.py 路径有效，等待晨报。
+
+- 2026-02-13 21:45 CST | Cron 夜间迭代守护触发：已确认轮次封顶50/50，执行文件与站点可用性校验，未改代码，仅追加 guard 记录到 workspace/memory/mujoco-overnight-iterations-2026-02-12.md。
