@@ -1,4 +1,5 @@
-onnx_path: "2026-02-10_20-24-06_GVHMR_telegram_0039+Tracking-Flat-G1-Wo-State-Estimation-v0.onnx"
+# Auto-updated by scripts/quick_sync_models.py (latest ONNX).
+onnx_path: "2026-02-12_22-30-39_webster+Tracking-Flat-G1-Wo-State-Estimation-v0.onnx"
 
 motion_length: 0
 
@@ -14,7 +15,7 @@ tau_limit: [88.0,  88.0, 88.0,
                                        5.0,  5.0
            ]
 
-tau_limit_scale: 1
+tau_limit_scale: 2
 
 kp_lab: [40.179, 40.179, 40.179, 99.098, 99.098, 28.501, 
           40.179, 40.179, 28.501, 99.098, 99.098, 14.251, 
