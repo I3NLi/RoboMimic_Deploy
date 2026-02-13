@@ -130,3 +130,4 @@
 - 触发来源：cron 55e04435-311b-4e9b-a619-2a5b3f780140
 - 动作：仅核对 `deploy_mujoco/deploy_mujoco.py` 路径存在性，未修改仓库代码。
 - 结果：路径存在（`deploy_path_ok`）。
+2026-02-13 18:09 CST [cron] MuJoCo overnight guard: 50轮已达上限，本轮仅核对文件与站点可达性并追加守护日志，无代码改动。
