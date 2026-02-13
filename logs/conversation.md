@@ -52,3 +52,6 @@
 - 执行：检测轮次已封顶（50），本轮按 Guard 模式运行，不改代码。
 - 验证：deploy_mujoco.py 存在；deploy_Mujoco.py 不存在（沿用小写路径）。
 - 结果：已写入 workspace 迭代日志，结论“已达50轮，等待晨报”。
+2026-02-13 13:14 CST [cron] MuJoCo overnight guard iteration: reached 50-round cap, performed read+validation only, no code changes, logged guard entry and wait-for-morning-report status.
+
+[2026-02-13 13:21 CST] cron mujo guard: round capped at 50, no code changes, guard log appended.
