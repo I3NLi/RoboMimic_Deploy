@@ -7,3 +7,17 @@
 ## 2026-02-13 10:28 GMT+8
 - User: [cron] 夜间迭代代理（每轮小步）要求继续 MuJoCo 对齐；达到 50 轮后不得改代码，仅记录等待晨报。
 - Assistant: 执行 Round 50+ Guard：仅核对 deploy_mujoco.py 参考路径与站点可访问性，无代码改动，记录“已达50轮，等待晨报”。
+
+## 2026-02-13 10:35 CST - MuJoCo overnight cron guard
+- Trigger: cron 55e04435-311b-4e9b-a619-2a5b3f780140
+- Action: Executed one guard iteration after round cap reached.
+- Read status from SimulationPage.vue + deploy_mujoco.py path validity + mujoco_wasm availability.
+- Code changes: none (cap reached at 50 rounds).
+- Verification: deploy script path check passed; web_fetch https://zalo.github.io/mujoco_wasm/ returned HTTP 200 (MuJoCo Demo).
+- Logged guard entry to: /home/hiyio/.openclaw/workspace/memory/mujoco-overnight-iterations-2026-02-12.md
+- Result: 已达50轮，等待晨报.
+
+## 2026-02-13 10:50 CST
+- Trigger: cron 55e04435-311b-4e9b-a619-2a5b3f780140（MuJoCo 夜间迭代）
+- User request: 单轮迭代；若达50轮则停止改代码，仅记录守护状态。
+- Action: 读取迭代日志与现状；确认已达50轮上限；执行可用验证（deploy脚本路径、mujoco_wasm可访问、时间戳）；未改代码；追加 Round 50+ Guard 记录到 workspace/memory/mujoco-overnight-iterations-2026-02-12.md。
