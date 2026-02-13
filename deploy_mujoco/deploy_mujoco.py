@@ -50,19 +50,6 @@ def _update_config_value(path, key, value):
     return False
 
 
-def _resolve_xml_path(config):
-    """Resolve xml path from mujoco.yaml, supporting named robot profiles."""
-    robot_model = config.get("robot_model")
-    robot_xml_map = config.get("robot_xml_map", {})
-    if robot_model and robot_model in robot_xml_map:
-        xml_raw = robot_xml_map[robot_model]
-    else:
-        xml_raw = config["xml_path"]
-    if os.path.isabs(xml_raw):
-        return xml_raw
-    return os.path.join(PROJECT_ROOT, xml_raw)
-
-
 class ModelMenu:
     """In-window model selector (keyboard-driven) with overlay text."""
 
@@ -95,6 +82,12 @@ class ModelMenu:
     def handle_key(self, key):
         if not self.model_files:
             return
+        if key == glfw.KEY_M:
+            self.open = not self.open
+            return
+        if key == glfw.KEY_R:
+            self.refresh()
+            return
         if not self.open:
             return
         if key == glfw.KEY_UP:
@@ -123,64 +116,6 @@ class ModelMenu:
         return "\n".join(lines)
 
 
-class RobotModelMenu:
-    """In-window robot XML selector. Applying takes effect on next restart."""
-
-    def __init__(self, config_path):
-        self.config_path = config_path
-        self.model_names = []
-        self.selected_index = 0
-        self.open = False
-        self.apply_requested = False
-        self.restart_required = False
-        self.refresh()
-
-    def refresh(self):
-        with open(self.config_path, "r") as f:
-            cfg = yaml.safe_load(f) or {}
-        robot_xml_map = cfg.get("robot_xml_map", {})
-        self.model_names = list(robot_xml_map.keys())
-        current = cfg.get("robot_model")
-        if current in self.model_names:
-            self.selected_index = self.model_names.index(current)
-        elif self.model_names:
-            self.selected_index = 0
-
-    def current_name(self):
-        if not self.model_names:
-            return None
-        return self.model_names[self.selected_index]
-
-    def handle_key(self, key):
-        if not self.model_names:
-            return
-        if not self.open:
-            return
-        if key == glfw.KEY_UP:
-            self.selected_index = (self.selected_index - 1) % len(self.model_names)
-        elif key == glfw.KEY_DOWN:
-            self.selected_index = (self.selected_index + 1) % len(self.model_names)
-        elif key in (glfw.KEY_ENTER, glfw.KEY_KP_ENTER):
-            self.apply_requested = True
-            self.open = False
-        elif key == glfw.KEY_ESCAPE:
-            self.open = False
-
-    def build_overlay(self):
-        current = self.current_name() or "N/A"
-        lines = []
-        lines.append("Robot selector: N=toggle, R=refresh, UP/DOWN=select, Enter=apply(next restart)")
-        lines.append(f"Robot model: {current}")
-        if self.restart_required:
-            lines.append("Restart required to load selected robot model.")
-        if self.open:
-            lines.append("Available robot models:")
-            for idx, name in enumerate(self.model_names):
-                marker = ">" if idx == self.selected_index else " "
-                lines.append(f"{marker} {name}")
-        return "\n".join(lines)
-
-
 
 def pd_control(target_q, q, kp, target_dq, dq, kd):
     """Calculates torques from position commands"""
@@ -191,7 +126,7 @@ if __name__ == "__main__":
     mujoco_yaml_path = os.path.join(current_dir, "config", "mujoco.yaml")
     with open(mujoco_yaml_path, "r") as f:
         config = yaml.load(f, Loader=yaml.FullLoader)
-        xml_path = _resolve_xml_path(config)
+        xml_path = os.path.join(PROJECT_ROOT, config["xml_path"])
         simulation_dt = config["simulation_dt"]
         control_decimation = config["control_decimation"]
 
@@ -207,12 +142,6 @@ if __name__ == "__main__":
     kps = np.zeros(num_joints, dtype=np.float32)
     kds = np.zeros(num_joints, dtype=np.float32)
     sim_counter = 0
-    full_policy_enabled = (num_joints == 29)
-    if not full_policy_enabled:
-        print(
-            f"[WARN] Loaded model has {num_joints} actuators (expected 29 for current skill policies). "
-            "Only PASSIVE mode is enabled."
-        )
     
     state_cmd = StateAndCmd(num_joints)
     policy_output = PolicyOutput(num_joints)
@@ -223,14 +152,12 @@ if __name__ == "__main__":
     joystick = JoyStick()
     Running = True
     menu = None
-    robot_menu = None
     menu_events = None
     if glfw is not None:
         menu = ModelMenu(
             model_dir=os.path.join(PROJECT_ROOT, "policy", "beyond_mimic", "model"),
             config_path=os.path.join(PROJECT_ROOT, "policy", "beyond_mimic", "config", "BeyondMimic.yaml"),
         )
-        robot_menu = RobotModelMenu(config_path=mujoco_yaml_path)
         menu_events = queue.Queue()
 
         def _on_key(key):
@@ -250,23 +177,7 @@ if __name__ == "__main__":
                 if menu is not None:
                     # Consume queued UI events and update menu state.
                     while not menu_events.empty():
-                        key = menu_events.get_nowait()
-                        if key == glfw.KEY_M:
-                            menu.open = not menu.open
-                            robot_menu.open = False
-                            continue
-                        if key == glfw.KEY_N:
-                            robot_menu.open = not robot_menu.open
-                            menu.open = False
-                            continue
-                        if key == glfw.KEY_R:
-                            menu.refresh()
-                            robot_menu.refresh()
-                            continue
-                        if menu.open:
-                            menu.handle_key(key)
-                        elif robot_menu.open:
-                            robot_menu.handle_key(key)
+                        menu.handle_key(menu_events.get_nowait())
                     if menu.apply_requested:
                         selected = menu.current_name()
                         if selected:
@@ -283,69 +194,53 @@ if __name__ == "__main__":
                                 FSM_controller.cur_policy = new_policy
                                 FSM_controller.cur_policy.enter()
                         menu.apply_requested = False
-                    if robot_menu.apply_requested:
-                        selected_robot = robot_menu.current_name()
-                        if selected_robot:
-                            _update_config_value(mujoco_yaml_path, "robot_model", selected_robot)
-                            robot_menu.restart_required = True
-                        robot_menu.apply_requested = False
                     # Overlay menu text in the viewer.
-                    viewer.set_texts(
-                        (
-                            None,
-                            mujoco.mjtGridPos.mjGRID_TOPLEFT,
-                            menu.build_overlay() + "\n\n" + robot_menu.build_overlay(),
-                            "",
-                        )
-                    )
+                    viewer.set_texts((None, mujoco.mjtGridPos.mjGRID_TOPLEFT, menu.build_overlay(), ""))
                 if(joystick.is_button_pressed(JoystickButton.SELECT)):
                     Running = False
 
                 joystick.update()
                 if joystick.is_button_released(JoystickButton.L3):
                     state_cmd.skill_cmd = FSMCommand.PASSIVE
-                if full_policy_enabled:
-                    if joystick.is_button_released(JoystickButton.UP):
-                        state_cmd.skill_cmd = FSMCommand.PAUSE
-                    if command_gate.trigger("POS_RESET", joystick.is_button_pressed(JoystickButton.START)):
-                        state_cmd.skill_cmd = FSMCommand.POS_RESET
-                    if command_gate.trigger(
-                        "LOCO",
-                        joystick.is_button_pressed(JoystickButton.A) and joystick.is_button_pressed(JoystickButton.R1),
-                    ):
-                        state_cmd.skill_cmd = FSMCommand.LOCO
-                    if command_gate.trigger(
-                        "SKILL_1",
-                        joystick.is_button_pressed(JoystickButton.X) and joystick.is_button_pressed(JoystickButton.R1),
-                    ):
-                        state_cmd.skill_cmd = FSMCommand.SKILL_1
-                    if command_gate.trigger(
-                        "SKILL_2",
-                        joystick.is_button_pressed(JoystickButton.Y) and joystick.is_button_pressed(JoystickButton.R1),
-                    ):
-                        state_cmd.skill_cmd = FSMCommand.SKILL_2
-                    if joystick.is_button_released(JoystickButton.B) and joystick.is_button_pressed(JoystickButton.R1):
-                        state_cmd.skill_cmd = FSMCommand.SKILL_3
-                    if command_gate.trigger(
-                        "SKILL_4",
-                        joystick.is_button_pressed(JoystickButton.Y) and joystick.is_button_pressed(JoystickButton.L1),
-                    ):
-                        state_cmd.skill_cmd = FSMCommand.SKILL_4
-                    if joystick.is_button_released(JoystickButton.B) and joystick.is_button_pressed(JoystickButton.L1):
-                        state_cmd.skill_cmd = FSMCommand.SKILL_5
-                    if command_gate.trigger(
-                        "SKILL_6",
-                        joystick.is_button_pressed(JoystickButton.X) and joystick.is_button_pressed(JoystickButton.L1),
-                    ):
-                        state_cmd.skill_cmd = FSMCommand.SKILL_6
-                    if command_gate.trigger(
-                        "SKILL_7",
-                        joystick.is_button_pressed(JoystickButton.A) and joystick.is_button_pressed(JoystickButton.L1),
-                    ):
-                        state_cmd.skill_cmd = FSMCommand.SKILL_7
-                else:
-                    state_cmd.skill_cmd = FSMCommand.PASSIVE
-
+                if joystick.is_button_released(JoystickButton.UP):
+                    state_cmd.skill_cmd = FSMCommand.PAUSE
+                if command_gate.trigger("POS_RESET", joystick.is_button_pressed(JoystickButton.START)):
+                    state_cmd.skill_cmd = FSMCommand.POS_RESET
+                if command_gate.trigger(
+                    "LOCO",
+                    joystick.is_button_pressed(JoystickButton.A) and joystick.is_button_pressed(JoystickButton.R1),
+                ):
+                    state_cmd.skill_cmd = FSMCommand.LOCO
+                if command_gate.trigger(
+                    "SKILL_1",
+                    joystick.is_button_pressed(JoystickButton.X) and joystick.is_button_pressed(JoystickButton.R1),
+                ):
+                    state_cmd.skill_cmd = FSMCommand.SKILL_1
+                if command_gate.trigger(
+                    "SKILL_2",
+                    joystick.is_button_pressed(JoystickButton.Y) and joystick.is_button_pressed(JoystickButton.R1),
+                ):
+                    state_cmd.skill_cmd = FSMCommand.SKILL_2
+                if joystick.is_button_released(JoystickButton.B) and joystick.is_button_pressed(JoystickButton.R1):
+                    state_cmd.skill_cmd = FSMCommand.SKILL_3
+                if command_gate.trigger(
+                    "SKILL_4",
+                    joystick.is_button_pressed(JoystickButton.Y) and joystick.is_button_pressed(JoystickButton.L1),
+                ):
+                    state_cmd.skill_cmd = FSMCommand.SKILL_4
+                if joystick.is_button_released(JoystickButton.B) and joystick.is_button_pressed(JoystickButton.L1):
+                    state_cmd.skill_cmd = FSMCommand.SKILL_5
+                if command_gate.trigger(
+                    "SKILL_6",
+                    joystick.is_button_pressed(JoystickButton.X) and joystick.is_button_pressed(JoystickButton.L1),
+                ):
+                    state_cmd.skill_cmd = FSMCommand.SKILL_6
+                if command_gate.trigger(
+                    "SKILL_7",
+                    joystick.is_button_pressed(JoystickButton.A) and joystick.is_button_pressed(JoystickButton.L1),
+                ):
+                    state_cmd.skill_cmd = FSMCommand.SKILL_7
+                
                 state_cmd.vel_cmd[0] = -joystick.get_axis_value(1)
                 state_cmd.vel_cmd[1] = -joystick.get_axis_value(0)
                 state_cmd.vel_cmd[2] = -joystick.get_axis_value(3)
