@@ -158,31 +158,6 @@ def main() -> int:
         default="python",
         help="Python executable to run LeggedLab export (use conda python if needed).",
     )
-    parser.add_argument(
-        "--deploy-mujoco",
-        dest="deploy_mujoco",
-        action="store_true",
-        default=True,
-        help="Launch deploy_mujoco after syncing (default).",
-    )
-    parser.add_argument(
-        "--no-deploy-mujoco",
-        dest="deploy_mujoco",
-        action="store_false",
-        help="Skip launching deploy_mujoco after syncing.",
-    )
-    parser.add_argument(
-        "--deploy-script",
-        type=Path,
-        default=Path("/home/hiyio/RoboMimic_Deploy/deploy_mujoco/deploy_mujoco.py"),
-        help="Path to deploy_mujoco.py.",
-    )
-    parser.add_argument(
-        "--deploy-python",
-        type=str,
-        default="python",
-        help="Python executable to run deploy_mujoco (use conda python if needed).",
-    )
     parser.add_argument("--dry-run", action="store_true", help="Print actions without copying/updating.")
 
     args = parser.parse_args()
@@ -216,7 +191,6 @@ def main() -> int:
         print(f"[DRY-RUN] Copy policy -> {policy_dest}")
         print(f"[DRY-RUN] Refresh policy.pt -> {policy_default}")
         print(f"[DRY-RUN] Update LocoMode_lowKp.yaml policy_path -> {policy_name}")
-        print(f"[DRY-RUN] Launch deploy_mujoco -> {args.deploy_script}")
         return 0
 
     copy_if_different(latest_onnx, beyond_dest)
@@ -239,9 +213,6 @@ def main() -> int:
 
     print(f"[OK] BeyondMimic ONNX synced: {beyond_dest}")
     print(f"[OK] LocoMode policy synced: {policy_dest}")
-    if args.deploy_mujoco:
-        # Launch deploy after syncing so it always picks up the newest models.
-        subprocess.run([args.deploy_python, str(args.deploy_script)], check=True)
     return 0
 
 
