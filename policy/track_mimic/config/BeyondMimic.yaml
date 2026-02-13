@@ -1,5 +1,4 @@
-# Updated to the latest ONNX for track mimic.
-onnx_path: "2026-02-12_10-19-21_webster+Tracking-Flat-G1-Wo-State-Estimation-v0.onnx"
+onnx_path: "2026-02-09_00-05-11_dance1_subject1+Tracking-Flat-G1-Wo-State-Estimation-v0.onnx"
 motion_file: "/home/hiyio/whole_body_tracking/motions/dance2_subject3.npz"
 
 motion_length: 0
