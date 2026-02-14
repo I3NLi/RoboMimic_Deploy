@@ -259,3 +259,5 @@
 - 2026-02-15 05:04 CST [cron] MuJoCo 夜间迭代守护：已达 50 轮上限，本轮不改代码；核对 deploy_mujoco/deploy_mujoco.py 存在，deploy_Mujoco.py 缺失（既有现状）。
 - 2026-02-15 05:18 CST | Cron Round 50+ Guard: 已达50轮，执行封顶守护；未改代码，仅核对 SimulationPage.vue / deploy_mujoco.py 与 mujoco_wasm 可访问性并写入迭代日志。
 2026-02-15 05:26 CST [cron][mujoco-overnight] Round 50+ guard executed: verified SimulationPage.vue, deploy_mujoco.py, and mujoco_wasm site; no code changes per 50-round cap; appended iteration log.
+[2026-02-15 05:33 CST] [cron][mujoco-overnight] Round 50+ Guard: reached cap=50, no code changes; verified SimulationPage.vue exists, deploy_mujoco.py exists (deploy_Mujoco.py missing as expected), mujoco_wasm reachable (HTTP 200 MuJoCo Demo); appended guard record.
+2026-02-15 05:42:29 CST | cron guard | checked deploy_mujoco.py path; deploy_Mujoco.py missing as expected
