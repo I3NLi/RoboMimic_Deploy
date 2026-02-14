@@ -11,13 +11,13 @@ import torch
 import os
 
 
-class BeyondMimic(FSMState):
+class TrackMimic(FSMState):
     def __init__(self, state_cmd:StateAndCmd, policy_output:PolicyOutput):
         super().__init__()
         self.state_cmd = state_cmd
         self.policy_output = policy_output
-        self.name = FSMStateName.SKILL_BEYOND_MIMIC
-        self.name_str = "beyond_mimic"
+        self.name = FSMStateName.SKILL_TRACK_MIMIC
+        self.name_str = "track_mimic"
         self.motion_phase = 0
         self.counter_step = 0
         self.ref_motion_phase = 0
@@ -39,7 +39,12 @@ class BeyondMimic(FSMState):
             self.num_actions = config["num_actions"]
             self.num_obs = config["num_obs"]
             self.action_scale_lab = np.array(config["action_scale_lab"], dtype=np.float32)
-            self.motion_length = config["motion_length"]
+            self.motion_length = int(config.get("motion_length", 0))
+            self.motion_file = config.get("motion_file", None)
+            self.motion_body_ids = config.get("motion_body_ids", None)
+            if self.motion_body_ids is not None:
+                self.motion_body_ids = [int(i) for i in self.motion_body_ids]
+            self.use_external_motion = self.motion_file is not None and str(self.motion_file).strip() != ""
 
             self.kps_mj = np.zeros_like(self.kps_lab)
             self.kds_mj = np.zeros_like(self.kds_lab)
@@ -122,12 +127,18 @@ class BeyondMimic(FSMState):
 
             body_names = self._parse_csv_list(metadata.get("body_names", ""))
             anchor_body_name = metadata.get("anchor_body_name", "")
+            self.body_names = body_names
             if body_names and anchor_body_name in body_names:
                 self.anchor_body_idx = body_names.index(anchor_body_name)
             else:
                 self.anchor_body_idx = 7
 
-            print("BeyondMimic-like policy initializing ...")
+            if self.use_external_motion:
+                self._load_motion(self.motion_file, current_dir)
+            else:
+                raise ValueError("track-mimic requires 'motion_file' in config.")
+
+            print("TrackMimic policy initializing ...")
     
     def enter(self):
         self.ref_motion_phase = 0.
@@ -142,7 +153,11 @@ class BeyondMimic(FSMState):
         observation[self.input_name[1]] = np.zeros((1, 1), dtype=np.float32)
         outputs_result = self.ort_session.run(None, observation)
         # 处理多个输出
-        self.action, self.ref_joint_pos, self.ref_joint_vel, _, self.ref_body_quat_w, _, _ = outputs_result
+        self.action = outputs_result[0]
+        if self.use_external_motion:
+            self._set_ref_from_motion(0)
+        else:
+            self.ref_joint_pos, self.ref_joint_vel, _, self.ref_body_quat_w, _, _ = outputs_result[1:]
 
         self.qj_obs = np.zeros(self.num_actions, dtype=np.float32)
         self.dqj_obs = np.zeros(self.num_actions, dtype=np.float32)
@@ -266,6 +281,105 @@ class BeyondMimic(FSMState):
                 continue
         return None
 
+    def _resolve_motion_path(self, motion_path: str, current_dir: str):
+        if motion_path is None:
+            return None
+        motion_path = str(motion_path)
+        motion_path = os.path.expanduser(motion_path)
+        if os.path.isabs(motion_path):
+            return motion_path
+        candidates = [
+            os.path.join(current_dir, motion_path),
+            os.path.join(PROJECT_ROOT, motion_path),
+        ]
+        for cand in candidates:
+            if os.path.isfile(cand):
+                return cand
+        return os.path.join(current_dir, motion_path)
+
+    def _load_motion(self, motion_path: str, current_dir: str):
+        resolved = self._resolve_motion_path(motion_path, current_dir)
+        if resolved is None or not os.path.isfile(resolved):
+            raise FileNotFoundError(f"motion_file not found: {motion_path}")
+        motion = np.load(resolved)
+        if "joint_pos" not in motion or "joint_vel" not in motion or "body_quat_w" not in motion:
+            raise ValueError("motion_file must contain joint_pos, joint_vel, body_quat_w arrays.")
+
+        self.motion_joint_pos = motion["joint_pos"].astype(np.float32)
+        self.motion_joint_vel = motion["joint_vel"].astype(np.float32)
+        self.motion_body_quat_w = motion["body_quat_w"].astype(np.float32)
+        self.motion_body_pos_w = motion["body_pos_w"].astype(np.float32) if "body_pos_w" in motion else None
+        self.motion_body_lin_vel_w = (
+            motion["body_lin_vel_w"].astype(np.float32) if "body_lin_vel_w" in motion else None
+        )
+        self.motion_body_ang_vel_w = (
+            motion["body_ang_vel_w"].astype(np.float32) if "body_ang_vel_w" in motion else None
+        )
+        data_len = int(self.motion_joint_pos.shape[0])
+        if self.motion_length > 0:
+            self.motion_length = min(self.motion_length, data_len)
+        else:
+            self.motion_length = data_len
+
+        if self.motion_joint_pos.shape[1] != self.num_actions:
+            self.motion_joint_pos = np.array(
+                [self._pad_or_trim(row, self.num_actions) for row in self.motion_joint_pos], dtype=np.float32
+            )
+        if self.motion_joint_vel.shape[1] != self.num_actions:
+            self.motion_joint_vel = np.array(
+                [self._pad_or_trim(row, self.num_actions) for row in self.motion_joint_vel], dtype=np.float32
+            )
+
+        target_body_count = len(self.body_names) if self.body_names else self.motion_body_quat_w.shape[1]
+        if self.motion_body_ids is not None:
+            if len(self.motion_body_ids) != target_body_count:
+                print(
+                    f"[TrackMimic][WARN] motion_body_ids len={len(self.motion_body_ids)} "
+                    f"!= target_body_count={target_body_count}"
+                )
+            self.motion_body_quat_w = self.motion_body_quat_w[:, self.motion_body_ids, :]
+            if self.motion_body_pos_w is not None:
+                self.motion_body_pos_w = self.motion_body_pos_w[:, self.motion_body_ids, :]
+            if self.motion_body_lin_vel_w is not None:
+                self.motion_body_lin_vel_w = self.motion_body_lin_vel_w[:, self.motion_body_ids, :]
+            if self.motion_body_ang_vel_w is not None:
+                self.motion_body_ang_vel_w = self.motion_body_ang_vel_w[:, self.motion_body_ids, :]
+        else:
+            if self.motion_body_quat_w.shape[1] == target_body_count:
+                pass
+            elif self.motion_body_quat_w.shape[1] > target_body_count:
+                print(
+                    f"[TrackMimic][WARN] motion bodies={self.motion_body_quat_w.shape[1]} "
+                    f"> target_body_count={target_body_count}; using first {target_body_count}."
+                )
+                self.motion_body_quat_w = self.motion_body_quat_w[:, :target_body_count, :]
+                if self.motion_body_pos_w is not None:
+                    self.motion_body_pos_w = self.motion_body_pos_w[:, :target_body_count, :]
+                if self.motion_body_lin_vel_w is not None:
+                    self.motion_body_lin_vel_w = self.motion_body_lin_vel_w[:, :target_body_count, :]
+                if self.motion_body_ang_vel_w is not None:
+                    self.motion_body_ang_vel_w = self.motion_body_ang_vel_w[:, :target_body_count, :]
+            else:
+                raise ValueError(
+                    f"motion body count {self.motion_body_quat_w.shape[1]} < target_body_count {target_body_count}"
+                )
+
+        print(f"[TrackMimic] motion_file loaded: {resolved} (len={self.motion_length})")
+
+    def _set_ref_from_motion(self, step: int):
+        if not self.use_external_motion or self.motion_length <= 0:
+            return
+        idx = int(step) % int(self.motion_length)
+        self.ref_joint_pos = self.motion_joint_pos[idx : idx + 1].astype(np.float32)
+        self.ref_joint_vel = self.motion_joint_vel[idx : idx + 1].astype(np.float32)
+        self.ref_body_quat_w = self.motion_body_quat_w[idx : idx + 1].astype(np.float32)
+        if self.motion_body_pos_w is not None:
+            self.ref_body_pos_w = self.motion_body_pos_w[idx : idx + 1].astype(np.float32)
+        if self.motion_body_lin_vel_w is not None:
+            self.ref_body_lin_vel_w = self.motion_body_lin_vel_w[idx : idx + 1].astype(np.float32)
+        if self.motion_body_ang_vel_w is not None:
+            self.ref_body_ang_vel_w = self.motion_body_ang_vel_w[idx : idx + 1].astype(np.float32)
+
     def _per_frame_dim_from_names(self, names):
         dim = 0
         for name in names:
@@ -345,6 +459,8 @@ class BeyondMimic(FSMState):
         paused = getattr(self.state_cmd, "pause", False)
         if paused:
             if self._paused_ref_joint_pos is None:
+                if self.use_external_motion:
+                    self._set_ref_from_motion(self.counter_step)
                 self._paused_ref_joint_pos = self.ref_joint_pos.copy()
                 self._paused_ref_joint_vel = self.ref_joint_vel.copy()
                 self._paused_ref_body_quat_w = self.ref_body_quat_w.copy()
@@ -359,6 +475,8 @@ class BeyondMimic(FSMState):
                 self._paused_ref_joint_pos = None
                 self._paused_ref_joint_vel = None
                 self._paused_ref_body_quat_w = None
+            if self.use_external_motion:
+                self._set_ref_from_motion(self.counter_step)
         robot_quat = self.state_cmd.base_quat
         
         qj = self.state_cmd.q[self.mj2lab]
@@ -415,7 +533,7 @@ class BeyondMimic(FSMState):
 
         # 处理多个输出
         self.action = outputs_result[0]
-        if not paused:
+        if not paused and (not self.use_external_motion and len(outputs_result) >= 5):
             self.ref_joint_pos = outputs_result[1]
             self.ref_joint_vel = outputs_result[2]
             self.ref_body_quat_w = outputs_result[4]
@@ -471,4 +589,4 @@ class BeyondMimic(FSMState):
             return FSMStateName.FIXEDPOSE
         else:
             self.state_cmd.skill_cmd = FSMCommand.INVALID
-            return FSMStateName.SKILL_BEYOND_MIMIC
+            return FSMStateName.SKILL_TRACK_MIMIC

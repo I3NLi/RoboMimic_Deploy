@@ -24,6 +24,7 @@ from unitree_sdk2py.utils.crc import CRC
 from common.command_helper import create_damping_cmd, create_zero_cmd, init_cmd_hg, init_cmd_go, MotorMode
 from common.rotation_helper import get_gravity_orientation_real, transform_imu_data
 from common.remote_controller import RemoteController, KeyMap
+from common.safety import load_safety_config, SafetyFilter, HoldToConfirm
 from config import Config
 
 
@@ -62,6 +63,10 @@ class Controller:
         self.state_cmd = StateAndCmd(self.num_joints)
         self.policy_output = PolicyOutput(self.num_joints)
         self.FSM_controller = FSM(self.state_cmd, self.policy_output)
+
+        self.safety_cfg = load_safety_config(getattr(config, "safety_yaml_path", None))
+        self.safety = SafetyFilter(self.num_joints, self.safety_cfg)
+        self.command_gate = HoldToConfirm(self.safety_cfg.command_hold_frames)
         
         self.running = True
         self.counter_over_time = 0
@@ -77,6 +82,8 @@ class Controller:
         self.remote_controller.set(self.low_state.wireless_remote)
 
     def send_cmd(self, cmd: Union[LowCmdGo, LowCmdHG]):
+        if getattr(self, "safety_cfg", None) is not None and self.safety_cfg.dry_run:
+            return
         cmd.crc = CRC().Crc(cmd)
         self.lowcmd_publisher_.Write(cmd)
 
@@ -102,18 +109,50 @@ class Controller:
             
             if self.remote_controller.is_button_pressed(KeyMap.F1):
                 self.state_cmd.skill_cmd = FSMCommand.PASSIVE
-            if self.remote_controller.is_button_pressed(KeyMap.start):
+            if self.remote_controller.is_button_released(KeyMap.up):
+                self.state_cmd.skill_cmd = FSMCommand.PAUSE
+            if self.command_gate.trigger(
+                "POS_RESET", self.remote_controller.is_button_pressed(KeyMap.start)
+            ):
                 self.state_cmd.skill_cmd = FSMCommand.POS_RESET
-            if self.remote_controller.is_button_pressed(KeyMap.A) and self.remote_controller.is_button_pressed(KeyMap.R1):
+            if self.command_gate.trigger(
+                "LOCO",
+                self.remote_controller.is_button_pressed(KeyMap.A)
+                and self.remote_controller.is_button_pressed(KeyMap.R1),
+            ):
                 self.state_cmd.skill_cmd = FSMCommand.LOCO
-            if self.remote_controller.is_button_pressed(KeyMap.X) and self.remote_controller.is_button_pressed(KeyMap.R1):
+            if self.command_gate.trigger(
+                "SKILL_1",
+                self.remote_controller.is_button_pressed(KeyMap.X)
+                and self.remote_controller.is_button_pressed(KeyMap.R1),
+            ):
                 self.state_cmd.skill_cmd = FSMCommand.SKILL_1
-            if self.remote_controller.is_button_pressed(KeyMap.Y) and self.remote_controller.is_button_pressed(KeyMap.R1):
+            if self.command_gate.trigger(
+                "SKILL_2",
+                self.remote_controller.is_button_pressed(KeyMap.Y)
+                and self.remote_controller.is_button_pressed(KeyMap.R1),
+            ):
                 self.state_cmd.skill_cmd = FSMCommand.SKILL_2
             # if self.remote_controller.is_button_pressed(KeyMap.B) and self.remote_controller.is_button_pressed(KeyMap.R1):
             #     self.state_cmd.skill_cmd = FSMCommand.SKILL_3
-            # if self.remote_controller.is_button_pressed(KeyMap.Y) and self.remote_controller.is_button_pressed(KeyMap.L1):
-            #     self.state_cmd.skill_cmd = FSMCommand.SKILL_4
+            if self.command_gate.trigger(
+                "SKILL_4",
+                self.remote_controller.is_button_pressed(KeyMap.Y)
+                and self.remote_controller.is_button_pressed(KeyMap.L1),
+            ):
+                self.state_cmd.skill_cmd = FSMCommand.SKILL_4
+            if self.command_gate.trigger(
+                "SKILL_6",
+                self.remote_controller.is_button_pressed(KeyMap.X)
+                and self.remote_controller.is_button_pressed(KeyMap.L1),
+            ):
+                self.state_cmd.skill_cmd = FSMCommand.SKILL_6
+            if self.command_gate.trigger(
+                "SKILL_7",
+                self.remote_controller.is_button_pressed(KeyMap.A)
+                and self.remote_controller.is_button_pressed(KeyMap.L1),
+            ):
+                self.state_cmd.skill_cmd = FSMCommand.SKILL_7
             
             self.state_cmd.vel_cmd[0] =  self.remote_controller.ly
             self.state_cmd.vel_cmd[1] =  self.remote_controller.lx * -1
@@ -139,14 +178,21 @@ class Controller:
             policy_output_action = self.policy_output.actions.copy()
             kps = self.policy_output.kps.copy()
             kds = self.policy_output.kds.copy()
+
+            policy_output_action, kps, kds, force_damping = self.safety.filter_actions(
+                policy_output_action, kps, kds
+            )
             
             # Build low cmd
-            for i in range(self.num_joints):
-                self.low_cmd.motor_cmd[i].q = policy_output_action[i]
-                self.low_cmd.motor_cmd[i].qd = 0
-                self.low_cmd.motor_cmd[i].kp = kps[i]
-                self.low_cmd.motor_cmd[i].kd = kds[i]
-                self.low_cmd.motor_cmd[i].tau = 0
+            if force_damping:
+                create_damping_cmd(self.low_cmd)
+            else:
+                for i in range(self.num_joints):
+                    self.low_cmd.motor_cmd[i].q = policy_output_action[i]
+                    self.low_cmd.motor_cmd[i].qd = 0
+                    self.low_cmd.motor_cmd[i].kp = kps[i]
+                    self.low_cmd.motor_cmd[i].kd = kds[i]
+                    self.low_cmd.motor_cmd[i].tau = 0
                 
             # send the command
             # create_damping_cmd(controller.low_cmd) # only for debug
@@ -160,6 +206,8 @@ class Controller:
             else:
                 print("control loop over time.")
                 self.counter_over_time += 1
+                if self.counter_over_time >= self.config.error_over_time:
+                    self.safety.report_fault("control loop overtime")
             pass
         except ValueError as e:
             print(str(e))

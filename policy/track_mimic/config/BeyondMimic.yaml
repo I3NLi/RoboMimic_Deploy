@@ -1,4 +1,5 @@
-onnx_path: "2026-02-13_12-47-19_webster+Tracking-Flat-G1-Wo-State-Estimation-v0.onnx"
+onnx_path: "2026-02-09_00-05-11_dance1_subject1+Tracking-Flat-G1-Wo-State-Estimation-v0.onnx"
+motion_file: "/home/hiyio/whole_body_tracking/motions/dance2_subject3.npz"
 
 motion_length: 0
 

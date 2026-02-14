@@ -45,6 +45,9 @@ class JoyStick:
         
         self.hat_count = self.joystick.get_numhats()
         self.hat_states = [(0, 0)] * self.hat_count
+        self.dpad_state = {"up": False, "down": False, "left": False, "right": False}
+        self.dpad_pressed = {"up": False, "down": False, "left": False, "right": False}
+        self.dpad_released = {"up": False, "down": False, "left": False, "right": False}
         
         
     def update(self):
@@ -52,6 +55,9 @@ class JoyStick:
         pygame.event.pump()  
         
         self.button_released = [False] * self.button_count
+        for k in self.dpad_pressed:
+            self.dpad_pressed[k] = False
+            self.dpad_released[k] = False
         
         for i in range(self.button_count):
             current_state = self.joystick.get_button(i) == 1
@@ -62,17 +68,51 @@ class JoyStick:
         for i in range(self.axis_count):
             self.axis_states[i] = self.joystick.get_axis(i)
         
+        prev_dpad = self.dpad_state.copy()
+        new_dpad = {"up": False, "down": False, "left": False, "right": False}
         for i in range(self.hat_count):
-            self.hat_states[i] = self.joystick.get_hat(i)
+            hat = self.joystick.get_hat(i)
+            self.hat_states[i] = hat
+            hx, hy = hat
+            if hy == 1:
+                new_dpad["up"] = True
+            if hy == -1:
+                new_dpad["down"] = True
+            if hx == -1:
+                new_dpad["left"] = True
+            if hx == 1:
+                new_dpad["right"] = True
+        self.dpad_state = new_dpad
+        for k in self.dpad_state:
+            if self.dpad_state[k] and not prev_dpad[k]:
+                self.dpad_pressed[k] = True
+            if prev_dpad[k] and not self.dpad_state[k]:
+                self.dpad_released[k] = True
 
     def is_button_pressed(self, button_id):
         """detect button pressed"""
+        if button_id == JoystickButton.UP:
+            return self.dpad_state["up"]
+        if button_id == JoystickButton.DOWN:
+            return self.dpad_state["down"]
+        if button_id == JoystickButton.LEFT:
+            return self.dpad_state["left"]
+        if button_id == JoystickButton.RIGHT:
+            return self.dpad_state["right"]
         if 0 <= button_id < self.button_count:
             return self.button_states[button_id]
         return False
 
     def is_button_released(self, button_id):
         """detect button released"""
+        if button_id == JoystickButton.UP:
+            return self.dpad_released["up"]
+        if button_id == JoystickButton.DOWN:
+            return self.dpad_released["down"]
+        if button_id == JoystickButton.LEFT:
+            return self.dpad_released["left"]
+        if button_id == JoystickButton.RIGHT:
+            return self.dpad_released["right"]
         if 0 <= button_id < self.button_count:
             return self.button_released[button_id]
         return False

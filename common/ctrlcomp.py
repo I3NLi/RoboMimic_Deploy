@@ -17,6 +17,7 @@ class StateAndCmd:
         # joy cmd
         self.vel_cmd = np.zeros(3)
         self.skill_cmd = FSMCommand.INVALID
+        self.pause = False
         # skill change cmd
         # self.skill_set = FSMCommand.SKILL_1
 
