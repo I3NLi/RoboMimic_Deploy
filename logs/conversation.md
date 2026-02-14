@@ -286,3 +286,10 @@
 - 触发：cron 任务 `55e04435-311b-4e9b-a619-2a5b3f780140`
 - 结论：已达 50 轮上限，本轮执行 Guard（不改代码）。
 - 验证：SimulationPage 存在、deploy_mujoco.py 路径有效且 deploy_Mujoco.py 不存在、mujoco_wasm 可访问（MuJoCo Demo, HTTP 200）。
+- 2026-02-15 07:42 CST | cron迭代守护轮（50封顶）：确认 deploy_mujoco.py 路径有效、deploy_Mujoco.py 不存在，未改代码。
+
+## 2026-02-15 07:50 CST — MuJoCo overnight cron guard
+- 触发：`[cron:55e04435-311b-4e9b-a619-2a5b3f780140]`
+- 动作：仅核对 `deploy_mujoco/deploy_mujoco.py` 路径可用；轮次已达 50，不改代码。
+- 验证：`deploy_path_ok`。
+- 结论：已达50轮，等待晨报。
