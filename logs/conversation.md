@@ -268,3 +268,5 @@
 - 2026-02-15 05:55 CST | Cron MuJoCo overnight guard: verified deploy_mujoco/deploy_mujoco.py reference path (deploy_Mujoco.py absent as expected); no code changes after 50-round cap.
 - 2026-02-15 06:09 CST: Overnight MuJoCo alignment cron guard check touched deploy reference verification only (deploy_mujoco/deploy_mujoco.py exists; deploy_Mujoco.py absent). No code changes due to 50-round cap.
 [2026-02-15 06:16 CST] cron mujoCo overnight guard: 核对 deploy_mujoco/deploy_mujoco.py 存在且 deploy_Mujoco.py 不存在；轮次已达50，未进行代码改动，仅执行封顶守护记录。
+- 2026-02-15 06:23 CST [cron mujoco-overnight] Round 50+ guard: reached cap, no code changes; verified SimulationPage.vue/deploy_mujoco.py/site accessibility; waiting for morning report.
+- 2026-02-15 06:30 CST | 夜间迭代守护触发：确认deploy_Mujoco.py不存在，沿用deploy_mujoco/deploy_mujoco.py作为有效参考；封顶50轮后仅记录Guard，无代码改动。
