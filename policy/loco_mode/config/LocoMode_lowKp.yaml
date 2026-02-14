@@ -1,4 +1,4 @@
-policy_path: "policy.pt"
+policy_path: "policy.onnx"
 
 # 说明：
 # - kps 与 kds 使用相同的“环行/索引顺序”（policy order）。

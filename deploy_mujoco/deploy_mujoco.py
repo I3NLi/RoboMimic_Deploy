@@ -10,110 +10,11 @@ import mujoco
 import numpy as np
 import yaml
 import os
-import queue
 from common.ctrlcomp import *
 from FSM.FSM import *
 from common.utils import get_gravity_orientation
 from common.joystick import JoyStick, JoystickButton
 from common.safety import load_safety_config, SafetyFilter, HoldToConfirm
-from policy.beyond_mimic.BeyondMimic import BeyondMimic
-
-try:
-    import glfw
-except Exception:
-    glfw = None
-
-
-def _read_config_value(path, key):
-    """Reads a simple top-level YAML key without altering formatting."""
-    try:
-        with open(path, "r") as f:
-            for line in f:
-                if line.lstrip().startswith(f"{key}:"):
-                    return line.split(":", 1)[1].strip().strip('"').strip("'")
-    except FileNotFoundError:
-        pass
-    return None
-
-
-def _update_config_value(path, key, value):
-    """Updates a simple top-level YAML key while preserving formatting."""
-    with open(path, "r") as f:
-        lines = f.read().splitlines()
-    for idx, line in enumerate(lines):
-        if line.lstrip().startswith(f"{key}:"):
-            indent = line[: len(line) - len(line.lstrip())]
-            lines[idx] = f'{indent}{key}: "{value}"'
-            with open(path, "w") as f:
-                f.write("\n".join(lines) + "\n")
-            return True
-    return False
-
-
-class ModelMenu:
-    """In-window model selector (keyboard-driven) with overlay text."""
-
-    def __init__(self, model_dir, config_path):
-        self.model_dir = model_dir
-        self.config_path = config_path
-        self.model_files = []
-        self.selected_index = 0
-        self.open = False
-        self.apply_requested = False
-        self.refresh()
-
-    def refresh(self):
-        self.model_files = sorted(
-            [p for p in os.listdir(self.model_dir) if p.endswith(".onnx")],
-            key=lambda name: os.path.getmtime(os.path.join(self.model_dir, name)),
-            reverse=True,
-        )
-        current = _read_config_value(self.config_path, "onnx_path")
-        if current in self.model_files:
-            self.selected_index = self.model_files.index(current)
-        elif self.model_files:
-            self.selected_index = 0
-
-    def current_name(self):
-        if not self.model_files:
-            return None
-        return self.model_files[self.selected_index]
-
-    def handle_key(self, key):
-        if not self.model_files:
-            return
-        if key == glfw.KEY_M:
-            self.open = not self.open
-            return
-        if key == glfw.KEY_R:
-            self.refresh()
-            return
-        if not self.open:
-            return
-        if key == glfw.KEY_UP:
-            self.selected_index = (self.selected_index - 1) % len(self.model_files)
-        elif key == glfw.KEY_DOWN:
-            self.selected_index = (self.selected_index + 1) % len(self.model_files)
-        elif key in (glfw.KEY_ENTER, glfw.KEY_KP_ENTER):
-            self.apply_requested = True
-            self.open = False
-        elif key == glfw.KEY_ESCAPE:
-            self.open = False
-
-    def build_overlay(self):
-        current = self.current_name() or "N/A"
-        lines = []
-        lines.append("Model selector: M=toggle, R=refresh, UP/DOWN=select, Enter=apply")
-        lines.append(f"Current: {current}")
-        if self.open:
-            lines.append("Available models:")
-            preview = self.model_files[:10]
-            for idx, name in enumerate(preview):
-                marker = ">" if idx == self.selected_index else " "
-                lines.append(f"{marker} {name}")
-            if len(self.model_files) > len(preview):
-                lines.append("... (showing latest 10)")
-        return "\n".join(lines)
 
 
 
@@ -151,51 +52,10 @@ if __name__ == "__main__":
     
     joystick = JoyStick()
     Running = True
-    menu = None
-    menu_events = None
-    if glfw is not None:
-        menu = ModelMenu(
-            model_dir=os.path.join(PROJECT_ROOT, "policy", "beyond_mimic", "model"),
-            config_path=os.path.join(PROJECT_ROOT, "policy", "beyond_mimic", "config", "BeyondMimic.yaml"),
-        )
-        menu_events = queue.Queue()
-
-        def _on_key(key):
-            # Collect key events on the UI thread to process in the sim loop.
-            try:
-                menu_events.put_nowait(key)
-            except queue.Full:
-                pass
-
-        key_callback = _on_key
-    else:
-        key_callback = None
-    with mujoco.viewer.launch_passive(m, d, key_callback=key_callback) as viewer:
+    with mujoco.viewer.launch_passive(m, d) as viewer:
         sim_start_time = time.time()
         while viewer.is_running() and Running:
             try:
-                if menu is not None:
-                    # Consume queued UI events and update menu state.
-                    while not menu_events.empty():
-                        menu.handle_key(menu_events.get_nowait())
-                    if menu.apply_requested:
-                        selected = menu.current_name()
-                        if selected:
-                            _update_config_value(
-                                os.path.join(PROJECT_ROOT, "policy", "beyond_mimic", "config", "BeyondMimic.yaml"),
-                                "onnx_path",
-                                selected,
-                            )
-                            # Recreate the BeyondMimic policy so the new ONNX is loaded.
-                            new_policy = BeyondMimic(state_cmd, policy_output)
-                            FSM_controller.beyond_mimic_policy = new_policy
-                            if getattr(FSM_controller.cur_policy, "name_str", "") == "beyond_mimic":
-                                FSM_controller.cur_policy.exit()
-                                FSM_controller.cur_policy = new_policy
-                                FSM_controller.cur_policy.enter()
-                        menu.apply_requested = False
-                    # Overlay menu text in the viewer.
-                    viewer.set_texts((None, mujoco.mjtGridPos.mjGRID_TOPLEFT, menu.build_overlay(), ""))
                 if(joystick.is_button_pressed(JoystickButton.SELECT)):
                     Running = False
 

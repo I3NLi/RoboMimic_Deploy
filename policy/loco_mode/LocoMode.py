@@ -8,6 +8,11 @@ import yaml
 import torch
 import os
 
+try:
+    import onnxruntime
+except Exception:
+    onnxruntime = None
+
 class LocoMode(FSMState):
     def __init__(self, state_cmd:StateAndCmd, policy_output:PolicyOutput):
         super().__init__()
@@ -20,7 +25,10 @@ class LocoMode(FSMState):
         config_path = os.path.join(current_dir, "config", "LocoMode_lowKp.yaml")
         with open(config_path, "r") as f:
             config = yaml.load(f, Loader=yaml.FullLoader)
-            self.policy_path = os.path.join(current_dir, "model", config["policy_path"])
+            model_rel_path = config.get("policy_path", "")
+            if not model_rel_path:
+                raise ValueError("LocoMode config must provide `policy_path`.")
+            self.policy_path = os.path.join(current_dir, "model", model_rel_path)
             self.kps = np.array(config["kps"], dtype=np.float32)
             self.kds = np.array(config["kds"], dtype=np.float32)
             self.default_angles =  np.array(config["default_angles"], dtype=np.float32)
@@ -46,19 +54,37 @@ class LocoMode(FSMState):
             self.qj_obs = np.zeros(self.num_actions, dtype=np.float32)
             self.dqj_obs = np.zeros(self.num_actions, dtype=np.float32)
             self.cmd = np.array(config["cmd_init"], dtype=np.float32)
-            self.obs = np.zeros(self.num_obs)
-            self.action = np.zeros(self.num_actions)
-            
-            # load policy
-            self.policy = torch.jit.load(self.policy_path)
-            
+            self.obs = np.zeros(self.num_obs, dtype=np.float32)
+            self.action = np.zeros(self.num_actions, dtype=np.float32)
+
+            # load policy backend
+            self._use_onnx = self.policy_path.lower().endswith(".onnx")
+            if self._use_onnx:
+                if onnxruntime is None:
+                    raise ImportError(
+                        f"onnxruntime is required for ONNX policy: {self.policy_path}"
+                    )
+                self.ort_session = onnxruntime.InferenceSession(self.policy_path)
+                self.input_name = self.ort_session.get_inputs()[0].name
+            else:
+                self.policy = torch.jit.load(self.policy_path)
+
             for _ in range(50):
-                with torch.inference_mode():
-                    obs_tensor = self.obs.reshape(1, -1)
-                    obs_tensor = obs_tensor.astype(np.float32)
-                    self.policy(torch.from_numpy(obs_tensor))
+                obs_tensor = self.obs.reshape(1, -1).astype(np.float32)
+                self._policy_forward(obs_tensor)
                     
-            print("Locomotion policy initializing ...")
+            backend = "ONNX" if self._use_onnx else "TorchScript"
+            print(f"Locomotion policy initializing ... ({backend})")
+
+    def _policy_forward(self, obs_tensor: np.ndarray) -> np.ndarray:
+        if self._use_onnx:
+            out = self.ort_session.run(None, {self.input_name: obs_tensor})[0]
+            out = np.asarray(out, dtype=np.float32)
+        else:
+            with torch.inference_mode():
+                out = self.policy(torch.from_numpy(obs_tensor).clip(-100, 100))
+            out = out.detach().cpu().numpy().astype(np.float32)
+        return np.clip(out, -100.0, 100.0)
                 
     @staticmethod
     def _apply_deadzone(cmd: np.ndarray, deadzone: np.ndarray) -> np.ndarray:
@@ -123,9 +149,8 @@ class LocoMode(FSMState):
         self.obs[9 + self.num_actions: 9 + self.num_actions * 2] = self.dqj_obs.copy()
         self.obs[9 + self.num_actions * 2: 9 + self.num_actions * 3] = self.action.copy()
         
-        obs_tensor = self.obs.reshape(1, -1)
-        obs_tensor = obs_tensor.astype(np.float32)
-        self.action = self.policy(torch.from_numpy(obs_tensor).clip(-100, 100)).clip(-100, 100).detach().numpy().squeeze()
+        obs_tensor = self.obs.reshape(1, -1).astype(np.float32)
+        self.action = self._policy_forward(obs_tensor).squeeze()
         target_dof_pos = self.action * self.action_scale + self.default_angles
         target_dof_pos_mj = target_dof_pos.copy()
         for i in range(len(self.joint2motor_idx)):
