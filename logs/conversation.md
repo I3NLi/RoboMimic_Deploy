@@ -432,3 +432,9 @@
 - Checks: deploy_mujoco/deploy_mujoco.py exists; external baseline URL reachable (MuJoCo Demo).
 - Result: 已达50轮，等待晨报；守护结果已记录。
 - 2026-02-15 15:52 CST [cron] MuJoCo 夜间迭代守护触发：轮次已封顶50，执行Guard-only核验（deploy_mujoco/deploy_mujoco.py存在；deploy_Mujoco.py路径不存在），未改代码。
+
+## 2026-02-15 16:06 CST — MuJoCo overnight cron guard
+- Trigger: cron 55e04435-311b-4e9b-a619-2a5b3f780140（夜间迭代单轮）
+- Action: 轮次已封顶（50/50），本轮 Guard-only；未改 deploy 代码。
+- Verification: `deploy_mujoco/deploy_mujoco.py` 路径有效；mujoco_wasm 可访问（HTTP 200）。
+- Result: 记录“已达50轮，等待晨报”。
