@@ -401,3 +401,4 @@
 - Action: 已检查轮次封顶（50/50），执行 Guard 轮；未改代码，仅追加守护日志。
 - Verification: simulation_page_ok, deploy_path_ok, mujoco_wasm HTTP 200.
 - Result: 已达50轮，等待晨报。
+- 2026-02-15 13:56 CST [cron mujoco-overnight] Guard轮：确认参考脚本路径 deploy_mujoco/deploy_mujoco.py 有效、deploy_Mujoco.py 不存在；因已达50轮未执行代码变更。
