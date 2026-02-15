@@ -294,3 +294,5 @@
 - 验证：`deploy_path_ok`。
 - 结论：已达50轮，等待晨报。
 2026-02-15 07:57 CST | cron mujoco-overnight | guard-only: round cap 50 reached, no code changes, verification checks passed.
+- 2026-02-15 08:04 CST | cron 55e04435-311b-4e9b-a619-2a5b3f780140 | MuJoCo overnight guard round: reached 50-cap, no code changes, ran verification checks (simulation_page_ok/deploy_path_ok/web_fetch 200), appended guard log.
+2026-02-15 08:12:12 CST | cron 55e04435 | MuJoCo overnight guard tick: reached 50 rounds, no code changes, validations passed, appended guard log.
