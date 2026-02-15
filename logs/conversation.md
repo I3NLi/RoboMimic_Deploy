@@ -328,3 +328,9 @@
 - Action: guard-only iteration at 50-round cap; no code changes.
 - Path check: deploy_mujoco/deploy_mujoco.py exists; deploy_Mujoco.py missing (case-sensitive).
 - Result: 已达50轮，等待晨报。
+
+## 2026-02-15 09:52 CST - Cron MuJoCo Round Guard
+- Trigger: [cron:55e04435-311b-4e9b-a619-2a5b3f780140]
+- Action: Guard-only 路径核对；确认 `deploy_Mujoco.py` 缺失，继续使用 `deploy_mujoco/deploy_mujoco.py`。
+- Validation: deploy_path_ok。
+- Result: 已达50轮，等待晨报。
