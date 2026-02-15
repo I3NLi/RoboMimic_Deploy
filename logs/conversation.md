@@ -298,3 +298,4 @@
 2026-02-15 08:12:12 CST | cron 55e04435 | MuJoCo overnight guard tick: reached 50 rounds, no code changes, validations passed, appended guard log.
 
 - [2026-02-15 08:18 CST] Cron迭代触发：MuJoCo夜间对齐任务已封顶(50轮)。执行Guard轮，仅核对SimulationPage.vue / deploy_mujoco.py路径 / mujoco_wasm可访问性；无代码改动。结果：已达50轮，等待晨报。
+- 2026-02-15 08:33 CST | Cron MuJoCo 夜间迭代：核对 deploy 路径（deploy_mujoco.py 存在，deploy_Mujoco.py 不存在），按 50 轮封顶策略仅记录 Guard。
