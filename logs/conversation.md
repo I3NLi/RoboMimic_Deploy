@@ -306,3 +306,4 @@
 - Trigger: cron 55e04435-311b-4e9b-a619-2a5b3f780140（MuJoCo 夜间迭代对齐）
 - Assistant: 仅执行封顶守护（Round 50+ Guard），核对 `deploy_mujoco/deploy_mujoco.py` 存在且 `deploy_Mujoco.py` 不存在；未改代码。
 - Result: 已达50轮，等待晨报。
+- 2026-02-15 09:02 CST | cron guard: MuJoCo overnight iteration cap reached (50). Verified deploy_mujoco/deploy_mujoco.py exists and canonical deploy_Mujoco.py is absent; no code changes made.
