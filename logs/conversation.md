@@ -425,3 +425,9 @@
 - Action: Guard-only iteration after 50-round cap; no deploy code changes.
 - Checks: deploy_mujoco/deploy_mujoco.py exists; deploy_Mujoco.py missing (case-sensitive path).
 - Result: 已达50轮，等待晨报；守护结果已同步写入 workspace 迭代日志。
+
+## 2026-02-15 15:45 CST — MuJoCo overnight cron guard
+- Trigger: cron 55e04435-311b-4e9b-a619-2a5b3f780140
+- Action: Guard-only iteration after 50/50 cap; no deploy code changes.
+- Checks: deploy_mujoco/deploy_mujoco.py exists; external baseline URL reachable (MuJoCo Demo).
+- Result: 已达50轮，等待晨报；守护结果已记录。
