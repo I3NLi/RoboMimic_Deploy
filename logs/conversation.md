@@ -404,3 +404,6 @@
 - 2026-02-15 13:56 CST [cron mujoco-overnight] Guard轮：确认参考脚本路径 deploy_mujoco/deploy_mujoco.py 有效、deploy_Mujoco.py 不存在；因已达50轮未执行代码变更。
 - 2026-02-15 14:04 CST [cron:mujoco-overnight] Guard轮：检测到迭代已达50/50，未改代码；完成现状核对与可用性验证（SimulationPage存在、deploy_mujoco.py路径有效、mujoco_wasm HTTP 200），记录“已达50轮，等待晨报”。
 - 2026-02-15 14:26 CST [cron:mujoco-overnight] Guard轮：核验 deploy_mujoco/deploy_mujoco.py 路径有效且 deploy_Mujoco.py 不存在；轮次封顶50/50，无代码改动，等待晨报。
+2026-02-15 14:34 CST [cron:mujoco-overnight] Guard轮：轮次已封顶50/50，执行只读核验（SimulationPage.vue存在、deploy_mujoco.py存在、mujoco_wasm HTTP 200），未做代码修改；已记录到 workspace/memory/mujoco-overnight-iterations-2026-02-12.md。
+2026-02-15 14:40 CST [cron] MuJoCo overnight guard: round capped at 50, read-only verification only, no code changes.
+[2026-02-15 14:55 CST] Cron guard iteration: reached 50/50 cap, performed read-only verification on SimulationPage.vue + deploy_mujoco.py path + mujoco_wasm availability; no code changes; logged guard result to workspace memory/mujoco-overnight-iterations-2026-02-12.md.
