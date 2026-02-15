@@ -315,3 +315,16 @@
 - Trigger: [cron:55e04435-311b-4e9b-a619-2a5b3f780140] MuJoCo 迭代对齐夜间轮询
 - Action: Guard-only (50轮封顶后不改代码)，执行存在性与站点可访问性核对，并写入 memory/mujoco-overnight-iterations-2026-02-12.md。
 - Result: simulation_page_ok, deploy_path_ok, web_fetch=HTTP 200 (MuJoCo Demo), conclusion=已达50轮，等待晨报。
+- [2026-02-15 09:30 CST] Cron Round 50+ Guard: reached cap=50; no code changes; verified SimulationPage.vue exists, deploy_mujoco.py path valid, mujoco_wasm reachable (HTTP 200 MuJoCo Demo); appended guard entry to workspace memory/mujoco-overnight-iterations-2026-02-12.md.
+
+## 2026-02-15 09:38 CST — Cron 55e04435-311b-4e9b-a619-2a5b3f780140
+- 执行夜间 MuJoCo 对齐任务 1 轮（Guard-only）。
+- 因总轮次已达 50，按规则未做任何代码改动。
+- 巡检通过：deploy_mujoco/deploy_mujoco.py 存在，deploy_Mujoco.py 仍不存在（继续以小写路径为对齐基准）。
+- 结果：已达50轮，等待晨报。
+
+## 2026-02-15 09:45 CST — Cron MuJoCo Round 50+ Guard
+- Trigger: [cron:55e04435-311b-4e9b-a619-2a5b3f780140]
+- Action: guard-only iteration at 50-round cap; no code changes.
+- Path check: deploy_mujoco/deploy_mujoco.py exists; deploy_Mujoco.py missing (case-sensitive).
+- Result: 已达50轮，等待晨报。
