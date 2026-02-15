@@ -363,3 +363,14 @@
 - 任务关联：RoboMimic deploy_mujoco 对齐核对
 - 结果：确认 deploy_mujoco.py 路径存在，deploy_Mujoco.py 路径不存在（沿用既定参考路径），无代码改动。
 [2026-02-15 11:33 CST] Cron Round50+Guard: 已封顶，仅执行巡检与日志追加；验证 simulation_page_ok/deploy_path_ok/web_fetch200。
+
+## 2026-02-15 11:40 CST — Cron MuJoCo 夜间迭代（Guard）
+- 用户/任务：`[cron:55e04435-311b-4e9b-a619-2a5b3f780140]` 单轮迭代触发（50 轮封顶守护）。
+- 执行：核对 `deploy_mujoco/deploy_mujoco.py` 参考路径存在，确认 `deploy_Mujoco.py` 不存在（继续使用小写路径）。
+- 结果：按封顶规则不改代码，仅记录守护轮日志并给出等待晨报结论。
+
+## 2026-02-15 11:47 CST - MuJoCo Overnight Guard Trigger
+- Trigger: cron:55e04435-311b-4e9b-a619-2a5b3f780140
+- Action: Guard-only (round cap reached at 50), no code changes.
+- Checks: SimulationPage.vue exists; deploy_mujoco.py exists; deploy_Mujoco.py absent; mujoco_wasm reachable (HTTP 200, title MuJoCo Demo).
+- Outcome: 已达50轮，等待晨报。
