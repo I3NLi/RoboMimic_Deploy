@@ -29,7 +29,12 @@ class TrackMimic(FSMState):
         config_path = os.path.join(current_dir, "config", "BeyondMimic.yaml")
         with open(config_path, "r") as f:
             config = yaml.load(f, Loader=yaml.FullLoader)
-            self.onnx_path = os.path.join(current_dir, "model", config["onnx_path"])
+            raw_onnx = str(config["onnx_path"]) if config.get("onnx_path", None) is not None else ""
+            raw_onnx = os.path.expanduser(os.path.expandvars(raw_onnx))
+            if os.path.isabs(raw_onnx) and raw_onnx != "":
+                self.onnx_path = raw_onnx
+            else:
+                self.onnx_path = os.path.join(current_dir, "model", raw_onnx)
             self.kps_lab = np.array(config["kp_lab"], dtype=np.float32)
             self.kds_lab = np.array(config["kd_lab"], dtype=np.float32)
             self.default_angles_lab =  np.array(config["default_angles_lab"], dtype=np.float32)
@@ -41,6 +46,9 @@ class TrackMimic(FSMState):
             self.action_scale_lab = np.array(config["action_scale_lab"], dtype=np.float32)
             self.motion_length = int(config.get("motion_length", 0))
             self.motion_file = config.get("motion_file", None)
+            # expand user and env vars for motion_file if provided
+            if self.motion_file is not None and str(self.motion_file).strip() != "":
+                self.motion_file = os.path.expanduser(os.path.expandvars(str(self.motion_file)))
             self.motion_body_ids = config.get("motion_body_ids", None)
             if self.motion_body_ids is not None:
                 self.motion_body_ids = [int(i) for i in self.motion_body_ids]
@@ -285,7 +293,7 @@ class TrackMimic(FSMState):
         if motion_path is None:
             return None
         motion_path = str(motion_path)
-        motion_path = os.path.expanduser(motion_path)
+        motion_path = os.path.expanduser(os.path.expandvars(motion_path))
         if os.path.isabs(motion_path):
             return motion_path
         candidates = [
@@ -301,7 +309,10 @@ class TrackMimic(FSMState):
         resolved = self._resolve_motion_path(motion_path, current_dir)
         if resolved is None or not os.path.isfile(resolved):
             raise FileNotFoundError(f"motion_file not found: {motion_path}")
-        motion = np.load(resolved)
+        try:
+            motion = np.load(resolved, allow_pickle=True)
+        except Exception as e:
+            raise ValueError(f"Failed to load motion_file '{resolved}': {e}")
         if "joint_pos" not in motion or "joint_vel" not in motion or "body_quat_w" not in motion:
             raise ValueError("motion_file must contain joint_pos, joint_vel, body_quat_w arrays.")
 

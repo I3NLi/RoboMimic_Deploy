@@ -29,7 +29,12 @@ class BeyondMimic(FSMState):
         config_path = os.path.join(current_dir, "config", "BeyondMimic.yaml")
         with open(config_path, "r") as f:
             config = yaml.load(f, Loader=yaml.FullLoader)
-            self.onnx_path = os.path.join(current_dir, "model", config["onnx_path"])
+            raw_onnx = str(config["onnx_path"]) if config.get("onnx_path", None) is not None else ""
+            raw_onnx = os.path.expanduser(os.path.expandvars(raw_onnx))
+            if os.path.isabs(raw_onnx) and raw_onnx != "":
+                self.onnx_path = raw_onnx
+            else:
+                self.onnx_path = os.path.join(current_dir, "model", raw_onnx)
             self.kps_lab = np.array(config["kp_lab"], dtype=np.float32)
             self.kds_lab = np.array(config["kd_lab"], dtype=np.float32)
             self.default_angles_lab =  np.array(config["default_angles_lab"], dtype=np.float32)
@@ -40,6 +45,12 @@ class BeyondMimic(FSMState):
             self.num_obs = config["num_obs"]
             self.action_scale_lab = np.array(config["action_scale_lab"], dtype=np.float32)
             self.motion_length = config["motion_length"]
+            # Numeric guards (optional in YAML, safe defaults here)
+            self.obs_clip = float(config.get("obs_clip", 100.0))
+            self.action_clip = float(config.get("action_clip", 20.0))
+            self.q_clip = float(config.get("q_clip", 6.5))
+            self.dq_clip = float(config.get("dq_clip", 80.0))
+            self.ang_vel_clip = float(config.get("ang_vel_clip", 80.0))
 
             self.kps_mj = np.zeros_like(self.kps_lab)
             self.kds_mj = np.zeros_like(self.kds_lab)
@@ -169,6 +180,7 @@ class BeyondMimic(FSMState):
         return np.array([w, x, y, z])
         
     def matrix_from_quat(self, q):
+        q = self._sanitize_quat(q)
         w, x, y, z = q
         return np.array([
             [1 - 2 * (y**2 + z**2), 2 * (x * y - z * w), 2 * (x * z + y * w)],
@@ -288,6 +300,31 @@ class BeyondMimic(FSMState):
             return np.pad(obs, (0, target_size - obs.size))
         return obs[:target_size]
 
+    def _sanitize_vec(self, value, size=None, clip=None, fill=0.0):
+        arr = np.asarray(value, dtype=np.float32).reshape(-1)
+        if size is not None and arr.size != size:
+            arr = self._pad_or_trim(arr, size)
+        arr = np.nan_to_num(arr, nan=fill, posinf=fill, neginf=fill)
+        if clip is not None and clip > 0:
+            arr = np.clip(arr, -clip, clip)
+        return arr.astype(np.float32, copy=False)
+
+    def _sanitize_quat(self, quat):
+        q = self._sanitize_vec(quat, size=4, clip=None, fill=0.0)
+        q_norm = float(np.linalg.norm(q))
+        if (not np.isfinite(q_norm)) or q_norm < 1e-6:
+            return np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32)
+        return (q / q_norm).astype(np.float32)
+
+    def _safe_action_vec(self, action_out):
+        action_vec = np.asarray(action_out, dtype=np.float32).reshape(-1)
+        if action_vec.size != self.num_actions:
+            action_vec = self._pad_or_trim(action_vec, self.num_actions)
+        action_vec = np.nan_to_num(action_vec, nan=0.0, posinf=0.0, neginf=0.0)
+        if self.action_clip > 0:
+            action_vec = np.clip(action_vec, -self.action_clip, self.action_clip)
+        return action_vec.astype(np.float32, copy=False)
+
     def _term_vector(self, name, motion_anchor_ori_b, base_gravity, base_ang_vel, qj, dqj):
         if name == 'command':
             return np.concatenate((self.ref_joint_pos.squeeze(0), self.ref_joint_vel.squeeze(0)), axis=-1)
@@ -359,10 +396,11 @@ class BeyondMimic(FSMState):
                 self._paused_ref_joint_pos = None
                 self._paused_ref_joint_vel = None
                 self._paused_ref_body_quat_w = None
-        robot_quat = self.state_cmd.base_quat
-        
-        qj = self.state_cmd.q[self.mj2lab]
-        qj = (qj - self.default_angles_lab)
+        robot_quat = self._sanitize_quat(self.state_cmd.base_quat)
+        qj_mj = self._sanitize_vec(self.state_cmd.q, size=self.num_actions, clip=self.q_clip)
+        dqj_mj = self._sanitize_vec(self.state_cmd.dq, size=self.num_actions, clip=self.dq_clip)
+        qj = qj_mj[self.mj2lab] - self.default_angles_lab
+        qj = self._sanitize_vec(qj, size=self.num_actions, clip=self.q_clip)
 
         base_troso_yaw = qj[2]
         base_troso_roll = qj[5]
@@ -375,7 +413,11 @@ class BeyondMimic(FSMState):
         temp1 = self.quat_mul(quat_roll, quat_pitch)
         temp2 = self.quat_mul(quat_yaw, temp1)
         robot_quat = self.quat_mul(robot_quat, temp2)
-        ref_anchor_ori_w = self.ref_body_quat_w[:, self.anchor_body_idx].squeeze(0)
+        try:
+            ref_anchor_ori_w = self.ref_body_quat_w[:, self.anchor_body_idx].squeeze(0)
+        except Exception:
+            ref_anchor_ori_w = np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32)
+        ref_anchor_ori_w = self._sanitize_quat(ref_anchor_ori_w)
 
         # 在第一帧提取当前机器人yaw方向，与参考动作yaw方向做差（与beyond mimic一致）
         if(self.counter_step < 2):
@@ -388,30 +430,36 @@ class BeyondMimic(FSMState):
 
         motion_anchor_ori_b = self.matrix_from_quat(robot_quat).T @ self.init_to_world @ self.matrix_from_quat(ref_anchor_ori_w)
 
-        ang_vel = np.asarray(self.state_cmd.ang_vel, dtype=np.float32).reshape(-1)
-        if ang_vel.size != 3:
-            ang_vel = self._pad_or_trim(ang_vel, 3)
-        dqj = self.state_cmd.dq
-        dqj = dqj[self.mj2lab]
+        ang_vel = self._sanitize_vec(self.state_cmd.ang_vel, size=3, clip=self.ang_vel_clip)
+        dqj = dqj_mj[self.mj2lab]
 
         base_gravity = getattr(self.state_cmd, "gravity_ori", None)
         if base_gravity is None or len(base_gravity) != 3:
             base_gravity = self._gravity_from_quat(robot_quat)
-        base_gravity = np.asarray(base_gravity, dtype=np.float32).reshape(-1)
-        if base_gravity.size != 3:
-            base_gravity = self._pad_or_trim(base_gravity, 3)
+        base_gravity = self._sanitize_vec(base_gravity, size=3, clip=2.0)
 
         frame_obs = self._build_frame_obs(motion_anchor_ori_b, base_gravity, ang_vel, qj, dqj)
+        frame_obs = self._sanitize_vec(frame_obs, size=self.per_frame_dim, clip=self.obs_clip)
         obs_input = self._append_history(frame_obs)
         if obs_input.size != self.num_obs:
             obs_input = self._pad_or_trim(obs_input, self.num_obs)
+        obs_input = self._sanitize_vec(obs_input, size=self.num_obs, clip=self.obs_clip)
 
         observation = {}
 
         # obs0 是网络观测，obs1 是当前时间步，用于输出参考动作信息
         observation[self.input_name[0]] = obs_input.reshape(1, -1).astype(np.float32)
         observation[self.input_name[1]] = np.array([[self.counter_step]], dtype=np.float32)
-        outputs_result = self.ort_session.run(None, observation)
+        try:
+            outputs_result = self.ort_session.run(None, observation)
+        except Exception as e:
+            print(f"[BeyondMimic][WARN] ONNX inference failed: {e}")
+            self.policy_output.actions = qj_mj.copy()
+            self.policy_output.kps = self.kps_mj.copy()
+            self.policy_output.kds = self.kds_mj.copy()
+            if not paused:
+                self.counter_step += 1
+            return
 
         # 处理多个输出
         self.action = outputs_result[0]
@@ -420,22 +468,25 @@ class BeyondMimic(FSMState):
             self.ref_joint_vel = outputs_result[2]
             self.ref_body_quat_w = outputs_result[4]
         target_dof_pos_mj = np.zeros(self.num_actions, dtype=np.float32)
-        action_vec = self.action.squeeze(0).astype(np.float32)
+        action_vec = self._safe_action_vec(self.action)
         target_dof_pos_lab = action_vec * self.action_scale_lab + self.default_angles_lab
+        target_dof_pos_lab = self._sanitize_vec(target_dof_pos_lab, size=self.num_actions, clip=self.q_clip)
         target_dof_pos_mj[self.mj2lab] = target_dof_pos_lab
+        target_dof_pos_mj = self._sanitize_vec(target_dof_pos_mj, size=self.num_actions, clip=self.q_clip)
 
-        qj_mj = np.asarray(self.state_cmd.q, dtype=np.float32)
-        dqj_mj = np.asarray(self.state_cmd.dq, dtype=np.float32)
-        tau_limit = self.tau_limit_mj * self.tau_limit_scale
-        kp = self.kps_mj
-        kd = self.kds_mj
+        tau_limit = self._sanitize_vec(self.tau_limit_mj * self.tau_limit_scale, size=self.num_actions, clip=500.0)
+        tau_limit = np.maximum(tau_limit, 0.0)
+        kp = np.maximum(self._sanitize_vec(self.kps_mj, size=self.num_actions, clip=1000.0), 0.0)
+        kd = np.maximum(self._sanitize_vec(self.kds_mj, size=self.num_actions, clip=200.0), 0.0)
         tau = (target_dof_pos_mj - qj_mj) * kp + (0.0 - dqj_mj) * kd
+        tau = np.nan_to_num(tau, nan=0.0, posinf=0.0, neginf=0.0)
         tau = np.clip(tau, -tau_limit, tau_limit)
         safe_kp = np.where(kp > 1e-6, kp, 1.0)
         target_dof_pos_mj_limited = qj_mj + (tau + kd * dqj_mj) / safe_kp
         target_dof_pos_mj = np.where(kp > 1e-6, target_dof_pos_mj_limited, target_dof_pos_mj)
+        target_dof_pos_mj = self._sanitize_vec(target_dof_pos_mj, size=self.num_actions, clip=self.q_clip)
         
-        self.policy_output.actions = target_dof_pos_mj
+        self.policy_output.actions = target_dof_pos_mj.copy()
         self.policy_output.kps = self.kps_mj.copy()
         self.policy_output.kds = self.kds_mj.copy()
         

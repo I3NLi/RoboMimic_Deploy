@@ -25,7 +25,12 @@ class KungFu(FSMState):
         config_path = os.path.join(current_dir, "config", "KungFu.yaml")
         with open(config_path, "r") as f:
             config = yaml.load(f, Loader=yaml.FullLoader)
-            self.onnx_path = os.path.join(current_dir, "model", config["onnx_path"])
+            raw_onnx = str(config["onnx_path"]) if config.get("onnx_path", None) is not None else ""
+            raw_onnx = os.path.expanduser(os.path.expandvars(raw_onnx))
+            if os.path.isabs(raw_onnx) and raw_onnx != "":
+                self.onnx_path = raw_onnx
+            else:
+                self.onnx_path = os.path.join(current_dir, "model", raw_onnx)
             self.kps = np.array(config["kps"], dtype=np.float32)
             self.kds = np.array(config["kds"], dtype=np.float32)
             self.default_angles =  np.array(config["default_angles"], dtype=np.float32)

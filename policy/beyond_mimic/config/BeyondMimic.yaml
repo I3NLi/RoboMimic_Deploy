@@ -1,4 +1,4 @@
-onnx_path: "2026-02-13_12-47-19_webster+Tracking-Flat-G1-Wo-State-Estimation-v0.onnx"
+onnx_path: "/home/hiyio/whole_body_tracking/logs/rsl_rl/g1_backflip/2026-02-20_22-03-07_webster+Tracking-Flat-G1-Backflip-v0/2026-02-20_22-03-07_webster+Tracking-Flat-G1-Backflip-v0.onnx"
 
 motion_length: 0
 

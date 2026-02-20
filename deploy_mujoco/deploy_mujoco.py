@@ -22,6 +22,32 @@ def pd_control(target_q, q, kp, target_dq, dq, kd):
     """Calculates torques from position commands"""
     return (target_q - q) * kp + (target_dq - dq) * kd
 
+
+def sanitize_ctrl(ctrl, model, fallback=None):
+    """Ensure finite actuator controls and clamp to actuator ctrlrange if available."""
+    out = np.asarray(ctrl, dtype=np.float32).reshape(-1)
+    if fallback is None:
+        fallback = np.zeros_like(out)
+    fallback = np.asarray(fallback, dtype=np.float32).reshape(-1)
+    if fallback.size != out.size:
+        fallback = np.zeros_like(out)
+
+    finite_mask = np.isfinite(out)
+    if not np.all(finite_mask):
+        out = np.where(finite_mask, out, fallback)
+    out = np.nan_to_num(out, nan=0.0, posinf=0.0, neginf=0.0)
+
+    ctrl_range = getattr(model, "actuator_ctrlrange", None)
+    if ctrl_range is not None and ctrl_range.shape[0] == out.size:
+        lo = ctrl_range[:, 0]
+        hi = ctrl_range[:, 1]
+        # Some models may leave ctrlrange unset (lo==hi==0), fallback in that case.
+        if np.any(hi > lo):
+            return np.clip(out, lo, hi).astype(np.float32)
+
+    return np.clip(out, -300.0, 300.0).astype(np.float32)
+
+
 if __name__ == "__main__":
     current_dir = os.path.dirname(os.path.abspath(__file__))
     mujoco_yaml_path = os.path.join(current_dir, "config", "mujoco.yaml")
@@ -107,7 +133,11 @@ if __name__ == "__main__":
                 
                 step_start = time.time()
                 
-                tau = pd_control(policy_output_action, d.qpos[7:], kps, np.zeros_like(kps), d.qvel[6:], kds)
+                raw_tau = pd_control(policy_output_action, d.qpos[7:], kps, np.zeros_like(kps), d.qvel[6:], kds)
+                fallback_tau = -safety_cfg.damping_kd * np.asarray(d.qvel[6:], dtype=np.float32)
+                tau = sanitize_ctrl(raw_tau, m, fallback=fallback_tau)
+                if (not np.isfinite(raw_tau).all()) or np.max(np.abs(raw_tau)) > 1e4:
+                    print("[Safety] abnormal torque detected; sanitized before applying ctrl.")
                 if safety_cfg.dry_run:
                     d.ctrl[:] = 0
                 else:
