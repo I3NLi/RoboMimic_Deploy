@@ -451,3 +451,4 @@
 [2026-02-27 17:54 CST] User: 好（继续数据流）。 Assistant: 完成 head camera ROS2 publisher 接入：新增 deploy_mujoco/head_camera_ros2.py；deploy_mujoco.py 增加 ROS2 发布初始化/循环发布/退出清理；config/mujoco.yaml 增加 head_camera_ros2 配置段并默认启用。
 [2026-02-27 17:56 CST] User: 提交并push到github给一个独立分支。 Assistant: 将创建独立分支并推送当前 head camera 定义+HTTP/ROS2 数据流改动。
 [2026-02-27 18:02 CST] User: 用hiyio身份登录并push。 Assistant: 已确认当前用户即 hiyio；尝试后仍因 GitHub 认证策略失败（Invalid username or token, password auth not supported）。
+[2026-02-27 18:04 CST] User: 然后推上去。 Assistant: 正在执行 GitHub device-code 登录认证流程，认证后将 push 分支 feature/g1-head-rgba-stream-ros2-20260227。
