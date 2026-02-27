@@ -1,6 +1,10 @@
-onnx_path: "/home/hiyio/whole_body_tracking/logs/rsl_rl/g1_backflip/2026-02-20_22-03-07_webster+Tracking-Flat-G1-Backflip-v0/2026-02-20_22-03-07_webster+Tracking-Flat-G1-Backflip-v0.onnx"
-
+onnx_path: "lafan/2026-02-09_12-07-26_dance1_subject1+Tracking-Flat-G1-Wo-State-Estimation-v0.onnx"
 motion_length: 0
+# 动作结束后自动切回 LOCO 的延时（秒）：
+#   < 0: 不自动返回（保持在 SKILL_BEYOND_MIMIC）
+#   = 0: 立即切回 LOCO
+#   > 0: 延时 x 秒后切回 LOCO
+switch_to_loco_delay_s: 0.0
 
 tau_limit: [88.0,  88.0, 88.0,
                    88.0,  88.0, 88.0,

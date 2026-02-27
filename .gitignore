@@ -87,8 +87,8 @@ Desktop.ini
 # ==============================
 # 模型与临时文件
 # ==============================
-policy/**/model/
-*.onnx
-*.pt
-*.pth
+# policy/**/model/
+# *.onnx
+# *.pt
+# *.pth
 * copy.py

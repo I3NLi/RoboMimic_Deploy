@@ -2,6 +2,7 @@ from common.path_config import PROJECT_ROOT
 
 from FSM.FSMState import FSMStateName, FSMState
 from common.ctrlcomp import StateAndCmd, PolicyOutput
+from collections import Counter
 import numpy as np
 import yaml
 from common.utils import FSMCommand, progress_bar
@@ -12,7 +13,7 @@ import os
 
 # Set this to an absolute config path to override the default config file.
 # Leave empty to use ./config/BeyondMimic.yaml
-BEYOND_MIMIC_CONFIG_PATH = "/home/hiyio/whole_body_tracking/logs/rsl_rl/g1_flat/2026-02-22_14-57-39_taiji+Tracking-Flat-G1-Wo-State-Estimation-v0/BeyondMimic.yaml"
+BEYOND_MIMIC_CONFIG_PATH = ""
 
 
 class BeyondMimic(FSMState):
@@ -28,12 +29,18 @@ class BeyondMimic(FSMState):
         self._paused_ref_joint_pos = None
         self._paused_ref_joint_vel = None
         self._paused_ref_body_quat_w = None
+        self.switch_to_loco_delay_s = 0.0
+        self.model_motion_length = 0
+        self._switch_to_loco_dt = 0.02
+        self._action_complete_hold_steps = 0
+        self._loop_step_warned = False
         
         current_dir = os.path.dirname(os.path.abspath(__file__))
         config_path = BEYOND_MIMIC_CONFIG_PATH.strip() or os.path.join(current_dir, "config", "BeyondMimic.yaml")
         config_path = os.path.expanduser(os.path.expandvars(config_path))
         if not os.path.isabs(config_path):
             config_path = os.path.join(current_dir, config_path)
+        print(f"[BeyondMimic] config_path = {config_path}")
         with open(config_path, "r") as f:
             config = yaml.load(f, Loader=yaml.FullLoader)
             raw_onnx = str(config["onnx_path"]) if config.get("onnx_path", None) is not None else ""
@@ -51,7 +58,8 @@ class BeyondMimic(FSMState):
             self.num_actions = config["num_actions"]
             self.num_obs = config["num_obs"]
             self.action_scale_lab = np.array(config["action_scale_lab"], dtype=np.float32)
-            self.motion_length = config["motion_length"]
+            self.motion_length = int(config.get("motion_length", 0))
+            self.switch_to_loco_delay_s = float(config.get("switch_to_loco_delay_s", 0.0))
             # Numeric guards (optional in YAML, safe defaults here)
             self.obs_clip = float(config.get("obs_clip", 100.0))
             self.action_clip = float(config.get("action_clip", 20.0))
@@ -86,7 +94,18 @@ class BeyondMimic(FSMState):
             metadata = {p.key: p.value for p in self.onnx_model.metadata_props}
             meta_motion_len = self._get_meta_int(metadata, ["motion_length", "motion_len", "traj_length"])
             if meta_motion_len is not None:
-                self.motion_length = int(meta_motion_len)
+                self.model_motion_length = int(meta_motion_len)
+            else:
+                graph_motion_len = self._infer_motion_length_from_graph(self.onnx_model)
+                if graph_motion_len is not None:
+                    self.model_motion_length = int(graph_motion_len)
+                    print(f"[BeyondMimic] motion_length inferred from ONNX graph: {self.model_motion_length}")
+
+            # Keep negative YAML motion_length as loop-mode flag.
+            # For non-negative values, prefer model-provided trajectory length when available.
+            if self.motion_length >= 0 and self.model_motion_length > 0:
+                self.motion_length = self.model_motion_length
+                print(f"[BeyondMimic] using model motion_length={self.motion_length}")
             self.obs_names = self._parse_csv_list(metadata.get("observation_names", ""))
             if not self.obs_names:
                 self.obs_names = [
@@ -146,11 +165,29 @@ class BeyondMimic(FSMState):
                 self.anchor_body_idx = 7
 
             print("BeyondMimic-like policy initializing ...")
+
+    def _get_loop_steps(self) -> int:
+        # For looping mode (motion_length < 0), prefer model trajectory length.
+        if self.model_motion_length > 1:
+            return int(self.model_motion_length)
+        # Fallback to abs(motion_length) if model length is unavailable.
+        raw_steps = int(abs(self.motion_length))
+        if raw_steps <= 1:
+            fallback_steps = int(round(10.0 / max(self._switch_to_loco_dt, 1e-6)))  # ~10s at control dt
+            if not self._loop_step_warned:
+                print(
+                    f"[BeyondMimic][WARN] motion_length={self.motion_length} causes 1-step loop; "
+                    f"use -N steps (e.g. -500). Fallback loop_steps={fallback_steps}."
+                )
+                self._loop_step_warned = True
+            return fallback_steps
+        return raw_steps
     
     def enter(self):
         self.ref_motion_phase = 0.
         self.motion_time = 0
         self.counter_step = 0
+        self._action_complete_hold_steps = 0
         self._paused_ref_joint_pos = None
         self._paused_ref_joint_vel = None
         self._paused_ref_body_quat_w = None
@@ -284,6 +321,62 @@ class BeyondMimic(FSMState):
             except (ValueError, TypeError):
                 continue
         return None
+
+    def _infer_motion_length_from_graph(self, onnx_model) -> int | None:
+        # Infer trajectory length from ONNX graph constants used by time_step gathers.
+        try:
+            graph = onnx_model.graph
+            const_tensors = {}
+            for node in graph.node:
+                if node.op_type != "Constant" or not node.output:
+                    continue
+                tensor_attr = None
+                for attr in node.attribute:
+                    if attr.name == "value":
+                        tensor_attr = attr.t
+                        break
+                if tensor_attr is None:
+                    continue
+                try:
+                    const_tensors[node.output[0]] = onnx.numpy_helper.to_array(tensor_attr)
+                except Exception:
+                    continue
+
+            candidates = []
+            ref_outputs = {
+                "joint_pos",
+                "joint_vel",
+                "body_pos_w",
+                "body_quat_w",
+                "body_lin_vel_w",
+                "body_ang_vel_w",
+            }
+
+            for node in graph.node:
+                if node.op_type == "Gather" and any(out in ref_outputs for out in node.output):
+                    if not node.input:
+                        continue
+                    arr = const_tensors.get(node.input[0], None)
+                    if arr is not None and getattr(arr, "ndim", 0) >= 1 and int(arr.shape[0]) > 1:
+                        candidates.append(int(arr.shape[0]))
+
+            # Fallback: infer from Clip max index if present (length = max_idx + 1).
+            for node in graph.node:
+                if node.op_type != "Clip" or len(node.input) < 3:
+                    continue
+                max_name = node.input[2]
+                arr = const_tensors.get(max_name, None)
+                if arr is None or getattr(arr, "size", 0) != 1:
+                    continue
+                max_val = float(np.array(arr).reshape(-1)[0])
+                if np.isfinite(max_val) and max_val >= 1:
+                    candidates.append(int(round(max_val)) + 1)
+
+            if not candidates:
+                return None
+            return Counter(candidates).most_common(1)[0][0]
+        except Exception:
+            return None
 
     def _per_frame_dim_from_names(self, names):
         dim = 0
@@ -456,7 +549,12 @@ class BeyondMimic(FSMState):
 
         # obs0 是网络观测，obs1 是当前时间步，用于输出参考动作信息
         observation[self.input_name[0]] = obs_input.reshape(1, -1).astype(np.float32)
-        observation[self.input_name[1]] = np.array([[self.counter_step]], dtype=np.float32)
+        policy_step = self.counter_step
+        if self.motion_length < 0:
+            # Negative motion_length means loop policy time index in-place.
+            loop_steps = self._get_loop_steps()
+            policy_step = self.counter_step % loop_steps
+        observation[self.input_name[1]] = np.array([[policy_step]], dtype=np.float32)
         try:
             outputs_result = self.ort_session.run(None, observation)
         except Exception as e:
@@ -507,6 +605,7 @@ class BeyondMimic(FSMState):
         self.ref_motion_phase = 0.
         self.motion_time = 0
         self.counter_step = 0
+        self._action_complete_hold_steps = 0
         self._paused_ref_joint_pos = None
         self._paused_ref_joint_vel = None
         self._paused_ref_body_quat_w = None
@@ -516,8 +615,19 @@ class BeyondMimic(FSMState):
     
     def checkChange(self):
         if self._is_action_complete():
+            # switch_to_loco_delay_s semantics:
+            # <0: never auto-return; 0: return immediately; >0: return after delay seconds.
+            if self.switch_to_loco_delay_s < 0.0:
+                self.state_cmd.skill_cmd = FSMCommand.INVALID
+                return FSMStateName.SKILL_BEYOND_MIMIC
+            delay_steps = max(0, int(round(self.switch_to_loco_delay_s / max(self._switch_to_loco_dt, 1e-6))))
+            self._action_complete_hold_steps += 1
+            if self._action_complete_hold_steps >= delay_steps:
+                self.state_cmd.skill_cmd = FSMCommand.INVALID
+                return FSMStateName.SKILL_COOLDOWN
             self.state_cmd.skill_cmd = FSMCommand.INVALID
-            return FSMStateName.SKILL_COOLDOWN
+            return FSMStateName.SKILL_BEYOND_MIMIC
+        self._action_complete_hold_steps = 0
         if(self.state_cmd.skill_cmd == FSMCommand.LOCO):
             self.state_cmd.skill_cmd = FSMCommand.INVALID
             return FSMStateName.SKILL_COOLDOWN

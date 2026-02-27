@@ -10,7 +10,7 @@ from policy.skill_cast.SkillCast import SkillCast
 from policy.kick.Kick import Kick
 from policy.kungfu2.KungFu2 import KungFu2
 from policy.beyond_mimic.BeyondMimic import BeyondMimic
-from policy.track_mimic.BeyondMimic import TrackMimic
+from policy.track_mimic.TrackMimic import TrackMimic
 from policy.imu_calib.ImuCalib import ImuCalib
 from policy.joint_zero_check.JointZeroCheck import JointZeroCheck
 from FSM.FSMState import *
