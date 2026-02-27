@@ -11,3 +11,15 @@ head_camera_stream:
   height: 480
   fps: 20
   jpeg_quality: 80
+
+head_camera_ros2:
+  enable: true
+  camera_name: "head_rgba_camera"
+  width: 640
+  height: 480
+  fps: 20
+  topic_rgb: "/g1/head_camera/rgb"
+  topic_rgba: "/g1/head_camera/rgba"
+  frame_id: "head_rgba_camera"
+  node_name: "g1_head_camera_publisher"
+  qos_depth: 5

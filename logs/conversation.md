@@ -448,3 +448,4 @@
 - Assistant: 说明并联差动的关节空间与电机空间映射解耦逻辑。
 [2026-02-27 17:47 CST] User: 补一版头部RGBA摄像头定义。 Assistant: 在 g1_29dof_rev_1_0.xml 中新增 <camera name='head_rgba_camera' .../>（挂载于 torso_link/head 区域）。
 [2026-02-27 17:52 CST] User: 我还希望能够拿到数据流。 Assistant: 新增头部相机 HTTP 数据流模块（deploy_mujoco/head_camera_stream.py），并在 deploy_mujoco.py 中接入可配置采样发布；支持 /health、/frame.jpg、/frame.png(RGBA)、/stream.mjpg。
+[2026-02-27 17:54 CST] User: 好（继续数据流）。 Assistant: 完成 head camera ROS2 publisher 接入：新增 deploy_mujoco/head_camera_ros2.py；deploy_mujoco.py 增加 ROS2 发布初始化/循环发布/退出清理；config/mujoco.yaml 增加 head_camera_ros2 配置段并默认启用。

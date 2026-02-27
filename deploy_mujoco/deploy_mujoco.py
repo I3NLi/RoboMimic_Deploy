@@ -21,6 +21,11 @@ try:
 except Exception:
     HeadCameraStreamServer = None
 
+try:
+    from deploy_mujoco.head_camera_ros2 import HeadCameraRos2Publisher
+except Exception:
+    HeadCameraRos2Publisher = None
+
 
 def pd_control(target_q, q, kp, target_dq, dq, kd):
     """Calculates torques from position commands"""
@@ -69,6 +74,11 @@ if __name__ == "__main__":
     head_cam_fps = float(head_cam_cfg.get("fps", 20))
     head_cam_every_n_steps = max(1, int(round(1.0 / max(simulation_dt * head_cam_fps, 1e-6))))
 
+    ros2_cam_cfg = config.get("head_camera_ros2", {})
+    ros2_cam_enable = bool(ros2_cam_cfg.get("enable", False))
+    ros2_cam_fps = float(ros2_cam_cfg.get("fps", 20))
+    ros2_cam_every_n_steps = max(1, int(round(1.0 / max(simulation_dt * ros2_cam_fps, 1e-6))))
+
     m = mujoco.MjModel.from_xml_path(xml_path)
     d = mujoco.MjData(m)
     m.opt.timestep = simulation_dt
@@ -105,6 +115,28 @@ if __name__ == "__main__":
             except Exception as e:
                 head_cam_stream = None
                 print(f"[CameraStream] failed to start: {e}")
+
+    head_cam_ros2 = None
+    if ros2_cam_enable:
+        if HeadCameraRos2Publisher is None:
+            print("[CameraROS2] disabled: ROS2 publisher module import failed.")
+        else:
+            try:
+                head_cam_ros2 = HeadCameraRos2Publisher(
+                    m,
+                    d,
+                    camera_name=ros2_cam_cfg.get("camera_name", "head_rgba_camera"),
+                    width=int(ros2_cam_cfg.get("width", 640)),
+                    height=int(ros2_cam_cfg.get("height", 480)),
+                    topic_rgb=ros2_cam_cfg.get("topic_rgb", "/g1/head_camera/rgb"),
+                    topic_rgba=ros2_cam_cfg.get("topic_rgba", "/g1/head_camera/rgba"),
+                    frame_id=ros2_cam_cfg.get("frame_id", "head_rgba_camera"),
+                    node_name=ros2_cam_cfg.get("node_name", "g1_head_camera_publisher"),
+                    qos_depth=int(ros2_cam_cfg.get("qos_depth", 5)),
+                )
+            except Exception as e:
+                head_cam_ros2 = None
+                print(f"[CameraROS2] failed to start: {e}")
 
     joystick = JoyStick()
     Running = True
@@ -182,6 +214,8 @@ if __name__ == "__main__":
 
                     if head_cam_stream is not None and (sim_counter % head_cam_every_n_steps == 0):
                         head_cam_stream.update()
+                    if head_cam_ros2 is not None and (sim_counter % ros2_cam_every_n_steps == 0):
+                        head_cam_ros2.publish()
 
                     if sim_counter % control_decimation == 0:
 
@@ -223,3 +257,5 @@ if __name__ == "__main__":
     finally:
         if head_cam_stream is not None:
             head_cam_stream.close()
+        if head_cam_ros2 is not None:
+            head_cam_ros2.close()
