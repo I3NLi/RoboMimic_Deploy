@@ -447,3 +447,4 @@
 - User: 宇树机器人鱼眼两自由度如何解耦
 - Assistant: 说明并联差动的关节空间与电机空间映射解耦逻辑。
 [2026-02-27 17:47 CST] User: 补一版头部RGBA摄像头定义。 Assistant: 在 g1_29dof_rev_1_0.xml 中新增 <camera name='head_rgba_camera' .../>（挂载于 torso_link/head 区域）。
+[2026-02-27 17:52 CST] User: 我还希望能够拿到数据流。 Assistant: 新增头部相机 HTTP 数据流模块（deploy_mujoco/head_camera_stream.py），并在 deploy_mujoco.py 中接入可配置采样发布；支持 /health、/frame.jpg、/frame.png(RGBA)、/stream.mjpg。
