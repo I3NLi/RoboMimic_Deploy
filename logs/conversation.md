@@ -438,3 +438,7 @@
 - Action: 轮次已封顶（50/50），本轮 Guard-only；未改 deploy 代码。
 - Verification: `deploy_mujoco/deploy_mujoco.py` 路径有效；mujoco_wasm 可访问（HTTP 200）。
 - Result: 记录“已达50轮，等待晨报”。
+
+## 2026-02-27 12:40:31 CST Asia/Shanghai
+- User: 分析 beyondmimic 库腰部如何解耦
+- Assistant: 完成代码级分析，定位到 BeyondMimic.py 中腰部姿态补偿与yaw对齐实现。
