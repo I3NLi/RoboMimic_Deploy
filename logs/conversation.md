@@ -450,3 +450,4 @@
 [2026-02-27 17:52 CST] User: 我还希望能够拿到数据流。 Assistant: 新增头部相机 HTTP 数据流模块（deploy_mujoco/head_camera_stream.py），并在 deploy_mujoco.py 中接入可配置采样发布；支持 /health、/frame.jpg、/frame.png(RGBA)、/stream.mjpg。
 [2026-02-27 17:54 CST] User: 好（继续数据流）。 Assistant: 完成 head camera ROS2 publisher 接入：新增 deploy_mujoco/head_camera_ros2.py；deploy_mujoco.py 增加 ROS2 发布初始化/循环发布/退出清理；config/mujoco.yaml 增加 head_camera_ros2 配置段并默认启用。
 [2026-02-27 17:56 CST] User: 提交并push到github给一个独立分支。 Assistant: 将创建独立分支并推送当前 head camera 定义+HTTP/ROS2 数据流改动。
+[2026-02-27 18:02 CST] User: 用hiyio身份登录并push。 Assistant: 已确认当前用户即 hiyio；尝试后仍因 GitHub 认证策略失败（Invalid username or token, password auth not supported）。
