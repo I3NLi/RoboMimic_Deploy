@@ -3,7 +3,7 @@ simulation_dt: 0.003
 control_decimation: 7
 
 head_camera_stream:
-  enable: false
+  enable: true
   camera_name: "head_rgba_camera"
   host: "0.0.0.0"
   port: 18080
