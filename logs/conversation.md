@@ -452,3 +452,4 @@
 [2026-02-27 17:56 CST] User: 提交并push到github给一个独立分支。 Assistant: 将创建独立分支并推送当前 head camera 定义+HTTP/ROS2 数据流改动。
 [2026-02-27 18:02 CST] User: 用hiyio身份登录并push。 Assistant: 已确认当前用户即 hiyio；尝试后仍因 GitHub 认证策略失败（Invalid username or token, password auth not supported）。
 [2026-02-27 18:04 CST] User: 然后推上去。 Assistant: 正在执行 GitHub device-code 登录认证流程，认证后将 push 分支 feature/g1-head-rgba-stream-ros2-20260227。
+[2026-02-27 18:05 CST] User: 用ssh。 Assistant: 已生成 SSH key (id_ed25519_github_hiyio)、配置 ~/.ssh/config 并将 origin 切换为 git@github.com:I3NLi/RoboMimic_Deploy.git；当前 ssh -T 返回 Permission denied(publickey)，等待将公钥加入 GitHub。
