@@ -446,3 +446,4 @@
 ## 2026-02-27 12:50:32 CST Asia/Shanghai
 - User: 宇树机器人鱼眼两自由度如何解耦
 - Assistant: 说明并联差动的关节空间与电机空间映射解耦逻辑。
+[2026-02-27 17:47 CST] User: 补一版头部RGBA摄像头定义。 Assistant: 在 g1_29dof_rev_1_0.xml 中新增 <camera name='head_rgba_camera' .../>（挂载于 torso_link/head 区域）。
