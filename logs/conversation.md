@@ -454,3 +454,4 @@
 [2026-02-27 18:04 CST] User: 然后推上去。 Assistant: 正在执行 GitHub device-code 登录认证流程，认证后将 push 分支 feature/g1-head-rgba-stream-ros2-20260227。
 [2026-02-27 18:05 CST] User: 用ssh。 Assistant: 已生成 SSH key (id_ed25519_github_hiyio)、配置 ~/.ssh/config 并将 origin 切换为 git@github.com:I3NLi/RoboMimic_Deploy.git；当前 ssh -T 返回 Permission denied(publickey)，等待将公钥加入 GitHub。
 [2026-02-27 18:16 CST] User: 仅发给我公钥。 Assistant: 返回 ~/.ssh/id_ed25519_github_hiyio.pub 公钥内容。
+[2026-02-27 18:36 CST] User: 好了（SSH key added）。 Assistant: ssh -T 验证通过，已 push 分支 feature/g1-head-rgba-stream-ros2-20260227 到 origin，并返回 PR 链接。
