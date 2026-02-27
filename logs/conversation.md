@@ -442,3 +442,7 @@
 ## 2026-02-27 12:40:31 CST Asia/Shanghai
 - User: 分析 beyondmimic 库腰部如何解耦
 - Assistant: 完成代码级分析，定位到 BeyondMimic.py 中腰部姿态补偿与yaw对齐实现。
+
+## 2026-02-27 12:50:32 CST Asia/Shanghai
+- User: 宇树机器人鱼眼两自由度如何解耦
+- Assistant: 说明并联差动的关节空间与电机空间映射解耦逻辑。
