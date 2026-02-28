@@ -324,6 +324,13 @@ if __name__ == "__main__":
             offscreen_preview_enable = False
             print(f"[OffscreenPreview] disabled: cv2 import failed: {e!r}")
 
+    num_cubes = int(config.get("num_cubes", 0))
+    if num_cubes > 0:
+        from g1_description.scene_generator import write_scene
+        scene_seed = config.get("scene_seed", None)
+        write_scene(num_cubes=num_cubes, seed=scene_seed, output=xml_path)
+        print(f"[Scene] Generated {num_cubes} cubes → {xml_path}")
+
     m = mujoco.MjModel.from_xml_path(xml_path)
     d = mujoco.MjData(m)
     randomize_cube_obstacles(m, d, random_blocks_cfg)

@@ -1,4 +1,9 @@
 xml_path: "g1_description/scene_withcamera.xml"
+
+# Number of randomly generated cubes in the scene.
+# Set to 0 to use the static xml_path as-is (no generation).
+num_cubes: 200
+# scene_seed: 42   # uncomment for a reproducible layout
 simulation_dt: 0.003
 control_decimation: 7
 
