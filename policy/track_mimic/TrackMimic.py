@@ -141,7 +141,13 @@ class TrackMimic(FSMState):
             if self.use_external_motion:
                 self._load_motion(self.motion_file, current_dir)
             else:
-                raise ValueError("track-mimic requires 'motion_file' in config.")
+                output_count = len(self.ort_session.get_outputs())
+                if output_count < 5:
+                    raise ValueError(
+                        "track-mimic motion_file is empty, but ONNX model does not provide "
+                        "reference outputs (expected >=5 outputs)."
+                    )
+                print("[TrackMimic] motion_file is empty; using ONNX reference outputs.")
 
             print("TrackMimic policy initializing ...")
     
