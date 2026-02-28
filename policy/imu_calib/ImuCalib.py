@@ -20,7 +20,7 @@ class ImuCalib(FSMState):
 
         current_dir = os.path.dirname(os.path.abspath(__file__))
         config_path = os.path.join(current_dir, "config", "ImuCalib.yaml")
-        with open(config_path, "r") as f:
+            with open(config_path, "r", encoding="utf-8") as f:
             config = yaml.load(f, Loader=yaml.FullLoader)
             self.control_dt = config.get("control_dt", 0.02)
             self.settle_time = config.get("settle_time", 2.0)

@@ -336,7 +336,7 @@ def main():
     # ── MuJoCo config ────────────────────────────────────────────────────────
     current_dir = os.path.dirname(os.path.abspath(__file__))
     mujoco_yaml_path = os.path.join(current_dir, "config", "mujoco.yaml")
-    with open(mujoco_yaml_path, "r") as f:
+    with open(mujoco_yaml_path, "r", encoding="utf-8") as f:
         mj_cfg = yaml.load(f, Loader=yaml.FullLoader)
     xml_path         = os.path.join(PROJECT_ROOT, mj_cfg["xml_path"])
     simulation_dt    = mj_cfg["simulation_dt"]
@@ -350,7 +350,7 @@ def main():
     # mj2lab[lab_idx] = mujoco_idx
     mj2lab_list = None
     if args.yaml and os.path.isfile(args.yaml):
-        with open(args.yaml, "r") as f:
+        with open(args.yaml, "r", encoding="utf-8") as f:
             bm_cfg = yaml.load(f, Loader=yaml.FullLoader)
         if "mj2lab" in bm_cfg:
             mj2lab_list = bm_cfg["mj2lab"]

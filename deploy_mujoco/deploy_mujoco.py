@@ -60,7 +60,7 @@ def sanitize_ctrl(ctrl, model, fallback=None):
 if __name__ == "__main__":
     current_dir = os.path.dirname(os.path.abspath(__file__))
     mujoco_yaml_path = os.path.join(current_dir, "config", "mujoco.yaml")
-    with open(mujoco_yaml_path, "r") as f:
+    with open(mujoco_yaml_path, "r", encoding="utf-8") as f:
         config = yaml.load(f, Loader=yaml.FullLoader)
         xml_path = os.path.join(PROJECT_ROOT, config["xml_path"])
         simulation_dt = config["simulation_dt"]

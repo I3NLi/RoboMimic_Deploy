@@ -41,7 +41,7 @@ class BeyondMimic(FSMState):
         if not os.path.isabs(config_path):
             config_path = os.path.join(current_dir, config_path)
         print(f"[BeyondMimic] config_path = {config_path}")
-        with open(config_path, "r") as f:
+            with open(config_path, "r", encoding="utf-8") as f:
             config = yaml.load(f, Loader=yaml.FullLoader)
             raw_onnx = str(config["onnx_path"]) if config.get("onnx_path", None) is not None else ""
             raw_onnx = os.path.expanduser(os.path.expandvars(raw_onnx))

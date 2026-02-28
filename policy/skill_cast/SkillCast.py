@@ -19,7 +19,7 @@ class SkillCast(FSMState):
         self.control_dt = 0.02
         current_dir = os.path.dirname(os.path.abspath(__file__))
         config_path = os.path.join(current_dir, "config", "SkillCast.yaml")
-        with open(config_path, "r") as f:
+            with open(config_path, "r", encoding="utf-8") as f:
             config = yaml.load(f, Loader=yaml.FullLoader)
             self.policy_path = os.path.join(current_dir, "model", config["policy_path"])
             self.kps = np.array(config["kps"], dtype=np.float32)
