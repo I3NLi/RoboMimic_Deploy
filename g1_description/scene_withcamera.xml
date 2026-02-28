@@ -184,5 +184,86 @@
       <freejoint/>
       <geom name="cube_rand_39_geom" type="box" size="0.022 0.017 0.044" rgba="0.34 0.87 0.64 1" mass="0.019" friction="3.0 2.0 0.003"/>
     </body>
+    <!-- Uniform cubes: size=0.05x0.05x0.05, collision geom == render geom -->
+    <body name="cube_uni_00" pos="1.60  0.30 0.05">
+      <freejoint/>
+      <geom name="cube_uni_00_geom" type="box" size="0.05 0.05 0.05" rgba="0.92 0.35 0.20 1" mass="0.030" friction="3.0 2.0 0.003"/>
+    </body>
+    <body name="cube_uni_01" pos="1.55 -0.45 0.05">
+      <freejoint/>
+      <geom name="cube_uni_01_geom" type="box" size="0.05 0.05 0.05" rgba="0.20 0.75 0.35 1" mass="0.030" friction="3.0 2.0 0.003"/>
+    </body>
+    <body name="cube_uni_02" pos="1.70  0.65 0.05">
+      <freejoint/>
+      <geom name="cube_uni_02_geom" type="box" size="0.05 0.05 0.05" rgba="0.35 0.20 0.90 1" mass="0.030" friction="3.0 2.0 0.003"/>
+    </body>
+    <body name="cube_uni_03" pos="1.65 -0.72 0.05">
+      <freejoint/>
+      <geom name="cube_uni_03_geom" type="box" size="0.05 0.05 0.05" rgba="0.85 0.72 0.10 1" mass="0.030" friction="3.0 2.0 0.003"/>
+    </body>
+    <body name="cube_uni_04" pos="1.50  0.88 0.05">
+      <freejoint/>
+      <geom name="cube_uni_04_geom" type="box" size="0.05 0.05 0.05" rgba="0.10 0.65 0.80 1" mass="0.030" friction="3.0 2.0 0.003"/>
+    </body>
+    <body name="cube_uni_05" pos="1.75 -0.18 0.05">
+      <freejoint/>
+      <geom name="cube_uni_05_geom" type="box" size="0.05 0.05 0.05" rgba="0.78 0.15 0.55 1" mass="0.030" friction="3.0 2.0 0.003"/>
+    </body>
+    <body name="cube_uni_06" pos="0.40  0.52 0.05">
+      <freejoint/>
+      <geom name="cube_uni_06_geom" type="box" size="0.05 0.05 0.05" rgba="0.55 0.82 0.20 1" mass="0.030" friction="3.0 2.0 0.003"/>
+    </body>
+    <body name="cube_uni_07" pos="0.35 -0.35 0.05">
+      <freejoint/>
+      <geom name="cube_uni_07_geom" type="box" size="0.05 0.05 0.05" rgba="0.20 0.38 0.78 1" mass="0.030" friction="3.0 2.0 0.003"/>
+    </body>
+    <body name="cube_uni_08" pos="0.45  0.78 0.05">
+      <freejoint/>
+      <geom name="cube_uni_08_geom" type="box" size="0.05 0.05 0.05" rgba="0.88 0.45 0.12 1" mass="0.030" friction="3.0 2.0 0.003"/>
+    </body>
+    <body name="cube_uni_09" pos="0.30 -0.62 0.05">
+      <freejoint/>
+      <geom name="cube_uni_09_geom" type="box" size="0.05 0.05 0.05" rgba="0.45 0.85 0.68 1" mass="0.030" friction="3.0 2.0 0.003"/>
+    </body>
+    <body name="cube_uni_10" pos="1.80  0.42 0.05">
+      <freejoint/>
+      <geom name="cube_uni_10_geom" type="box" size="0.05 0.05 0.05" rgba="0.72 0.25 0.85 1" mass="0.030" friction="3.0 2.0 0.003"/>
+    </body>
+    <body name="cube_uni_11" pos="1.45 -0.92 0.05">
+      <freejoint/>
+      <geom name="cube_uni_11_geom" type="box" size="0.05 0.05 0.05" rgba="0.25 0.72 0.42 1" mass="0.030" friction="3.0 2.0 0.003"/>
+    </body>
+    <body name="cube_uni_12" pos="0.60  0.93 0.05">
+      <freejoint/>
+      <geom name="cube_uni_12_geom" type="box" size="0.05 0.05 0.05" rgba="0.95 0.60 0.30 1" mass="0.030" friction="3.0 2.0 0.003"/>
+    </body>
+    <body name="cube_uni_13" pos="0.50 -0.92 0.05">
+      <freejoint/>
+      <geom name="cube_uni_13_geom" type="box" size="0.05 0.05 0.05" rgba="0.30 0.55 0.90 1" mass="0.030" friction="3.0 2.0 0.003"/>
+    </body>
+    <body name="cube_uni_14" pos="1.68 -0.52 0.05">
+      <freejoint/>
+      <geom name="cube_uni_14_geom" type="box" size="0.05 0.05 0.05" rgba="0.65 0.90 0.25 1" mass="0.030" friction="3.0 2.0 0.003"/>
+    </body>
+    <body name="cube_uni_15" pos="0.38  0.22 0.05">
+      <freejoint/>
+      <geom name="cube_uni_15_geom" type="box" size="0.05 0.05 0.05" rgba="0.42 0.28 0.72 1" mass="0.030" friction="3.0 2.0 0.003"/>
+    </body>
+    <body name="cube_uni_16" pos="1.57  0.72 0.05">
+      <freejoint/>
+      <geom name="cube_uni_16_geom" type="box" size="0.05 0.05 0.05" rgba="0.90 0.42 0.65 1" mass="0.030" friction="3.0 2.0 0.003"/>
+    </body>
+    <body name="cube_uni_17" pos="0.65 -0.87 0.05">
+      <freejoint/>
+      <geom name="cube_uni_17_geom" type="box" size="0.05 0.05 0.05" rgba="0.28 0.85 0.52 1" mass="0.030" friction="3.0 2.0 0.003"/>
+    </body>
+    <body name="cube_uni_18" pos="1.73  0.17 0.05">
+      <freejoint/>
+      <geom name="cube_uni_18_geom" type="box" size="0.05 0.05 0.05" rgba="0.68 0.18 0.35 1" mass="0.030" friction="3.0 2.0 0.003"/>
+    </body>
+    <body name="cube_uni_19" pos="0.42 -0.52 0.05">
+      <freejoint/>
+      <geom name="cube_uni_19_geom" type="box" size="0.05 0.05 0.05" rgba="0.18 0.62 0.75 1" mass="0.030" friction="3.0 2.0 0.003"/>
+    </body>
   </worldbody>
 </mujoco>
