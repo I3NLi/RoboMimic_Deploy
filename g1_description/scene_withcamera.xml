@@ -23,54 +23,166 @@
       <freejoint/>
       <geom type="box" size="0.05 0.02 0.06" rgba="1 0 0 1" mass="0.01" friction="3.0 2.0 0.003"/>
     </body>
-    <!-- Randomized obstacle cubes (fixed sample) -->
-    <body name="cube_rand_00" pos="0.62 -0.48 0.035">
+    <!-- Randomized obstacle cubes (fixed sample, re-randomized at startup). -->
+    <body name="cube_rand_00" pos="1.10 -0.62 0.041">
       <freejoint/>
-      <geom type="box" size="0.022 0.028 0.035" rgba="0.92 0.28 0.23 1" mass="0.02" friction="3.0 2.0 0.003"/>
+      <geom name="cube_rand_00_geom" type="box" size="0.018 0.028 0.041" rgba="0.75 0.74 0.61 1" mass="0.020" friction="3.0 2.0 0.003"/>
     </body>
-    <body name="cube_rand_01" pos="0.88 0.44 0.028">
+    <body name="cube_rand_01" pos="1.11 -0.37 0.025">
       <freejoint/>
-      <geom type="box" size="0.026 0.018 0.028" rgba="0.19 0.63 0.88 1" mass="0.015" friction="3.0 2.0 0.003"/>
+      <geom name="cube_rand_01_geom" type="box" size="0.033 0.019 0.025" rgba="0.15 0.16 0.27 1" mass="0.013" friction="3.0 2.0 0.003"/>
     </body>
-    <body name="cube_rand_02" pos="1.05 -0.23 0.042">
+    <body name="cube_rand_02" pos="1.03 -0.54 0.028">
       <freejoint/>
-      <geom type="box" size="0.020 0.020 0.042" rgba="0.15 0.74 0.42 1" mass="0.02" friction="3.0 2.0 0.003"/>
+      <geom name="cube_rand_02_geom" type="box" size="0.022 0.027 0.028" rgba="0.42 0.57 0.31 1" mass="0.019" friction="3.0 2.0 0.003"/>
     </body>
-    <body name="cube_rand_03" pos="1.18 0.18 0.030">
+    <body name="cube_rand_03" pos="0.54 -0.47 0.033">
       <freejoint/>
-      <geom type="box" size="0.030 0.016 0.030" rgba="0.96 0.73 0.20 1" mass="0.02" friction="3.0 2.0 0.003"/>
+      <geom name="cube_rand_03_geom" type="box" size="0.038 0.018 0.033" rgba="0.17 0.86 0.45 1" mass="0.014" friction="3.0 2.0 0.003"/>
     </body>
-    <body name="cube_rand_04" pos="0.54 0.22 0.026">
+    <body name="cube_rand_04" pos="1.30 0.11 0.027">
       <freejoint/>
-      <geom type="box" size="0.018 0.024 0.026" rgba="0.72 0.43 0.95 1" mass="0.012" friction="3.0 2.0 0.003"/>
+      <geom name="cube_rand_04_geom" type="box" size="0.032 0.035 0.027" rgba="0.18 0.22 0.94 1" mass="0.025" friction="3.0 2.0 0.003"/>
     </body>
-    <body name="cube_rand_05" pos="0.94 -0.62 0.033">
+    <body name="cube_rand_05" pos="1.01 0.71 0.021">
       <freejoint/>
-      <geom type="box" size="0.024 0.024 0.033" rgba="0.98 0.47 0.12 1" mass="0.018" friction="3.0 2.0 0.003"/>
+      <geom name="cube_rand_05_geom" type="box" size="0.033 0.018 0.021" rgba="0.52 0.33 0.71 1" mass="0.034" friction="3.0 2.0 0.003"/>
     </body>
-    <body name="cube_rand_06" pos="1.26 -0.05 0.024">
+    <body name="cube_rand_06" pos="0.88 -0.03 0.050">
       <freejoint/>
-      <geom type="box" size="0.016 0.016 0.024" rgba="0.14 0.80 0.78 1" mass="0.01" friction="3.0 2.0 0.003"/>
+      <geom name="cube_rand_06_geom" type="box" size="0.019 0.022 0.050" rgba="0.87 0.76 0.84 1" mass="0.029" friction="3.0 2.0 0.003"/>
     </body>
-    <body name="cube_rand_07" pos="0.70 0.63 0.038">
+    <body name="cube_rand_07" pos="1.37 -0.17 0.035">
       <freejoint/>
-      <geom type="box" size="0.020 0.030 0.038" rgba="0.88 0.24 0.60 1" mass="0.02" friction="3.0 2.0 0.003"/>
+      <geom name="cube_rand_07_geom" type="box" size="0.029 0.027 0.035" rgba="0.22 0.44 0.76 1" mass="0.033" friction="3.0 2.0 0.003"/>
     </body>
-    <body name="cube_rand_08" pos="1.32 0.56 0.027">
+    <body name="cube_rand_08" pos="1.36 0.61 0.023">
       <freejoint/>
-      <geom type="box" size="0.028 0.020 0.027" rgba="0.26 0.55 0.96 1" mass="0.016" friction="3.0 2.0 0.003"/>
+      <geom name="cube_rand_08_geom" type="box" size="0.015 0.025 0.023" rgba="0.20 0.51 0.84 1" mass="0.026" friction="3.0 2.0 0.003"/>
     </body>
-    <body name="cube_rand_09" pos="0.48 -0.10 0.032">
+    <body name="cube_rand_09" pos="0.58 0.31 0.050">
       <freejoint/>
-      <geom type="box" size="0.020 0.022 0.032" rgba="0.34 0.86 0.34 1" mass="0.016" friction="3.0 2.0 0.003"/>
+      <geom name="cube_rand_09_geom" type="box" size="0.016 0.034 0.050" rgba="0.79 0.28 0.14 1" mass="0.037" friction="3.0 2.0 0.003"/>
     </body>
-    <body name="cube_rand_10" pos="1.12 -0.48 0.029">
+    <body name="cube_rand_10" pos="0.88 -0.71 0.053">
       <freejoint/>
-      <geom type="box" size="0.022 0.018 0.029" rgba="0.99 0.65 0.31 1" mass="0.014" friction="3.0 2.0 0.003"/>
+      <geom name="cube_rand_10_geom" type="box" size="0.026 0.028 0.053" rgba="0.35 0.35 0.66 1" mass="0.030" friction="3.0 2.0 0.003"/>
     </body>
-    <body name="cube_rand_11" pos="0.84 0.10 0.036">
+    <body name="cube_rand_11" pos="0.92 0.38 0.047">
       <freejoint/>
-      <geom type="box" size="0.026 0.026 0.036" rgba="0.44 0.47 0.99 1" mass="0.022" friction="3.0 2.0 0.003"/>
+      <geom name="cube_rand_11_geom" type="box" size="0.031 0.026 0.047" rgba="0.74 0.85 0.74 1" mass="0.020" friction="3.0 2.0 0.003"/>
+    </body>
+    <body name="cube_rand_12" pos="0.78 -0.25 0.025">
+      <freejoint/>
+      <geom name="cube_rand_12_geom" type="box" size="0.021 0.034 0.025" rgba="0.60 0.17 0.74 1" mass="0.037" friction="3.0 2.0 0.003"/>
+    </body>
+    <body name="cube_rand_13" pos="0.85 0.60 0.027">
+      <freejoint/>
+      <geom name="cube_rand_13_geom" type="box" size="0.028 0.021 0.027" rgba="0.91 0.40 0.25 1" mass="0.010" friction="3.0 2.0 0.003"/>
+    </body>
+    <body name="cube_rand_14" pos="0.96 0.17 0.045">
+      <freejoint/>
+      <geom name="cube_rand_14_geom" type="box" size="0.028 0.023 0.045" rgba="0.40 0.84 0.71 1" mass="0.020" friction="3.0 2.0 0.003"/>
+    </body>
+    <body name="cube_rand_15" pos="0.52 -0.10 0.020">
+      <freejoint/>
+      <geom name="cube_rand_15_geom" type="box" size="0.029 0.016 0.020" rgba="0.81 0.23 0.87 1" mass="0.035" friction="3.0 2.0 0.003"/>
+    </body>
+    <body name="cube_rand_16" pos="1.12 0.09 0.032">
+      <freejoint/>
+      <geom name="cube_rand_16_geom" type="box" size="0.029 0.035 0.032" rgba="0.97 0.68 0.34 1" mass="0.025" friction="3.0 2.0 0.003"/>
+    </body>
+    <body name="cube_rand_17" pos="0.49 -0.79 0.037">
+      <freejoint/>
+      <geom name="cube_rand_17_geom" type="box" size="0.028 0.034 0.037" rgba="0.63 0.44 0.17 1" mass="0.022" friction="3.0 2.0 0.003"/>
+    </body>
+    <body name="cube_rand_18" pos="1.21 0.09 0.048">
+      <freejoint/>
+      <geom name="cube_rand_18_geom" type="box" size="0.016 0.037 0.048" rgba="0.77 0.83 0.95 1" mass="0.038" friction="3.0 2.0 0.003"/>
+    </body>
+    <body name="cube_rand_19" pos="0.73 -0.09 0.046">
+      <freejoint/>
+      <geom name="cube_rand_19_geom" type="box" size="0.031 0.025 0.046" rgba="0.25 0.96 0.26 1" mass="0.034" friction="3.0 2.0 0.003"/>
+    </body>
+    <body name="cube_rand_20" pos="1.34 0.78 0.040">
+      <freejoint/>
+      <geom name="cube_rand_20_geom" type="box" size="0.037 0.026 0.040" rgba="0.88 0.30 0.72 1" mass="0.016" friction="3.0 2.0 0.003"/>
+    </body>
+    <body name="cube_rand_21" pos="1.12 0.82 0.049">
+      <freejoint/>
+      <geom name="cube_rand_21_geom" type="box" size="0.033 0.023 0.049" rgba="0.95 0.30 0.89 1" mass="0.018" friction="3.0 2.0 0.003"/>
+    </body>
+    <body name="cube_rand_22" pos="0.91 0.71 0.030">
+      <freejoint/>
+      <geom name="cube_rand_22_geom" type="box" size="0.023 0.028 0.030" rgba="0.88 0.12 0.75 1" mass="0.022" friction="3.0 2.0 0.003"/>
+    </body>
+    <body name="cube_rand_23" pos="1.39 -0.77 0.036">
+      <freejoint/>
+      <geom name="cube_rand_23_geom" type="box" size="0.037 0.037 0.036" rgba="0.87 0.46 0.93 1" mass="0.034" friction="3.0 2.0 0.003"/>
+    </body>
+    <body name="cube_rand_24" pos="1.35 0.25 0.045">
+      <freejoint/>
+      <geom name="cube_rand_24_geom" type="box" size="0.036 0.018 0.045" rgba="0.74 0.33 0.98 1" mass="0.017" friction="3.0 2.0 0.003"/>
+    </body>
+    <body name="cube_rand_25" pos="0.96 0.43 0.042">
+      <freejoint/>
+      <geom name="cube_rand_25_geom" type="box" size="0.019 0.023 0.042" rgba="0.49 0.55 0.88 1" mass="0.024" friction="3.0 2.0 0.003"/>
+    </body>
+    <body name="cube_rand_26" pos="0.78 -0.50 0.035">
+      <freejoint/>
+      <geom name="cube_rand_26_geom" type="box" size="0.016 0.034 0.035" rgba="0.58 0.55 0.53 1" mass="0.010" friction="3.0 2.0 0.003"/>
+    </body>
+    <body name="cube_rand_27" pos="1.36 0.42 0.032">
+      <freejoint/>
+      <geom name="cube_rand_27_geom" type="box" size="0.029 0.018 0.032" rgba="0.69 0.36 0.76 1" mass="0.034" friction="3.0 2.0 0.003"/>
+    </body>
+    <body name="cube_rand_28" pos="0.82 0.80 0.036">
+      <freejoint/>
+      <geom name="cube_rand_28_geom" type="box" size="0.030 0.033 0.036" rgba="0.46 0.73 0.48 1" mass="0.036" friction="3.0 2.0 0.003"/>
+    </body>
+    <body name="cube_rand_29" pos="1.14 0.04 0.052">
+      <freejoint/>
+      <geom name="cube_rand_29_geom" type="box" size="0.028 0.019 0.052" rgba="0.84 0.39 0.66 1" mass="0.024" friction="3.0 2.0 0.003"/>
+    </body>
+    <body name="cube_rand_30" pos="0.99 0.49 0.049">
+      <freejoint/>
+      <geom name="cube_rand_30_geom" type="box" size="0.035 0.026 0.049" rgba="0.47 0.79 0.19 1" mass="0.014" friction="3.0 2.0 0.003"/>
+    </body>
+    <body name="cube_rand_31" pos="1.11 -0.28 0.031">
+      <freejoint/>
+      <geom name="cube_rand_31_geom" type="box" size="0.031 0.033 0.031" rgba="0.62 0.46 0.41 1" mass="0.021" friction="3.0 2.0 0.003"/>
+    </body>
+    <body name="cube_rand_32" pos="1.22 0.52 0.050">
+      <freejoint/>
+      <geom name="cube_rand_32_geom" type="box" size="0.021 0.019 0.050" rgba="0.29 0.77 0.46 1" mass="0.025" friction="3.0 2.0 0.003"/>
+    </body>
+    <body name="cube_rand_33" pos="1.42 -0.52 0.034">
+      <freejoint/>
+      <geom name="cube_rand_33_geom" type="box" size="0.025 0.034 0.034" rgba="0.53 0.46 0.75 1" mass="0.032" friction="3.0 2.0 0.003"/>
+    </body>
+    <body name="cube_rand_34" pos="0.86 -0.34 0.053">
+      <freejoint/>
+      <geom name="cube_rand_34_geom" type="box" size="0.038 0.034 0.053" rgba="0.59 0.55 0.78 1" mass="0.025" friction="3.0 2.0 0.003"/>
+    </body>
+    <body name="cube_rand_35" pos="1.00 0.60 0.029">
+      <freejoint/>
+      <geom name="cube_rand_35_geom" type="box" size="0.023 0.020 0.029" rgba="0.77 0.85 0.18 1" mass="0.018" friction="3.0 2.0 0.003"/>
+    </body>
+    <body name="cube_rand_36" pos="0.95 0.19 0.044">
+      <freejoint/>
+      <geom name="cube_rand_36_geom" type="box" size="0.027 0.023 0.044" rgba="0.97 0.92 0.29 1" mass="0.037" friction="3.0 2.0 0.003"/>
+    </body>
+    <body name="cube_rand_37" pos="0.69 0.79 0.040">
+      <freejoint/>
+      <geom name="cube_rand_37_geom" type="box" size="0.020 0.016 0.040" rgba="0.15 0.47 0.22 1" mass="0.035" friction="3.0 2.0 0.003"/>
+    </body>
+    <body name="cube_rand_38" pos="1.35 -0.84 0.045">
+      <freejoint/>
+      <geom name="cube_rand_38_geom" type="box" size="0.037 0.018 0.045" rgba="0.44 0.64 0.56 1" mass="0.012" friction="3.0 2.0 0.003"/>
+    </body>
+    <body name="cube_rand_39" pos="0.92 -0.37 0.044">
+      <freejoint/>
+      <geom name="cube_rand_39_geom" type="box" size="0.022 0.017 0.044" rgba="0.34 0.87 0.64 1" mass="0.019" friction="3.0 2.0 0.003"/>
     </body>
   </worldbody>
 </mujoco>

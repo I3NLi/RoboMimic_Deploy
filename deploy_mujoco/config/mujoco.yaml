@@ -1,4 +1,4 @@
-xml_path: "g1_description/scene.xml"
+xml_path: "g1_description/scene_withcamera.xml"
 simulation_dt: 0.003
 control_decimation: 7
 
@@ -12,14 +12,33 @@ head_camera_stream:
   fps: 20
   jpeg_quality: 80
 
-head_camera_ros2:
+head_camera_view:
+  enable: false
+  camera_name: "head_rgba_camera"
+  print_definition: true
+  lock_view: false
+
+offscreen_renderer:
   enable: true
   camera_name: "head_rgba_camera"
   width: 640
   height: 480
   fps: 20
-  topic_rgb: "/g1/head_camera/rgb"
-  topic_rgba: "/g1/head_camera/rgba"
-  frame_id: "head_rgba_camera"
-  node_name: "g1_head_camera_publisher"
-  qos_depth: 5
+  preview_window: true
+  preview_title: "Head Camera Preview"
+
+camera_debug:
+  enable: false
+  camera_name: "head_rgba_camera"
+  show_frustum: true
+  show_frame: true
+
+random_blocks:
+  enable: true
+  body_prefix: "cube_rand_"
+  x_min: 0.45
+  x_max: 1.55
+  y_min: -0.85
+  y_max: 0.85
+  z_offset: 0.003
+  seed: -1
