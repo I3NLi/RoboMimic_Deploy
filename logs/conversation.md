@@ -456,3 +456,4 @@
 [2026-02-27 18:16 CST] User: 仅发给我公钥。 Assistant: 返回 ~/.ssh/id_ed25519_github_hiyio.pub 公钥内容。
 [2026-02-27 18:36 CST] User: 好了（SSH key added）。 Assistant: ssh -T 验证通过，已 push 分支 feature/g1-head-rgba-stream-ros2-20260227 到 origin，并返回 PR 链接。
 [2026-02-28 09:28 CST] User: 把当前run里最好的策略放到deploy的model中提交。 Assistant: 选用当前run可部署最优策略ONNX（model_217500对应导出）复制至 RoboMimic_Deploy/policy/beyond_mimic/model/lafan/ 并更新 BeyondMimic.yaml 的 onnx_path，完成提交。
+[2026-02-28 09:49 CST] User: 推到远端。 Assistant: 将 RoboMimic_Deploy 分支 feature/g1-head-rgba-stream-ros2-20260227（含 BeyondMimic deploy 模型更新提交 7d7b750）推送到 origin。
