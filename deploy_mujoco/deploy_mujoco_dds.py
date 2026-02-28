@@ -103,7 +103,13 @@ class WirelessRemoteBuilder:
 
     @classmethod
     def from_joystick(cls, joy: JoyStick) -> list:
-        """Build wireless_remote bytes from live joystick state."""
+        """Build wireless_remote bytes from live joystick state.
+
+        Default axis mapping follows legacy behavior:
+            lx <- axis0
+            ly <- -axis1
+            rx <- axis3
+        """
         bits = 0
         for jb, kbit in cls._JB_MAP.items():
             if joy.is_button_pressed(jb):
@@ -122,6 +128,37 @@ class WirelessRemoteBuilder:
         struct.pack_into("H", data, 2,  bits & 0xFFFF)
         struct.pack_into("f", data, 4,  lx)
         struct.pack_into("f", data, 8,  rx)
+        struct.pack_into("f", data, 12, ry)
+        struct.pack_into("f", data, 20, ly)
+        return list(data)
+
+    @classmethod
+    def from_joystick_and_vel_cmd(cls, joy: JoyStick, vel_cmd: np.ndarray) -> list:
+        """Build wireless_remote bytes using current vel_cmd mapping.
+
+        deploy_real relation:
+            vel_cmd[0] = ly
+            vel_cmd[1] = -lx
+            vel_cmd[2] = -rx
+        so:
+            lx = -vel_cmd[1]
+            ly =  vel_cmd[0]
+            rx = -vel_cmd[2]
+        """
+        bits = 0
+        for jb, kbit in cls._JB_MAP.items():
+            if joy.is_button_pressed(jb):
+                bits |= (1 << kbit)
+
+        lx = float(-vel_cmd[1])
+        ly = float(vel_cmd[0])
+        rx = float(-vel_cmd[2])
+        ry = 0.0
+
+        data = bytearray(40)
+        struct.pack_into("H", data, 2, bits & 0xFFFF)
+        struct.pack_into("f", data, 4, lx)
+        struct.pack_into("f", data, 8, rx)
         struct.pack_into("f", data, 12, ry)
         struct.pack_into("f", data, 20, ly)
         return list(data)
@@ -341,6 +378,13 @@ def main():
     xml_path         = os.path.join(PROJECT_ROOT, mj_cfg["xml_path"])
     simulation_dt    = mj_cfg["simulation_dt"]
     control_decimation = mj_cfg["control_decimation"]
+    joystick_cfg = mj_cfg.get("joystick", {})
+    axis_forward = int(joystick_cfg.get("axis_forward", 1))
+    axis_lateral = int(joystick_cfg.get("axis_lateral", 0))
+    axis_yaw = int(joystick_cfg.get("axis_yaw", 2))
+    sign_forward = float(joystick_cfg.get("sign_forward", -1.0))
+    sign_lateral = float(joystick_cfg.get("sign_lateral", -1.0))
+    sign_yaw = float(joystick_cfg.get("sign_yaw", -1.0))
 
     # ── Safety config ─────────────────────────────────────────────────────────
     safety_yaml_path = os.path.join(current_dir, "config", "safety.yaml")
@@ -386,6 +430,12 @@ def main():
 
     # ── Joystick ──────────────────────────────────────────────────────────────
     joystick = JoyStick()
+    print(
+        "[Joystick] cmd axis mapping: "
+        f"forward=axis{axis_forward}*{sign_forward:+.1f}, "
+        f"lateral=axis{axis_lateral}*{sign_lateral:+.1f}, "
+        f"yaw=axis{axis_yaw}*{sign_yaw:+.1f}"
+    )
 
     # ── DDS bridge ────────────────────────────────────────────────────────────
     bridge: DDSBridge | None = None
@@ -473,9 +523,9 @@ def main():
                 ):
                     state_cmd.skill_cmd = FSMCommand.SKILL_7
 
-                state_cmd.vel_cmd[0] = -joystick.get_axis_value(1)
-                state_cmd.vel_cmd[1] = -joystick.get_axis_value(0)
-                state_cmd.vel_cmd[2] = -joystick.get_axis_value(3)
+                state_cmd.vel_cmd[0] = sign_forward * float(joystick.get_axis_value(axis_forward))
+                state_cmd.vel_cmd[1] = sign_lateral * float(joystick.get_axis_value(axis_lateral))
+                state_cmd.vel_cmd[2] = sign_yaw * float(joystick.get_axis_value(axis_yaw))
 
                 step_start = time.time()
 
@@ -519,7 +569,9 @@ def main():
 
                     # ── Publish LowState to DDS ───────────────────────────
                     if bridge is not None:
-                        remote = WirelessRemoteBuilder.from_joystick(joystick)
+                        remote = WirelessRemoteBuilder.from_joystick_and_vel_cmd(
+                            joystick, state_cmd.vel_cmd
+                        )
                         bridge.publish_state(qj, dqj, quat, omega, remote)
 
                     # ── Python policy ─────────────────────────────────────

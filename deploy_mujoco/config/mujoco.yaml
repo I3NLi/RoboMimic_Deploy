@@ -2,6 +2,15 @@ xml_path: "g1_description/scene_withcamera.xml"
 simulation_dt: 0.003
 control_decimation: 7
 
+joystick:
+  # forward/lateral/yaw command axis mapping
+  axis_forward: 1
+  axis_lateral: 0
+  axis_yaw: 2
+  sign_forward: -1.0
+  sign_lateral: -1.0
+  sign_yaw: -1.0
+
 head_camera_stream:
   enable: true
   camera_name: "head_rgba_camera"

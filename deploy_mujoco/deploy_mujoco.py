@@ -303,6 +303,13 @@ if __name__ == "__main__":
         )
     )
     random_blocks_cfg = config.get("random_blocks", {})
+    joystick_cfg = config.get("joystick", {})
+    axis_forward = int(joystick_cfg.get("axis_forward", 1))
+    axis_lateral = int(joystick_cfg.get("axis_lateral", 0))
+    axis_yaw = int(joystick_cfg.get("axis_yaw", 2))
+    sign_forward = float(joystick_cfg.get("sign_forward", -1.0))
+    sign_lateral = float(joystick_cfg.get("sign_lateral", -1.0))
+    sign_yaw = float(joystick_cfg.get("sign_yaw", -1.0))
     offscreen_preview_enable = bool(offscreen_cfg.get("preview_window", False))
     offscreen_preview_title = str(offscreen_cfg.get("preview_title", "Offscreen Camera Preview"))
     offscreen_draw_overlay = bool(offscreen_cfg.get("draw_overlay", True))
@@ -395,6 +402,12 @@ if __name__ == "__main__":
                 print(f"[Offscreen] failed to start: {e}")
 
     joystick = JoyStick()
+    print(
+        "[Joystick] cmd axis mapping: "
+        f"forward=axis{axis_forward}*{sign_forward:+.1f}, "
+        f"lateral=axis{axis_lateral}*{sign_lateral:+.1f}, "
+        f"yaw=axis{axis_yaw}*{sign_yaw:+.1f}"
+    )
     Running = True
     try:
         with mujoco.viewer.launch_passive(m, d) as viewer:
@@ -450,9 +463,9 @@ if __name__ == "__main__":
                     ):
                         state_cmd.skill_cmd = FSMCommand.SKILL_7
 
-                    state_cmd.vel_cmd[0] = -joystick.get_axis_value(1)
-                    state_cmd.vel_cmd[1] = -joystick.get_axis_value(0)
-                    state_cmd.vel_cmd[2] = -joystick.get_axis_value(3)
+                    state_cmd.vel_cmd[0] = sign_forward * float(joystick.get_axis_value(axis_forward))
+                    state_cmd.vel_cmd[1] = sign_lateral * float(joystick.get_axis_value(axis_lateral))
+                    state_cmd.vel_cmd[2] = sign_yaw * float(joystick.get_axis_value(axis_yaw))
 
                     step_start = time.time()
 
