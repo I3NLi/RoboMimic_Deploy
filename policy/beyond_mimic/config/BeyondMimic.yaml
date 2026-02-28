@@ -1,4 +1,4 @@
-onnx_path: "lafan/2026-02-27_11-05-23_balance_beam_2m24d_5-4_model_217500.onnx"
+onnx_path: "gvhmr/2026-02-11_11-49-25_GVHMR_telegram_0039+Tracking-Flat-G1-Wo-State-Estimation-v0.onnx"
 motion_length: 0
 # 动作结束后自动切回 LOCO 的延时（秒）：
 #   < 0: 不自动返回（保持在 SKILL_BEYOND_MIMIC）
