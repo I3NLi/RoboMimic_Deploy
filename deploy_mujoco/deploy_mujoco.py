@@ -14,6 +14,7 @@ from common.ctrlcomp import *
 from FSM.FSM import *
 from common.utils import get_gravity_orientation
 from common.joystick import JoyStick, JoystickButton
+from common.numpad_keyboard import NumpadKeyboard, NumKey
 from common.safety import load_safety_config, SafetyFilter, HoldToConfirm
 
 try:
@@ -401,12 +402,25 @@ if __name__ == "__main__":
                 offscreen_renderer = None
                 print(f"[Offscreen] failed to start: {e}")
 
-    joystick = JoyStick()
+    try:
+        joystick = JoyStick()
+        print(
+            "[Joystick] cmd axis mapping: "
+            f"forward=axis{axis_forward}*{sign_forward:+.1f}, "
+            f"lateral=axis{axis_lateral}*{sign_lateral:+.1f}, "
+            f"yaw=axis{axis_yaw}*{sign_yaw:+.1f}"
+        )
+    except RuntimeError as e:
+        joystick = None
+        print(f"[Joystick] not available ({e}). Keyboard-only mode.")
+
+    kb_cfg = config.get("keyboard", {})
+    kb_speed = float(kb_cfg.get("speed", 1.0))
+    numpad_kb = NumpadKeyboard(speed=kb_speed)
     print(
-        "[Joystick] cmd axis mapping: "
-        f"forward=axis{axis_forward}*{sign_forward:+.1f}, "
-        f"lateral=axis{axis_lateral}*{sign_lateral:+.1f}, "
-        f"yaw=axis{axis_yaw}*{sign_yaw:+.1f}"
+        "[Keyboard] numpad control enabled: "
+        "8/2=fwd/back, 4/6=left/right, 7/9=yaw, "
+        "5=LOCO, 0=POS_RESET, 1=BeyondMimic, 3=TrackMimic"
     )
     Running = True
     try:
@@ -418,54 +432,75 @@ if __name__ == "__main__":
                 try:
                     if head_camera_lock:
                         lock_viewer_to_fixed_camera(viewer, head_camera_id)
-                    if(joystick.is_button_pressed(JoystickButton.SELECT)):
-                        Running = False
+                    # --- Joystick input ---
+                    if joystick is not None:
+                        if joystick.is_button_pressed(JoystickButton.SELECT):
+                            Running = False
 
-                    joystick.update()
-                    if joystick.is_button_released(JoystickButton.L3):
-                        state_cmd.skill_cmd = FSMCommand.PASSIVE
-                    if joystick.is_button_released(JoystickButton.UP):
-                        state_cmd.skill_cmd = FSMCommand.PAUSE
-                    if command_gate.trigger("POS_RESET", joystick.is_button_pressed(JoystickButton.START)):
+                        joystick.update()
+                        if joystick.is_button_released(JoystickButton.L3):
+                            state_cmd.skill_cmd = FSMCommand.PASSIVE
+                        if joystick.is_button_released(JoystickButton.UP):
+                            state_cmd.skill_cmd = FSMCommand.PAUSE
+                        if command_gate.trigger("POS_RESET", joystick.is_button_pressed(JoystickButton.START)):
+                            state_cmd.skill_cmd = FSMCommand.POS_RESET
+                        if command_gate.trigger(
+                            "LOCO",
+                            joystick.is_button_pressed(JoystickButton.A) and joystick.is_button_pressed(JoystickButton.R1),
+                        ):
+                            state_cmd.skill_cmd = FSMCommand.LOCO
+                        if command_gate.trigger(
+                            "SKILL_1",
+                            joystick.is_button_pressed(JoystickButton.X) and joystick.is_button_pressed(JoystickButton.R1),
+                        ):
+                            state_cmd.skill_cmd = FSMCommand.SKILL_1
+                        if command_gate.trigger(
+                            "SKILL_2",
+                            joystick.is_button_pressed(JoystickButton.Y) and joystick.is_button_pressed(JoystickButton.R1),
+                        ):
+                            state_cmd.skill_cmd = FSMCommand.SKILL_2
+                        if joystick.is_button_released(JoystickButton.B) and joystick.is_button_pressed(JoystickButton.R1):
+                            state_cmd.skill_cmd = FSMCommand.SKILL_3
+                        if command_gate.trigger(
+                            "SKILL_4",
+                            joystick.is_button_pressed(JoystickButton.Y) and joystick.is_button_pressed(JoystickButton.L1),
+                        ):
+                            state_cmd.skill_cmd = FSMCommand.SKILL_4
+                        if joystick.is_button_released(JoystickButton.B) and joystick.is_button_pressed(JoystickButton.L1):
+                            state_cmd.skill_cmd = FSMCommand.SKILL_5
+                        if command_gate.trigger(
+                            "SKILL_6",
+                            joystick.is_button_pressed(JoystickButton.X) and joystick.is_button_pressed(JoystickButton.L1),
+                        ):
+                            state_cmd.skill_cmd = FSMCommand.SKILL_6
+                        if command_gate.trigger(
+                            "SKILL_7",
+                            joystick.is_button_pressed(JoystickButton.A) and joystick.is_button_pressed(JoystickButton.L1),
+                        ):
+                            state_cmd.skill_cmd = FSMCommand.SKILL_7
+
+                        state_cmd.vel_cmd[0] = sign_forward * float(joystick.get_axis_value(axis_forward))
+                        state_cmd.vel_cmd[1] = sign_lateral * float(joystick.get_axis_value(axis_lateral))
+                        state_cmd.vel_cmd[2] = sign_yaw * float(joystick.get_axis_value(axis_yaw))
+                    else:
+                        state_cmd.vel_cmd[:] = 0.0
+
+                    # --- Numpad keyboard input ---
+                    numpad_kb.update()
+
+                    if command_gate.trigger("KB_POS_RESET", numpad_kb.is_pressed(NumKey.NUM0)):
                         state_cmd.skill_cmd = FSMCommand.POS_RESET
-                    if command_gate.trigger(
-                        "LOCO",
-                        joystick.is_button_pressed(JoystickButton.A) and joystick.is_button_pressed(JoystickButton.R1),
-                    ):
+                    if command_gate.trigger("KB_LOCO", numpad_kb.is_pressed(NumKey.NUM5)):
                         state_cmd.skill_cmd = FSMCommand.LOCO
-                    if command_gate.trigger(
-                        "SKILL_1",
-                        joystick.is_button_pressed(JoystickButton.X) and joystick.is_button_pressed(JoystickButton.R1),
-                    ):
-                        state_cmd.skill_cmd = FSMCommand.SKILL_1
-                    if command_gate.trigger(
-                        "SKILL_2",
-                        joystick.is_button_pressed(JoystickButton.Y) and joystick.is_button_pressed(JoystickButton.R1),
-                    ):
-                        state_cmd.skill_cmd = FSMCommand.SKILL_2
-                    if joystick.is_button_released(JoystickButton.B) and joystick.is_button_pressed(JoystickButton.R1):
-                        state_cmd.skill_cmd = FSMCommand.SKILL_3
-                    if command_gate.trigger(
-                        "SKILL_4",
-                        joystick.is_button_pressed(JoystickButton.Y) and joystick.is_button_pressed(JoystickButton.L1),
-                    ):
+                    if command_gate.trigger("KB_BEYOND_MIMIC", numpad_kb.is_pressed(NumKey.NUM1)):
                         state_cmd.skill_cmd = FSMCommand.SKILL_4
-                    if joystick.is_button_released(JoystickButton.B) and joystick.is_button_pressed(JoystickButton.L1):
-                        state_cmd.skill_cmd = FSMCommand.SKILL_5
-                    if command_gate.trigger(
-                        "SKILL_6",
-                        joystick.is_button_pressed(JoystickButton.X) and joystick.is_button_pressed(JoystickButton.L1),
-                    ):
-                        state_cmd.skill_cmd = FSMCommand.SKILL_6
-                    if command_gate.trigger(
-                        "SKILL_7",
-                        joystick.is_button_pressed(JoystickButton.A) and joystick.is_button_pressed(JoystickButton.L1),
-                    ):
+                    if command_gate.trigger("KB_TRACK_MIMIC", numpad_kb.is_pressed(NumKey.NUM3)):
                         state_cmd.skill_cmd = FSMCommand.SKILL_7
 
-                    state_cmd.vel_cmd[0] = sign_forward * float(joystick.get_axis_value(axis_forward))
-                    state_cmd.vel_cmd[1] = sign_lateral * float(joystick.get_axis_value(axis_lateral))
-                    state_cmd.vel_cmd[2] = sign_yaw * float(joystick.get_axis_value(axis_yaw))
+                    kb_fwd, kb_lat, kb_yaw = numpad_kb.get_vel_cmd()
+                    state_cmd.vel_cmd[0] = float(np.clip(state_cmd.vel_cmd[0] + kb_fwd, -1.0, 1.0))
+                    state_cmd.vel_cmd[1] = float(np.clip(state_cmd.vel_cmd[1] + kb_lat, -1.0, 1.0))
+                    state_cmd.vel_cmd[2] = float(np.clip(state_cmd.vel_cmd[2] + kb_yaw, -1.0, 1.0))
 
                     step_start = time.time()
 
@@ -545,6 +580,7 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         print("[Main] interrupted by user (Ctrl+C).")
     finally:
+        numpad_kb.stop()
         if head_cam_stream is not None:
             head_cam_stream.close()
         if offscreen_renderer is not None:
