@@ -23,7 +23,7 @@ class KungFu(FSMState):
         
         current_dir = os.path.dirname(os.path.abspath(__file__))
         config_path = os.path.join(current_dir, "config", "KungFu.yaml")
-            with open(config_path, "r", encoding="utf-8") as f:
+        with open(config_path, "r", encoding="utf-8") as f:
             config = yaml.load(f, Loader=yaml.FullLoader)
             raw_onnx = str(config["onnx_path"]) if config.get("onnx_path", None) is not None else ""
             raw_onnx = os.path.expanduser(os.path.expandvars(raw_onnx))

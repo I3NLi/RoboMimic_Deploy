@@ -23,7 +23,7 @@ class Kick(FSMState):
         
         current_dir = os.path.dirname(os.path.abspath(__file__))
         config_path = os.path.join(current_dir, "config", "Kick.yaml")
-            with open(config_path, "r", encoding="utf-8") as f:
+        with open(config_path, "r", encoding="utf-8") as f:
             config = yaml.load(f, Loader=yaml.FullLoader)
             self.onnx_path = os.path.join(current_dir, "model", config["onnx_path"])
             self.kps = np.array(config["kps"], dtype=np.float32)

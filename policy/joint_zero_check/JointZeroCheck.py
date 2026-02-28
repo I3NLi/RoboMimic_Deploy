@@ -18,7 +18,7 @@ class JointZeroCheck(FSMState):
 
         current_dir = os.path.dirname(os.path.abspath(__file__))
         config_path = os.path.join(current_dir, "config", "JointZeroCheck.yaml")
-            with open(config_path, "r", encoding="utf-8") as f:
+        with open(config_path, "r", encoding="utf-8") as f:
             config = yaml.load(f, Loader=yaml.FullLoader)
             self.kds = np.array(config["kds"], dtype=np.float32)
             self.kps = np.array(config["kps"], dtype=np.float32)
