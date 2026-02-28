@@ -9,6 +9,7 @@ import onnx
 import onnxruntime
 import torch
 import os
+from glob import glob
 
 
 class TrackMimic(FSMState):
@@ -26,15 +27,11 @@ class TrackMimic(FSMState):
         self._paused_ref_body_quat_w = None
         
         current_dir = os.path.dirname(os.path.abspath(__file__))
-        config_path = os.path.join(current_dir, "config", "BeyondMimic.yaml")
+        config_path = os.path.join(current_dir, "config", "TrackMimic.yaml")
         with open(config_path, "r", encoding="utf-8") as f:
             config = yaml.load(f, Loader=yaml.FullLoader)
             raw_onnx = str(config["onnx_path"]) if config.get("onnx_path", None) is not None else ""
-            raw_onnx = os.path.expanduser(os.path.expandvars(raw_onnx))
-            if os.path.isabs(raw_onnx) and raw_onnx != "":
-                self.onnx_path = raw_onnx
-            else:
-                self.onnx_path = os.path.join(current_dir, "model", raw_onnx)
+            self.onnx_path = self._resolve_onnx_path(raw_onnx, current_dir)
             self.kps_lab = np.array(config["kp_lab"], dtype=np.float32)
             self.kds_lab = np.array(config["kd_lab"], dtype=np.float32)
             self.default_angles_lab =  np.array(config["default_angles_lab"], dtype=np.float32)
@@ -304,6 +301,41 @@ class TrackMimic(FSMState):
             if os.path.isfile(cand):
                 return cand
         return os.path.join(current_dir, motion_path)
+
+    def _resolve_onnx_path(self, onnx_path: str, current_dir: str) -> str:
+        raw = str(onnx_path or "").strip()
+        expanded = os.path.expanduser(os.path.expandvars(raw))
+        model_dir = os.path.join(current_dir, "model")
+
+        candidates = []
+        if expanded:
+            if os.path.isabs(expanded):
+                candidates.append(expanded)
+                candidates.append(os.path.join(model_dir, os.path.basename(expanded)))
+            else:
+                candidates.append(os.path.join(model_dir, expanded))
+                candidates.append(os.path.join(current_dir, expanded))
+                candidates.append(os.path.join(PROJECT_ROOT, expanded))
+
+        candidates.append(os.path.join(model_dir, "policy.onnx"))
+
+        for cand in candidates:
+            if cand and os.path.isfile(cand):
+                if raw and os.path.normcase(os.path.abspath(cand)) != os.path.normcase(os.path.abspath(expanded)):
+                    print(f"[TrackMimic][WARN] onnx_path not found: {raw}")
+                    print(f"[TrackMimic][WARN] fallback to: {cand}")
+                return cand
+
+        model_candidates = sorted(glob(os.path.join(model_dir, "*.onnx")))
+        if model_candidates:
+            fallback = model_candidates[-1]
+            print(f"[TrackMimic][WARN] onnx_path not found: {raw}")
+            print(f"[TrackMimic][WARN] fallback to latest in model/: {fallback}")
+            return fallback
+
+        raise FileNotFoundError(
+            f"TrackMimic ONNX not found. configured='{raw}', searched_model_dir='{model_dir}'"
+        )
 
     def _load_motion(self, motion_path: str, current_dir: str):
         resolved = self._resolve_motion_path(motion_path, current_dir)
