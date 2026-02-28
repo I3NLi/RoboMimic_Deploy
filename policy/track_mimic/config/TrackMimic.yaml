@@ -1,5 +1,5 @@
 onnx_path: "/home/hiyio/whole_body_tracking/logs/rsl_rl/g1_flat/2026-02-20_03-13-16_dance1_subject1+Tracking-Flat-G1-Wo-State-Estimation-v0/2026-02-20_03-13-16_dance1_subject1+Tracking-Flat-G1-Wo-State-Estimation-v0.onnx"
-motion_file: "/home/hiyio/whole_body_tracking/datasets/lafan/dance1_subject2.npz"
+motion_file: ""
 
 motion_length: 0
 
