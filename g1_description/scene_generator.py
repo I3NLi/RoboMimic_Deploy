@@ -5,30 +5,22 @@ placed boxes.  Each box uses a **single <geom>** so the collision geometry
 and the render geometry are identical (same size, same shape).
 pos.z == size.z (half-height) ensures every cube rests flush on the floor.
 
-Quick start
------------
-Change NUM_CUBES below and run::
+Configuration (primary)
+-----------------------
+Edit ``deploy_mujoco/config/mujoco.yaml``::
 
-    python g1_description/scene_generator.py
+    num_cubes: 200       # ← number of cubes
+    scene_seed: 42       # optional, for reproducible layout
 
-Or call from Python::
+Then run deploy_mujoco.py normally — the scene is regenerated automatically.
 
-    from g1_description.scene_generator import generate_scene_xml
-    xml = generate_scene_xml(num_cubes=50, seed=42)
-
-Command-line options
---------------------
-  --num-cubes N     Number of cubes (default: NUM_CUBES)
-  --seed      S     Random seed for reproducibility
-  --output    PATH  Output XML path (default: scene_withcamera.xml)
+Standalone usage
+----------------
+    python g1_description/scene_generator.py --num-cubes 50 --seed 7
 """
 import os
 import random
 import argparse
-
-# ─── Quick control variable ───────────────────────────────────────────────────
-NUM_CUBES: int = 200    # ← change this to generate a different number of cubes
-# ─────────────────────────────────────────────────────────────────────────────
 
 _SCENE_HEADER = """\
 <mujoco model="g1 scene">
@@ -66,7 +58,7 @@ _SCENE_FOOTER = """\
 """
 
 
-def generate_scene_xml(num_cubes: int = NUM_CUBES, seed: int = None) -> str:
+def generate_scene_xml(num_cubes: int, seed: int = None) -> str:
     """Return a MuJoCo XML string with *num_cubes* randomly placed boxes.
 
     Parameters
@@ -83,12 +75,12 @@ def generate_scene_xml(num_cubes: int = NUM_CUBES, seed: int = None) -> str:
         f"(single geom → collision == render geometry) -->"
     ]
     for i in range(num_cubes):
-        sx   = rng.uniform(0.015, 0.070)   # half-extent x
-        sy   = rng.uniform(0.015, 0.070)   # half-extent y
-        sz   = rng.uniform(0.020, 0.080)   # half-extent z
-        px   = rng.uniform(0.30,  1.80)    # world x
-        py   = rng.uniform(-1.00, 1.00)    # world y
-        pz   = sz                           # bottom face on floor
+        sx   = rng.uniform(0.015, 0.070)
+        sy   = rng.uniform(0.015, 0.070)
+        sz   = rng.uniform(0.020, 0.080)
+        px   = rng.uniform(0.30,  1.80)
+        py   = rng.uniform(-1.00, 1.00)
+        pz   = sz                        # bottom face on floor
         mass = rng.uniform(0.010, 0.040)
         r, g, b = rng.random(), rng.random(), rng.random()
 
@@ -105,8 +97,7 @@ def generate_scene_xml(num_cubes: int = NUM_CUBES, seed: int = None) -> str:
     return _SCENE_HEADER + "\n".join(lines) + "\n" + _SCENE_FOOTER
 
 
-def write_scene(num_cubes: int = NUM_CUBES, seed: int = None,
-                output: str = None) -> str:
+def write_scene(num_cubes: int, seed: int = None, output: str = None) -> str:
     """Generate and write the scene XML.  Returns the output path."""
     if output is None:
         output = os.path.join(os.path.dirname(__file__), "scene_withcamera.xml")
@@ -118,8 +109,8 @@ def write_scene(num_cubes: int = NUM_CUBES, seed: int = None,
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Generate MuJoCo scene XML.")
-    parser.add_argument("--num-cubes", type=int, default=NUM_CUBES,
-                        help=f"Number of cubes to generate (default: {NUM_CUBES})")
+    parser.add_argument("--num-cubes", type=int, default=200,
+                        help="Number of cubes to generate (default: 200; set in mujoco.yaml)")
     parser.add_argument("--seed", type=int, default=None,
                         help="Random seed for reproducible layout")
     parser.add_argument("--output", default=None,
