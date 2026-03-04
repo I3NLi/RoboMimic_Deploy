@@ -13,7 +13,7 @@ import os
 
 # Set this to an absolute config path to override the default config file.
 # Leave empty to use ./config/BeyondMimic.yaml
-BEYOND_MIMIC_CONFIG_PATH = ""
+BEYOND_MIMIC_CONFIG_PATH = "/home/hiyio/whole_body_tracking/logs/rsl_rl/g1_flat/2026-03-04_13-41-53_img_0714_216_20260304-011711+Tracking-Flat-G1-Wo-State-Estimation-v0/BeyondMimic.yaml"
 
 
 class BeyondMimic(FSMState):
@@ -66,6 +66,16 @@ class BeyondMimic(FSMState):
             self.q_clip = float(config.get("q_clip", 6.5))
             self.dq_clip = float(config.get("dq_clip", 80.0))
             self.ang_vel_clip = float(config.get("ang_vel_clip", 80.0))
+            raw_use_torso_quat_correction = config.get("use_torso_quat_correction", True)
+            if isinstance(raw_use_torso_quat_correction, str):
+                self.use_torso_quat_correction = raw_use_torso_quat_correction.strip().lower() in (
+                    "1",
+                    "true",
+                    "yes",
+                    "on",
+                )
+            else:
+                self.use_torso_quat_correction = bool(raw_use_torso_quat_correction)
 
             self.kps_mj = np.zeros_like(self.kps_lab)
             self.kds_mj = np.zeros_like(self.kds_lab)
@@ -165,6 +175,7 @@ class BeyondMimic(FSMState):
                 self.anchor_body_idx = 7
 
             print("BeyondMimic-like policy initializing ...")
+            print(f"[BeyondMimic] use_torso_quat_correction={self.use_torso_quat_correction}")
 
     def _get_loop_steps(self) -> int:
         # For looping mode (motion_length < 0), prefer model trajectory length.
@@ -502,17 +513,18 @@ class BeyondMimic(FSMState):
         qj = qj_mj[self.mj2lab] - self.default_angles_lab
         qj = self._sanitize_vec(qj, size=self.num_actions, clip=self.q_clip)
 
-        base_troso_yaw = qj[2]
-        base_troso_roll = qj[5]
-        base_troso_pitch = qj[8]
-        
-        # beyond mimic使用torso姿态作为姿态输入，需要根据腰部位置将pelvis数据转到torso
-        quat_yaw = self.euler_single_axis_to_quat(base_troso_yaw, 'z', degrees=False)
-        quat_roll = self.euler_single_axis_to_quat(base_troso_roll, 'x', degrees=False)
-        quat_pitch = self.euler_single_axis_to_quat(base_troso_pitch, 'y', degrees=False)
-        temp1 = self.quat_mul(quat_roll, quat_pitch)
-        temp2 = self.quat_mul(quat_yaw, temp1)
-        robot_quat = self.quat_mul(robot_quat, temp2)
+        if self.use_torso_quat_correction:
+            base_troso_yaw = qj[2]
+            base_troso_roll = qj[5]
+            base_troso_pitch = qj[8]
+
+            # beyond mimic使用torso姿态作为姿态输入，需要根据腰部位置将pelvis数据转到torso
+            quat_yaw = self.euler_single_axis_to_quat(base_troso_yaw, 'z', degrees=False)
+            quat_roll = self.euler_single_axis_to_quat(base_troso_roll, 'x', degrees=False)
+            quat_pitch = self.euler_single_axis_to_quat(base_troso_pitch, 'y', degrees=False)
+            temp1 = self.quat_mul(quat_roll, quat_pitch)
+            temp2 = self.quat_mul(quat_yaw, temp1)
+            robot_quat = self.quat_mul(robot_quat, temp2)
         try:
             ref_anchor_ori_w = self.ref_body_quat_w[:, self.anchor_body_idx].squeeze(0)
         except Exception:
