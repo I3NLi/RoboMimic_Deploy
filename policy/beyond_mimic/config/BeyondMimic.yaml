@@ -1,10 +1,14 @@
-onnx_path: "lafan/2026-02-09_12-07-26_dance1_subject1+Tracking-Flat-G1-Wo-State-Estimation-v0.onnx"
+onnx_path: "lafan/2026-02-27_11-05-23_balance_beam_2m24d_5-4_model_217500.onnx"
 motion_length: 0
 # 动作结束后自动切回 LOCO 的延时（秒）：
 #   < 0: 不自动返回（保持在 SKILL_BEYOND_MIMIC）
 #   = 0: 立即切回 LOCO
 #   > 0: 延时 x 秒后切回 LOCO
 switch_to_loco_delay_s: 0.0
+# 是否将 pelvis IMU 四元数结合腰部关节补偿为 torso 姿态。
+# true: 保持当前 BeyondMimic 行为
+# false: 直接使用原始 IMU 姿态（用于排查后仰等姿态坐标系问题）
+use_torso_quat_correction: true
 
 tau_limit: [88.0,  88.0, 88.0,
                    88.0,  88.0, 88.0,

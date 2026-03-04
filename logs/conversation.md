@@ -450,3 +450,10 @@
 [2026-02-27 17:52 CST] User: 我还希望能够拿到数据流。 Assistant: 新增头部相机 HTTP 数据流模块（deploy_mujoco/head_camera_stream.py），并在 deploy_mujoco.py 中接入可配置采样发布；支持 /health、/frame.jpg、/frame.png(RGBA)、/stream.mjpg。
 [2026-02-27 17:54 CST] User: 好（继续数据流）。 Assistant: 完成 head camera ROS2 publisher 接入：新增 deploy_mujoco/head_camera_ros2.py；deploy_mujoco.py 增加 ROS2 发布初始化/循环发布/退出清理；config/mujoco.yaml 增加 head_camera_ros2 配置段并默认启用。
 [2026-02-27 17:56 CST] User: 提交并push到github给一个独立分支。 Assistant: 将创建独立分支并推送当前 head camera 定义+HTTP/ROS2 数据流改动。
+[2026-02-27 18:02 CST] User: 用hiyio身份登录并push。 Assistant: 已确认当前用户即 hiyio；尝试后仍因 GitHub 认证策略失败（Invalid username or token, password auth not supported）。
+[2026-02-27 18:04 CST] User: 然后推上去。 Assistant: 正在执行 GitHub device-code 登录认证流程，认证后将 push 分支 feature/g1-head-rgba-stream-ros2-20260227。
+[2026-02-27 18:05 CST] User: 用ssh。 Assistant: 已生成 SSH key (id_ed25519_github_hiyio)、配置 ~/.ssh/config 并将 origin 切换为 git@github.com:I3NLi/RoboMimic_Deploy.git；当前 ssh -T 返回 Permission denied(publickey)，等待将公钥加入 GitHub。
+[2026-02-27 18:16 CST] User: 仅发给我公钥。 Assistant: 返回 ~/.ssh/id_ed25519_github_hiyio.pub 公钥内容。
+[2026-02-27 18:36 CST] User: 好了（SSH key added）。 Assistant: ssh -T 验证通过，已 push 分支 feature/g1-head-rgba-stream-ros2-20260227 到 origin，并返回 PR 链接。
+[2026-02-28 09:28 CST] User: 把当前run里最好的策略放到deploy的model中提交。 Assistant: 选用当前run可部署最优策略ONNX（model_217500对应导出）复制至 RoboMimic_Deploy/policy/beyond_mimic/model/lafan/ 并更新 BeyondMimic.yaml 的 onnx_path，完成提交。
+[2026-02-28 09:49 CST] User: 推到远端。 Assistant: 将 RoboMimic_Deploy 分支 feature/g1-head-rgba-stream-ros2-20260227（含 BeyondMimic deploy 模型更新提交 7d7b750）推送到 origin。
