@@ -29,6 +29,8 @@
 #include <vector>
 #include <algorithm>
 #include <stdexcept>
+#include <filesystem>
+#include <cctype>
 
 #include <onnxruntime_cxx_api.h>
 #include <yaml-cpp/yaml.h>
@@ -151,6 +153,8 @@ inline bool fisfinite(float v) { return std::isfinite(v); }
 struct BeyondMimicConfig {
     std::string onnx_path;
     int         motion_length   { 0 };
+    float       switch_to_loco_delay_s { 0.0f };
+    bool        use_torso_quat_correction { true };
     int         num_actions     { 29 };
     int         num_obs         { 154 };
     float       tau_limit_scale { 1.0f };
@@ -171,11 +175,49 @@ struct BeyondMimicConfig {
     {
         YAML::Node node = YAML::LoadFile(yaml_path);
         BeyondMimicConfig c;
+        namespace fs = std::filesystem;
+        const fs::path yaml_abs = fs::absolute(fs::path(yaml_path));
+        const fs::path yaml_dir = yaml_abs.parent_path();
 
-        if (node["onnx_path"])
-            c.onnx_path = node["onnx_path"].as<std::string>();
+        if (node["onnx_path"]) {
+            std::string raw_onnx = node["onnx_path"].as<std::string>();
+            fs::path onnx_path(raw_onnx);
+            if (onnx_path.is_absolute()) {
+                c.onnx_path = onnx_path.string();
+            } else {
+                // Mirror Python BeyondMimic.py behavior:
+                //   config/BeyondMimic.yaml + "lafan/xxx.onnx"
+                //   -> ../model/lafan/xxx.onnx
+                const fs::path candidate_model = yaml_dir.parent_path() / "model" / onnx_path;
+                const fs::path candidate_same_dir = yaml_dir / onnx_path;
+                if (fs::exists(candidate_model)) {
+                    c.onnx_path = candidate_model.string();
+                } else if (fs::exists(candidate_same_dir)) {
+                    c.onnx_path = candidate_same_dir.string();
+                } else {
+                    // Keep deterministic fallback for readable error reporting.
+                    c.onnx_path = candidate_model.string();
+                }
+            }
+        }
         if (node["motion_length"])
             c.motion_length = node["motion_length"].as<int>();
+        if (node["switch_to_loco_delay_s"])
+            c.switch_to_loco_delay_s = node["switch_to_loco_delay_s"].as<float>();
+        if (node["use_torso_quat_correction"]) {
+            const YAML::Node v = node["use_torso_quat_correction"];
+            try {
+                c.use_torso_quat_correction = v.as<bool>();
+            } catch (...) {
+                try {
+                    std::string s = v.as<std::string>();
+                    std::transform(s.begin(), s.end(), s.begin(),
+                                   [](unsigned char ch){ return (char)std::tolower(ch); });
+                    c.use_torso_quat_correction =
+                        (s == "1" || s == "true" || s == "yes" || s == "on");
+                } catch (...) {}
+            }
+        }
         if (node["num_actions"])
             c.num_actions = node["num_actions"].as<int>();
         if (node["num_obs"])
@@ -219,10 +261,12 @@ public:
      * @param yaml_path   Absolute path to BeyondMimic.yaml
      */
     BeyondMimicPolicy(StateAndCmd& sc, PolicyOutput& po,
-                      const std::string& yaml_path)
+                      const std::string& yaml_path,
+                      float control_dt = 0.02f)
         : FSMState(FSMStateName::SKILL_BEYOND_MIMIC, "BeyondMimic", sc, po),
           ort_env_(ORT_LOGGING_LEVEL_WARNING, "BeyondMimic")
     {
+        switch_to_loco_dt_ = std::max(1e-6f, control_dt);
         // ── load config ──────────────────────────────────────────
         cfg_ = BeyondMimicConfig::load(yaml_path);
         na_  = cfg_.num_actions;
@@ -254,19 +298,33 @@ public:
         n_inputs_  = session_->GetInputCount();
         n_outputs_ = session_->GetOutputCount();
 
+        input_names_owned_.reserve(n_inputs_);
+        output_names_owned_.reserve(n_outputs_);
         for (size_t i = 0; i < n_inputs_; i++) {
             auto s = session_->GetInputNameAllocated(i, alloc);
-            input_names_owned_.push_back(s.get());
-            input_names_.push_back(input_names_owned_.back().c_str());
+            input_names_owned_.push_back(s ? std::string(s.get()) : std::string());
         }
         for (size_t i = 0; i < n_outputs_; i++) {
             auto s = session_->GetOutputNameAllocated(i, alloc);
-            output_names_owned_.push_back(s.get());
-            output_names_.push_back(output_names_owned_.back().c_str());
+            output_names_owned_.push_back(s ? std::string(s.get()) : std::string());
+        }
+        input_names_.clear();
+        output_names_.clear();
+        input_names_.reserve(input_names_owned_.size());
+        output_names_.reserve(output_names_owned_.size());
+        for (auto& name : input_names_owned_) {
+            input_names_.push_back(name.c_str());
+        }
+        for (auto& name : output_names_owned_) {
+            output_names_.push_back(name.c_str());
         }
 
         // ── read ONNX metadata ───────────────────────────────────
         parse_metadata();
+        if (cfg_.motion_length >= 0 && model_motion_length_ > 0) {
+            cfg_.motion_length = model_motion_length_;
+            printf("[BeyondMimic] using model motion_length=%d\n", cfg_.motion_length);
+        }
 
         // ── allocate buffers ─────────────────────────────────────
         action_buf_.assign(na_, 0.f);
@@ -329,25 +387,25 @@ public:
         // ── lab-frame joint positions ─────────────────────────────
         std::vector<float> qj(na_, 0.f);   // lab order, relative to default
         for (int i = 0; i < na_; i++) {
-            int lab_i = cfg_.mj2lab[i];
+            int lab_i = mj_index(i);
             float raw = (lab_i >= 0 && lab_i < na_) ? qj_mj[lab_i] : 0.f;
             float def = (i < (int)cfg_.default_angles_lab.size()) ? cfg_.default_angles_lab[i] : 0.f;
             qj[i] = std::clamp(raw - def, -cfg_.q_clip, cfg_.q_clip);
         }
 
-        // ── torso-corrected IMU quaternion ────────────────────────
-        // beyond mimic uses torso as anchor; correct pelvis quat by waist joints
-        // mj joint order: [0..2]=left_leg [6..8]=right_leg → waist_yaw=12? but
-        // the Python indexing is qj[2]=yaw, qj[5]=roll, qj[8]=pitch in LAB order
-        float torso_yaw   = (na_>2) ? qj[2] : 0.f;
-        float torso_roll  = (na_>5) ? qj[5] : 0.f;
-        float torso_pitch = (na_>8) ? qj[8] : 0.f;
         using namespace qmath;
-        Vec4 qy = axis_angle_quat(torso_yaw,   'z');
-        Vec4 qr = axis_angle_quat(torso_roll,  'x');
-        Vec4 qp = axis_angle_quat(torso_pitch, 'y');
-        Vec4 delta = qmul(qy, qmul(qr, qp));
-        robot_quat = normalize(qmul(robot_quat, delta));
+        if (cfg_.use_torso_quat_correction) {
+            // beyond mimic uses torso as anchor; correct pelvis quat by waist joints
+            // the Python indexing is qj[2]=yaw, qj[5]=roll, qj[8]=pitch in LAB order
+            float torso_yaw   = (na_>2) ? qj[2] : 0.f;
+            float torso_roll  = (na_>5) ? qj[5] : 0.f;
+            float torso_pitch = (na_>8) ? qj[8] : 0.f;
+            Vec4 qy = axis_angle_quat(torso_yaw,   'z');
+            Vec4 qr = axis_angle_quat(torso_roll,  'x');
+            Vec4 qp = axis_angle_quat(torso_pitch, 'y');
+            Vec4 delta = qmul(qy, qmul(qr, qp));
+            robot_quat = normalize(qmul(robot_quat, delta));
+        }
 
         // ── anchor orientation in world frame ─────────────────────
         Vec4 ref_anchor_w = sanitize_quat(get_ref_anchor_quat());
@@ -358,8 +416,7 @@ public:
             Mat33 world_to_anchor = mat_from_quat(yaw_quat(robot_quat));
             init_to_world_ = matmul(world_to_anchor, mat_T(init_to_anchor));
             counter_step_++;
-            // fill output with last known target so we don't send zeros
-            fill_output_from_buf(qj_mj, dqj_mj);
+            // Match Python: return early without overriding policy_output.
             return;
         }
 
@@ -375,12 +432,17 @@ public:
             cfg_.ang_vel_clip);
 
         Vec3 base_gravity_v = sc_.gravity_ori;
-        std::vector<float> base_gravity = sanitize_vec(
-            {base_gravity_v[0], base_gravity_v[1], base_gravity_v[2]}, 2.0f);
+        bool gravity_valid =
+            std::isfinite(base_gravity_v[0]) &&
+            std::isfinite(base_gravity_v[1]) &&
+            std::isfinite(base_gravity_v[2]);
+        std::vector<float> base_gravity = gravity_valid
+            ? sanitize_vec({base_gravity_v[0], base_gravity_v[1], base_gravity_v[2]}, 2.0f)
+            : sanitize_vec(gravity_from_quat(robot_quat), 2.0f);
 
         std::vector<float> dqj(na_, 0.f);
         for (int i = 0; i < na_; i++) {
-            int lab_i = cfg_.mj2lab[i];
+            int lab_i = mj_index(i);
             dqj[i] = (lab_i >= 0 && lab_i < na_) ? dqj_mj[lab_i] : 0.f;
         }
 
@@ -399,6 +461,12 @@ public:
         std::array<int64_t,2> obs_shape  {1, (int64_t)no_};
         std::array<int64_t,2> step_shape {1, 1};
         float step_val = (float)counter_step_;
+        if (cfg_.motion_length < 0) {
+            int loop_steps = get_loop_steps();
+            step_val = (float)(counter_step_ % std::max(1, loop_steps));
+        }
+        if (sc_.policy_step_override >= 0)
+            step_val = (float)sc_.policy_step_override;
 
         std::vector<Ort::Value> inputs;
         inputs.push_back(Ort::Value::CreateTensor<float>(
@@ -447,7 +515,7 @@ public:
 
         std::vector<float> target_mj(na_, 0.f);
         for (int i = 0; i < na_; i++) {
-            int lab_i = cfg_.mj2lab[i];
+            int lab_i = mj_index(i);
             if (lab_i >= 0 && lab_i < na_) target_mj[lab_i] = target_lab[i];
         }
         target_mj = sanitize_vec(target_mj, cfg_.q_clip);
@@ -479,6 +547,7 @@ public:
     void exit() override
     {
         counter_step_ = 0;
+        action_complete_hold_steps_ = 0;
         paused_ref_valid_ = false;
         std::fill(action_buf_.begin(),   action_buf_.end(),   0.f);
         std::fill(obs_history_.begin(),  obs_history_.end(),  0.f);
@@ -489,13 +558,40 @@ public:
 
     FSMStateName check_change() override
     {
-        // motion complete
-        if (cfg_.motion_length > 0 && counter_step_ >= cfg_.motion_length)
-            return FSMStateName::SKILL_COOLDOWN;
+        if (is_action_complete()) {
+            // switch_to_loco_delay_s semantics:
+            // <0: never auto-return; 0: return immediately; >0: return after delay.
+            if (cfg_.switch_to_loco_delay_s < 0.0f) {
+                sc_.skill_cmd = FSMCommand::INVALID;
+                return FSMStateName::SKILL_BEYOND_MIMIC;
+            }
+            int delay_steps = std::max(
+                0,
+                (int)std::round(cfg_.switch_to_loco_delay_s /
+                                std::max(1e-6f, switch_to_loco_dt_)));
+            action_complete_hold_steps_++;
+            if (action_complete_hold_steps_ >= delay_steps) {
+                sc_.skill_cmd = FSMCommand::INVALID;
+                return FSMStateName::SKILL_COOLDOWN;
+            }
+            sc_.skill_cmd = FSMCommand::INVALID;
+            return FSMStateName::SKILL_BEYOND_MIMIC;
+        }
+        action_complete_hold_steps_ = 0;
 
-        if (sc_.skill_cmd == FSMCommand::LOCO)      return FSMStateName::SKILL_COOLDOWN;
-        if (sc_.skill_cmd == FSMCommand::PASSIVE)   return FSMStateName::PASSIVE;
-        if (sc_.skill_cmd == FSMCommand::POS_RESET) return FSMStateName::FIXEDPOSE;
+        if (sc_.skill_cmd == FSMCommand::LOCO) {
+            sc_.skill_cmd = FSMCommand::INVALID;
+            return FSMStateName::SKILL_COOLDOWN;
+        }
+        if (sc_.skill_cmd == FSMCommand::PASSIVE) {
+            sc_.skill_cmd = FSMCommand::INVALID;
+            return FSMStateName::PASSIVE;
+        }
+        if (sc_.skill_cmd == FSMCommand::POS_RESET) {
+            sc_.skill_cmd = FSMCommand::INVALID;
+            return FSMStateName::FIXEDPOSE;
+        }
+        sc_.skill_cmd = FSMCommand::INVALID;
         return FSMStateName::SKILL_BEYOND_MIMIC;
     }
 
@@ -523,6 +619,7 @@ private:
     int                              per_frame_dim_ { 0 };
     int                              history_length_{ 1 };
     int                              anchor_body_idx_{ 7 };
+    int                              model_motion_length_{ 0 };
 
     // ── runtime buffers ───────────────────────────────────────────
     std::vector<float> action_buf_;
@@ -536,6 +633,9 @@ private:
         1,0,0, 0,1,0, 0,0,1
     };
     int  counter_step_   { 0 };
+    int  action_complete_hold_steps_ { 0 };
+    bool loop_step_warned_ { false };
+    float switch_to_loco_dt_ { 0.02f };
     bool paused_ref_valid_{ false };
     std::vector<float> paused_ref_joint_pos_;
     std::vector<float> paused_ref_joint_vel_;
@@ -572,6 +672,20 @@ private:
             obs_names_ = split_csv(obs_names_str);
         }
 
+        // model motion length (metadata takes priority when available)
+        for (const char* key : {"motion_length", "motion_len", "traj_length"}) {
+            std::string raw = get_meta(key);
+            if (raw.empty()) continue;
+            try {
+                int v = (int)std::round(std::stof(raw));
+                if (v > 0) {
+                    model_motion_length_ = v;
+                    printf("[BeyondMimic] motion_length from metadata: %d\n", model_motion_length_);
+                    break;
+                }
+            } catch (...) {}
+        }
+
         // anchor body index
         std::string body_names_str = get_meta("body_names");
         std::string anchor_name    = get_meta("anchor_body_name");
@@ -589,7 +703,11 @@ private:
         std::string hist_str = get_meta("observation_history_lengths");
         if (!hist_str.empty()) {
             auto vals = parse_csv_ints(hist_str);
-            if (!vals.empty()) history_length_ = vals[0];
+            if (!vals.empty()) {
+                bool all_eq = std::all_of(vals.begin(), vals.end(),
+                                          [&](int x){ return x == vals[0]; });
+                if (all_eq) history_length_ = vals[0];
+            }
         }
         // infer from model input shape
         if (history_length_ <= 1 && per_frame_dim_ > 0) {
@@ -672,9 +790,10 @@ private:
                 for (float v : ref_joint_pos_) parts.push_back(v);
                 for (float v : ref_joint_vel_) parts.push_back(v);
             } else if (name == "motion_anchor_ori_b") {
-                // First two rows of 3×3 → 6 values
-                for (int r = 0; r < 2; r++)
-                    for (int c = 0; c < 3; c++)
+                // Match Python: motion_anchor_ori_b[:, :2].reshape(-1)
+                // i.e. first two columns of 3x3, row-major flatten.
+                for (int r = 0; r < 3; r++)
+                    for (int c = 0; c < 2; c++)
                         parts.push_back(motion_anchor_ori_b[r*3+c]);
             } else if (name == "motion_anchor_pos_b") {
                 parts.push_back(0.f); parts.push_back(0.f); parts.push_back(0.f);
@@ -823,5 +942,45 @@ private:
             try { out.push_back(std::stof(tok)); } catch (...) {}
         }
         return out;
+    }
+
+    int mj_index(int lab_idx) const
+    {
+        if (lab_idx < 0) return -1;
+        if (lab_idx >= (int)cfg_.mj2lab.size()) return lab_idx;
+        return cfg_.mj2lab[lab_idx];
+    }
+
+    std::vector<float> gravity_from_quat(const qmath::Vec4& q) const
+    {
+        qmath::Vec3 g = qmath::quat_apply_inverse(q, qmath::Vec3{0.f, 0.f, -1.f});
+        return {g[0], g[1], g[2]};
+    }
+
+    bool is_action_complete() const
+    {
+        if (cfg_.motion_length <= 0) return false;
+        return counter_step_ >= cfg_.motion_length;
+    }
+
+    int get_loop_steps()
+    {
+        if (model_motion_length_ > 1) {
+            return model_motion_length_;
+        }
+        int raw_steps = std::abs(cfg_.motion_length);
+        if (raw_steps <= 1) {
+            int fallback_steps = std::max(
+                1,
+                (int)std::round(10.0f / std::max(1e-6f, switch_to_loco_dt_)));
+            if (!loop_step_warned_) {
+                printf("[BeyondMimic][WARN] motion_length=%d causes 1-step loop; "
+                       "fallback loop_steps=%d\n",
+                       cfg_.motion_length, fallback_steps);
+                loop_step_warned_ = true;
+            }
+            return fallback_steps;
+        }
+        return raw_steps;
     }
 };

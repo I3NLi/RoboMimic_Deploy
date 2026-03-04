@@ -80,6 +80,11 @@ pip install -e .
 ---
 ## 运行代码
 
+## C++ 真机部署文档
+
+- `deploy_real_c` 的编译、启动、对比验证说明见：
+  - [`deploy_real_c/README.md`](deploy_real_c/README.md)
+
 ## 1. 运行Mujoco仿真代码
 ```bash
 python deploy_mujoco/deploy_mujoco.py
@@ -167,5 +172,4 @@ Mimic策略不保证100%成功率，特别是在湿滑/沙地等复杂地面上�
 - `deploy_real/config/safety.yaml` 与 `deploy_mujoco/config/safety.yaml` 可配置调试安全参数。
 - 默认开启动作/增益限幅、长按触发（防误触）与故障降级到阻尼模式。
 - 需要干跑时，将 `dry_run: true`（只计算不下发指令）。
-
 

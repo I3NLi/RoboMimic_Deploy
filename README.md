@@ -76,6 +76,11 @@ pip install -e .
 ---
 ## Running the Code
 
+## C++ Deploy Real Documentation
+
+- For `deploy_real_c` build/run/verify instructions, see:
+  - [`deploy_real_c/README.md`](deploy_real_c/README.md)
+
 ## 1. Run Mujoco Simulation
 ```bash
 python deploy_mujoco/deploy_mujoco.py

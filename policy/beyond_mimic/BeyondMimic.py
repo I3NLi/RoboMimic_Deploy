@@ -11,9 +11,9 @@ import onnxruntime
 import torch
 import os
 
-# Set this to an absolute config path to override the default config file.
-# Leave empty to use ./config/BeyondMimic.yaml
-BEYOND_MIMIC_CONFIG_PATH = "/home/hiyio/whole_body_tracking/logs/rsl_rl/g1_flat/2026-03-04_13-41-53_img_0714_216_20260304-011711+Tracking-Flat-G1-Wo-State-Estimation-v0/BeyondMimic.yaml"
+# Optional hardcoded override for local debugging.
+# Leave empty in normal usage and use env var BEYOND_MIMIC_CONFIG_PATH when needed.
+BEYOND_MIMIC_CONFIG_PATH = ""
 
 
 class BeyondMimic(FSMState):
@@ -36,7 +36,9 @@ class BeyondMimic(FSMState):
         self._loop_step_warned = False
         
         current_dir = os.path.dirname(os.path.abspath(__file__))
-        config_path = BEYOND_MIMIC_CONFIG_PATH.strip() or os.path.join(current_dir, "config", "BeyondMimic.yaml")
+        env_override = os.environ.get("BEYOND_MIMIC_CONFIG_PATH", "").strip()
+        cfg_override = env_override or BEYOND_MIMIC_CONFIG_PATH.strip()
+        config_path = cfg_override or os.path.join(current_dir, "config", "BeyondMimic.yaml")
         config_path = os.path.expanduser(os.path.expandvars(config_path))
         if not os.path.isabs(config_path):
             config_path = os.path.join(current_dir, config_path)
