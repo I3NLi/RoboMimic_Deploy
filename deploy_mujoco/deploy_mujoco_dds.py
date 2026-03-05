@@ -453,6 +453,10 @@ def main():
              "Used to load mj2lab joint mapping.",
     )
     parser.add_argument(
+        "--track-yaml", default=None,
+        help="TrackMimic YAML path (same file passed to C++ --track-yaml).",
+    )
+    parser.add_argument(
         "--net", default="wlp3s0",
         help="DDS network interface (default: 'wlp3s0'). Must match C++ --net.",
     )
@@ -482,7 +486,11 @@ def main():
     )
     parser.add_argument(
         "--shadow-sync", action="store_true",
-        help="Force Python FSM to SKILL_BEYOND_MIMIC at startup (match C++ --shadow).",
+        help="Force Python FSM to selected shadow state at startup (match C++ --shadow-state).",
+    )
+    parser.add_argument(
+        "--shadow-state", default="beyond", choices=["beyond", "track"],
+        help="FSM state used with --shadow-sync: beyond or track.",
     )
     parser.add_argument(
         "--headless", action="store_true",
@@ -536,6 +544,15 @@ def main():
         os.environ["BEYOND_MIMIC_CONFIG_PATH"] = yaml_path
         print(f"[Config] BEYOND_MIMIC_CONFIG_PATH={yaml_path}")
 
+    track_yaml_path = None
+    if args.track_yaml:
+        track_yaml_path = os.path.abspath(os.path.expanduser(args.track_yaml))
+        if not os.path.isfile(track_yaml_path):
+            raise FileNotFoundError(f"Track YAML not found: {track_yaml_path}")
+        args.track_yaml = track_yaml_path
+        os.environ["TRACK_MIMIC_CONFIG_PATH"] = track_yaml_path
+        print(f"[Config] TRACK_MIMIC_CONFIG_PATH={track_yaml_path}")
+
     # ── MuJoCo config ────────────────────────────────────────────────────────
     current_dir = os.path.dirname(os.path.abspath(__file__))
     mujoco_yaml_path = os.path.join(current_dir, "config", "mujoco.yaml")
@@ -552,8 +569,11 @@ def main():
     # ── Load mj2lab from YAML ─────────────────────────────────────────────────
     # mj2lab[lab_idx] = mujoco_idx
     mj2lab_list = None
-    if yaml_path and os.path.isfile(yaml_path):
-        with open(yaml_path, "r") as f:
+    mapping_yaml = yaml_path
+    if args.shadow_state == "track" and track_yaml_path:
+        mapping_yaml = track_yaml_path
+    if mapping_yaml and os.path.isfile(mapping_yaml):
+        with open(mapping_yaml, "r") as f:
             bm_cfg = yaml.load(f, Loader=yaml.FullLoader)
         if "mj2lab" in bm_cfg:
             mj2lab_list = bm_cfg["mj2lab"]
@@ -588,7 +608,12 @@ def main():
     safety        = SafetyFilter(num_joints, safety_cfg)
     cmd_gate      = HoldToConfirm(safety_cfg.command_hold_frames)
     if args.shadow_sync:
-        force_fsm_state(fsm_ctrl, FSMStateName.SKILL_BEYOND_MIMIC)
+        target_state = (
+            FSMStateName.SKILL_TRACK_MIMIC
+            if args.shadow_state == "track"
+            else FSMStateName.SKILL_BEYOND_MIMIC
+        )
+        force_fsm_state(fsm_ctrl, target_state)
 
     # ── Joystick ──────────────────────────────────────────────────────────────
     if args.no_joystick:
@@ -630,7 +655,9 @@ def main():
         print(
             "[DDS] Start it with:\n"
             f"       ./build/deploy_real_onnx --shadow --net {args.net} "
-            + (f"--yaml {args.yaml}" if args.yaml else "")
+            + (f"--yaml {args.yaml} " if args.yaml else "")
+            + (f"--track-yaml {args.track_yaml} " if args.track_yaml else "")
+            + f"--shadow-state {args.shadow_state}"
         )
     else:
         print("[no-cpp] DDS disabled. Running Python-only (same as deploy_mujoco.py).")

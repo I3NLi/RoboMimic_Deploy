@@ -26,6 +26,8 @@ Options:
   --verify                    Headless auto verification with PASS/FAIL exit code.
   --interactive               Interactive compare mode (default).
   --yaml PATH                 BeyondMimic.yaml path.
+  --track-yaml PATH           TrackMimic yaml path (used with --shadow-state track).
+  --shadow-state STATE        Shadow FSM state: beyond|track (default: beyond).
   --net IFACE                 DDS network interface.
   --sync-lowstate             Force C++ shadow to step on new LowState ticks.
   --no-sync-lowstate          Disable C++ tick sync.
@@ -49,6 +51,8 @@ EOF
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 MODE="interactive"
 YAML="${SCRIPT_DIR}/policy/beyond_mimic/config/BeyondMimic.yaml"
+TRACK_YAML=""
+SHADOW_STATE="beyond"
 NET="wlp3s0"
 CPP_BIN="${SCRIPT_DIR}/deploy_real_c/build/deploy_real_onnx"
 PY_SCRIPT="${SCRIPT_DIR}/deploy_mujoco/deploy_mujoco_dds.py"
@@ -73,6 +77,8 @@ while [ $# -gt 0 ]; do
         --verify) MODE="verify"; shift ;;
         --interactive) MODE="interactive"; shift ;;
         --yaml) YAML="$2"; shift 2 ;;
+        --track-yaml) TRACK_YAML="$2"; shift 2 ;;
+        --shadow-state) SHADOW_STATE="$2"; shift 2 ;;
         --net) NET="$2"; shift 2 ;;
         --sync-lowstate) SYNC_LOWSTATE=1; shift ;;
         --no-sync-lowstate) SYNC_LOWSTATE=0; shift ;;
@@ -128,6 +134,15 @@ if [ ! -f "$YAML" ]; then
     echo "[ERROR] BeyondMimic YAML not found: $YAML"
     exit 1
 fi
+if [ "$SHADOW_STATE" = "track" ]; then
+    if [ -z "$TRACK_YAML" ]; then
+        TRACK_YAML="${SCRIPT_DIR}/policy/track_mimic/config/BeyondMimic.yaml"
+    fi
+    if [ ! -f "$TRACK_YAML" ]; then
+        echo "[ERROR] TrackMimic YAML not found: $TRACK_YAML"
+        exit 1
+    fi
+fi
 if [ ! -f "$CPP_BIN" ]; then
     echo "[ERROR] C++ binary not found: $CPP_BIN"
     echo "        Run: cd deploy_real_c && cmake -B build && cmake --build build"
@@ -167,15 +182,24 @@ echo " RoboMimic: Python vs C++ Policy Compare"
 echo "========================================"
 echo "  Mode : $MODE"
 echo "  YAML : $YAML"
+echo "  TYML : ${TRACK_YAML:-(none)}"
+echo "  State: $SHADOW_STATE"
 echo "  NET  : $NET"
 echo "  C++  : $CPP_BIN"
 echo "  Py   : $PY_SCRIPT"
 echo "  PyCmd: ${PYTHON_CMD[*]}"
 echo ""
 
-CPP_ARGS=(--shadow --net "$NET" --yaml "$YAML")
+CPP_ARGS=(--shadow --net "$NET" --yaml "$YAML" --shadow-state "$SHADOW_STATE")
+if [ -n "$TRACK_YAML" ]; then
+    CPP_ARGS+=(--track-yaml "$TRACK_YAML")
+fi
 if [ "$SYNC_LOWSTATE" -eq 1 ]; then
     CPP_ARGS+=(--sync-lowstate)
+fi
+PY_ARGS=(--yaml "$YAML" --net "$NET" --shadow-state "$SHADOW_STATE")
+if [ -n "$TRACK_YAML" ]; then
+    PY_ARGS+=(--track-yaml "$TRACK_YAML")
 fi
 
 echo "[compare] Starting C++ shadow..."
@@ -187,8 +211,7 @@ sleep 1
 if [ "$MODE" = "interactive" ]; then
     echo "[compare] Starting Python bridge (interactive)..."
     "${PYTHON_CMD[@]}" "$PY_SCRIPT" \
-        --yaml "$YAML" \
-        --net "$NET" \
+        "${PY_ARGS[@]}" \
         --lag-search "$LAG_SEARCH" \
         --cmd-wait-ms "$CMD_WAIT_MS" \
         > >(sed 's/^/[Py]  /') 2>&1 &
@@ -203,8 +226,7 @@ fi
 echo "[compare] Running verification..."
 set +e
 "${PYTHON_CMD[@]}" "$PY_SCRIPT" \
-    --yaml "$YAML" \
-    --net "$NET" \
+    "${PY_ARGS[@]}" \
     --headless \
     --no-joystick \
     --shadow-sync \

@@ -22,6 +22,7 @@
 #include <array>
 #include <atomic>
 #include <cfloat>
+#include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -499,8 +500,11 @@ public:
 
     FSMStateName check_change() override
     {
-        if (sc_.skill_cmd == FSMCommand::POS_RESET) return FSMStateName::FIXEDPOSE;
-        if (sc_.skill_cmd == FSMCommand::LOCO)      return FSMStateName::LOCOMODE;
+        if (sc_.skill_cmd == FSMCommand::POS_RESET) {
+            sc_.skill_cmd = FSMCommand::INVALID;
+            return FSMStateName::FIXEDPOSE;
+        }
+        sc_.skill_cmd = FSMCommand::INVALID;
         return FSMStateName::PASSIVE;
     }
 
@@ -514,13 +518,9 @@ private:
 
 class FixedPose : public FSMState {
 public:
-    // Default target angles for G1 (all zeros; adjust per your robot)
-    std::array<float, G1_NUM_MOTOR> default_pos{};
-
-    FixedPose(StateAndCmd& sc, PolicyOutput& po,
-              float dt = DEFAULT_CTRL_DT, float kp = 100.f, float kd = 3.f)
+    FixedPose(StateAndCmd& sc, PolicyOutput& po, float dt = DEFAULT_CTRL_DT)
         : FSMState(FSMStateName::FIXEDPOSE, "FixedPose", sc, po),
-          control_dt_(dt), kp_(kp), kd_(kd) {}
+          control_dt_(dt) {}
 
     void enter() override
     {
@@ -535,25 +535,43 @@ public:
         float ratio = std::min(elapsed_ / duration_, 1.0f);
 
         for (int i = 0; i < sc_.num_joints; i++) {
-            po_.actions[i] = init_pos_[i] * (1.0f - ratio) + default_pos[i] * ratio;
-            po_.kps[i]     = kp_;
-            po_.kds[i]     = kd_;
+            po_.actions[i] = init_pos_[i] * (1.0f - ratio) + default_pos_[i] * ratio;
+            po_.kps[i]     = kps_[i];
+            po_.kds[i]     = kds_[i];
+        }
+    }
+
+    void exit() override
+    {
+        for (int i = 0; i < sc_.num_joints; i++) {
+            po_.actions[i] = default_pos_[i];
+            po_.kps[i]     = kps_[i];
+            po_.kds[i]     = kds_[i];
         }
     }
 
     FSMStateName check_change() override
     {
-        if (sc_.skill_cmd == FSMCommand::PASSIVE)   return FSMStateName::PASSIVE;
-        if (sc_.skill_cmd == FSMCommand::LOCO)      return FSMStateName::LOCOMODE;
+        if (sc_.skill_cmd == FSMCommand::LOCO) {
+            sc_.skill_cmd = FSMCommand::INVALID;
+            return FSMStateName::LOCOMODE;
+        }
+        if (sc_.skill_cmd == FSMCommand::PASSIVE) {
+            sc_.skill_cmd = FSMCommand::INVALID;
+            return FSMStateName::PASSIVE;
+        }
+        sc_.skill_cmd = FSMCommand::INVALID;
         return FSMStateName::FIXEDPOSE;
     }
 
 private:
     float control_dt_;
-    float kp_, kd_;
     float duration_ { 2.0f };
     float elapsed_  { 0.0f };
     std::array<float, G1_NUM_MOTOR> init_pos_{};
+    const std::array<float, G1_NUM_MOTOR> default_pos_ { JOINT_ZERO_DEFAULT };
+    const std::array<float, G1_NUM_MOTOR> kps_ { JOINT_ZERO_KP };
+    const std::array<float, G1_NUM_MOTOR> kds_ { JOINT_ZERO_KD };
 };
 
 // ============================================================
@@ -820,12 +838,19 @@ private:
 
 class ImuCalibMode : public FSMState {
 public:
+    using LocoProvider = std::function<FSMState*()>;
+
     ImuCalibMode(StateAndCmd& sc, PolicyOutput& po, float control_dt)
         : FSMState(FSMStateName::IMU_CALIB, "ImuCalib", sc, po),
           control_dt_(std::max(1e-6f, control_dt))
     {
         settle_steps_ = std::max(1, (int)std::round(settle_time_ / control_dt_));
         sample_steps_ = std::max(1, (int)std::round(sample_time_ / control_dt_));
+    }
+
+    void set_loco_provider(LocoProvider provider)
+    {
+        loco_provider_ = std::move(provider);
     }
 
     void enter() override
@@ -842,11 +867,25 @@ public:
 
     void run() override
     {
-        // Use conservative stand pose for calibration stability.
-        for (int i = 0; i < sc_.num_joints; i++) {
-            po_.actions[i] = JOINT_ZERO_DEFAULT[i];
-            po_.kps[i]     = JOINT_ZERO_KP[i];
-            po_.kds[i]     = JOINT_ZERO_KD[i];
+        bool used_loco_pose = false;
+        if (loco_provider_) {
+            FSMState* loco = loco_provider_();
+            if (loco) {
+                // Python ImuCalib reuses LocoMode outputs for standing stabilization.
+                loco->run();
+                used_loco_pose = true;
+            }
+        }
+        if (!used_loco_pose) {
+            if (!warned_no_loco_) {
+                printf("[ImuCalib][WARN] Loco provider missing, fallback to fixed stand pose.\n");
+                warned_no_loco_ = true;
+            }
+            for (int i = 0; i < sc_.num_joints; i++) {
+                po_.actions[i] = JOINT_ZERO_DEFAULT[i];
+                po_.kps[i]     = JOINT_ZERO_KP[i];
+                po_.kds[i]     = JOINT_ZERO_KD[i];
+            }
         }
 
         cur_step_++;
@@ -926,6 +965,8 @@ private:
     int   cur_step_    { 0 };
     int   sample_count_{ 0 };
     bool  done_        { false };
+    bool  warned_no_loco_{ false };
+    LocoProvider loco_provider_{};
     std::array<float, G1_NUM_MOTOR> sum_q_{};
     std::array<float, 3> sum_g_{};
     std::array<float, 3> sum_w_{};
@@ -955,6 +996,9 @@ public:
           beyond_stub_(FSMStateName::SKILL_BEYOND_MIMIC, "BeyondMimic(stub)", sc, po),
           track_stub_(FSMStateName::SKILL_TRACK_MIMIC, "TrackMimic(stub)", sc, po)
     {
+        imu_calib_.set_loco_provider([this]() -> FSMState* {
+            return resolve_policy(FSMStateName::LOCOMODE);
+        });
         cur_ = &passive_;
         printf("[FSM] Initialized. Policy: %s\n", cur_->name_str.c_str());
     }
@@ -1059,30 +1103,41 @@ private:
         else        printf("[FSM] Pause OFF\n");
     }
 
+    FSMState* resolve_policy(FSMStateName name)
+    {
+        auto it = extra_.find(name);
+        if (it != extra_.end() && it->second) return it->second.get();
+
+        switch (name) {
+            case FSMStateName::PASSIVE:            return &passive_;
+            case FSMStateName::FIXEDPOSE:          return &fixed_;
+            case FSMStateName::LOCOMODE:           return &loco_;
+            case FSMStateName::SKILL_COOLDOWN:     return &cooldown_;
+            case FSMStateName::SKILL_CAST:         return &skill_cast_;
+            case FSMStateName::SKILL_KUNGFU:       return &kungfu_;
+            case FSMStateName::SKILL_DANCE:        return &dance_;
+            case FSMStateName::SKILL_KICK:         return &kick_;
+            case FSMStateName::SKILL_KUNGFU2:      return &kungfu2_;
+            case FSMStateName::SKILL_BEYOND_MIMIC: return &beyond_stub_;
+            case FSMStateName::JOINT_ZERO_CHECK:   return &joint_zero_;
+            case FSMStateName::IMU_CALIB:          return &imu_calib_;
+            case FSMStateName::SKILL_TRACK_MIMIC:  return &track_stub_;
+            default:                               return nullptr;
+        }
+    }
+
     void set_policy(FSMStateName name)
     {
-        if (extra_.count(name)) { cur_ = extra_[name].get(); return; }
-        switch (name) {
-            case FSMStateName::PASSIVE:   cur_ = &passive_; break;
-            case FSMStateName::FIXEDPOSE: cur_ = &fixed_;   break;
-            case FSMStateName::LOCOMODE:  cur_ = &loco_;    break;
-            case FSMStateName::SKILL_COOLDOWN:   cur_ = &cooldown_;   break;
-            case FSMStateName::SKILL_CAST:       cur_ = &skill_cast_; break;
-            case FSMStateName::SKILL_KUNGFU:     cur_ = &kungfu_;     break;
-            case FSMStateName::SKILL_DANCE:      cur_ = &dance_;      break;
-            case FSMStateName::SKILL_KICK:       cur_ = &kick_;       break;
-            case FSMStateName::SKILL_KUNGFU2:    cur_ = &kungfu2_;    break;
-            case FSMStateName::SKILL_BEYOND_MIMIC: cur_ = &beyond_stub_; break;
-            case FSMStateName::JOINT_ZERO_CHECK: cur_ = &joint_zero_; break;
-            case FSMStateName::IMU_CALIB:        cur_ = &imu_calib_;  break;
-            case FSMStateName::SKILL_TRACK_MIMIC: cur_ = &track_stub_; break;
-            default:
-                // Match Python behavior more closely: ignore unknown target
-                // and keep current policy instead of force-fallback.
-                printf("[FSM] Unknown/unregistered state %d, keep current policy %s\n",
-                       (int)name, cur_ ? cur_->name_str.c_str() : "null");
-                if (!cur_) cur_ = &passive_;
+        FSMState* target = resolve_policy(name);
+        if (target) {
+            cur_ = target;
+            return;
         }
+        // Match Python behavior more closely: ignore unknown target
+        // and keep current policy instead of force-fallback.
+        printf("[FSM] Unknown/unregistered state %d, keep current policy %s\n",
+               (int)name, cur_ ? cur_->name_str.c_str() : "null");
+        if (!cur_) cur_ = &passive_;
     }
 };
 
@@ -1374,6 +1429,7 @@ int main(int argc, char* argv[])
     Config config;
     std::string yaml_path;
     std::string track_yaml_path;
+    std::string shadow_state = "beyond";
     bool shadow = false;   // --shadow: skip zero_torque_state() wait (for MuJoCo comparison)
 
     for (int i = 1; i < argc; i++) {
@@ -1382,6 +1438,10 @@ int main(int argc, char* argv[])
             yaml_path = argv[++i];
         } else if (arg == "--track-yaml" && i+1 < argc) {
             track_yaml_path = argv[++i];
+        } else if (arg == "--shadow-state" && i+1 < argc) {
+            shadow_state = argv[++i];
+            std::transform(shadow_state.begin(), shadow_state.end(), shadow_state.begin(),
+                           [](unsigned char ch) { return (char)std::tolower(ch); });
         } else if (arg == "--net" && i+1 < argc) {
             config.net = argv[++i];
         } else if (arg == "--joints" && i+1 < argc) {
@@ -1412,6 +1472,7 @@ int main(int argc, char* argv[])
 #ifdef ENABLE_BEYOND_MIMIC
     printf("ONNX yaml : %s\n", yaml_path.empty() ? "(none)" : yaml_path.c_str());
     printf("Track yaml: %s\n", track_yaml_path.empty() ? "(none)" : track_yaml_path.c_str());
+    printf("Shadow FSM: %s\n", shadow_state.c_str());
 #endif
     printf("\n");
 
@@ -1568,7 +1629,10 @@ int main(int argc, char* argv[])
                 controller.get_state_cmd(),
                 controller.get_policy_output(),
                 track_yaml_path,
-                config.control_dt);
+                config.control_dt,
+                FSMStateName::SKILL_TRACK_MIMIC,
+                "TrackMimic",
+                /*require_motion_file=*/true);
             controller.get_fsm().register_policy(
                 FSMStateName::SKILL_TRACK_MIMIC, std::move(track_policy));
             printf("[Main] TrackMimic policy registered "
@@ -1586,7 +1650,10 @@ int main(int argc, char* argv[])
 #ifdef ENABLE_BEYOND_MIMIC
         // Auto-arm: jump directly to SKILL_BEYOND_MIMIC so we start comparing
         // as soon as MuJoCo starts sending LowState.
-        if (!yaml_path.empty()) {
+        if (shadow_state == "track" && !track_yaml_path.empty()) {
+            printf("[Main] Shadow mode: auto-arming SKILL_TRACK_MIMIC.\n");
+            controller.get_fsm().force_state(FSMStateName::SKILL_TRACK_MIMIC);
+        } else if (!yaml_path.empty()) {
             printf("[Main] Shadow mode: auto-arming SKILL_BEYOND_MIMIC.\n");
             controller.get_fsm().force_state(FSMStateName::SKILL_BEYOND_MIMIC);
         }

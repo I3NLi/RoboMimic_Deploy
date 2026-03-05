@@ -10,6 +10,8 @@ import onnxruntime
 import torch
 import os
 
+TRACK_MIMIC_CONFIG_PATH = ""
+
 
 class TrackMimic(FSMState):
     def __init__(self, state_cmd:StateAndCmd, policy_output:PolicyOutput):
@@ -26,7 +28,13 @@ class TrackMimic(FSMState):
         self._paused_ref_body_quat_w = None
         
         current_dir = os.path.dirname(os.path.abspath(__file__))
-        config_path = os.path.join(current_dir, "config", "BeyondMimic.yaml")
+        env_override = os.environ.get("TRACK_MIMIC_CONFIG_PATH", "").strip()
+        cfg_override = env_override or TRACK_MIMIC_CONFIG_PATH.strip()
+        config_path = cfg_override or os.path.join(current_dir, "config", "BeyondMimic.yaml")
+        config_path = os.path.expanduser(os.path.expandvars(config_path))
+        if not os.path.isabs(config_path):
+            config_path = os.path.join(current_dir, config_path)
+        print(f"[TrackMimic] config_path = {config_path}")
         with open(config_path, "r") as f:
             config = yaml.load(f, Loader=yaml.FullLoader)
             raw_onnx = str(config["onnx_path"]) if config.get("onnx_path", None) is not None else ""

@@ -31,9 +31,14 @@
 #include <stdexcept>
 #include <filesystem>
 #include <cctype>
+#include <fstream>
+#include <sstream>
+#include <unordered_map>
+#include <regex>
 
 #include <onnxruntime_cxx_api.h>
 #include <yaml-cpp/yaml.h>
+#include <zlib.h>
 
 // deploy_real.cpp declares these; include order matters — this header
 // must be included AFTER the base types are defined (FSMState, StateAndCmd, etc.)
@@ -152,6 +157,7 @@ inline bool fisfinite(float v) { return std::isfinite(v); }
 
 struct BeyondMimicConfig {
     std::string onnx_path;
+    std::string motion_file;
     int         motion_length   { 0 };
     float       switch_to_loco_delay_s { 0.0f };
     bool        use_torso_quat_correction { true };
@@ -170,6 +176,7 @@ struct BeyondMimicConfig {
     std::vector<float> default_angles_lab;
     std::vector<float> action_scale_lab;
     std::vector<int>   mj2lab;
+    std::vector<int>   motion_body_ids;
 
     static BeyondMimicConfig load(const std::string& yaml_path)
     {
@@ -197,6 +204,26 @@ struct BeyondMimicConfig {
                 } else {
                     // Keep deterministic fallback for readable error reporting.
                     c.onnx_path = candidate_model.string();
+                }
+            }
+        }
+        if (node["motion_file"]) {
+            std::string raw_motion = node["motion_file"].as<std::string>();
+            fs::path motion_path(raw_motion);
+            if (motion_path.is_absolute()) {
+                c.motion_file = motion_path.string();
+            } else {
+                const fs::path candidate_policy_dir = yaml_dir.parent_path() / motion_path;
+                const fs::path candidate_project_dir = fs::current_path() / motion_path;
+                const fs::path candidate_same_dir = yaml_dir / motion_path;
+                if (fs::exists(candidate_policy_dir)) {
+                    c.motion_file = candidate_policy_dir.string();
+                } else if (fs::exists(candidate_project_dir)) {
+                    c.motion_file = candidate_project_dir.string();
+                } else if (fs::exists(candidate_same_dir)) {
+                    c.motion_file = candidate_same_dir.string();
+                } else {
+                    c.motion_file = candidate_policy_dir.string();
                 }
             }
         }
@@ -245,9 +272,221 @@ struct BeyondMimicConfig {
         read_fvec("default_angles_lab", c.default_angles_lab);
         read_fvec("action_scale_lab",   c.action_scale_lab);
         read_ivec("mj2lab",             c.mj2lab);
+        read_ivec("motion_body_ids",    c.motion_body_ids);
         return c;
     }
 };
+
+namespace npzutil {
+
+inline uint16_t read_u16(const std::vector<uint8_t>& b, size_t off)
+{
+    if (off + 2 > b.size()) throw std::runtime_error("npz read_u16 out of range");
+    return (uint16_t)b[off] | ((uint16_t)b[off + 1] << 8);
+}
+
+inline uint32_t read_u32(const std::vector<uint8_t>& b, size_t off)
+{
+    if (off + 4 > b.size()) throw std::runtime_error("npz read_u32 out of range");
+    return (uint32_t)b[off]
+         | ((uint32_t)b[off + 1] << 8)
+         | ((uint32_t)b[off + 2] << 16)
+         | ((uint32_t)b[off + 3] << 24);
+}
+
+inline std::vector<uint8_t> read_file(const std::string& path)
+{
+    std::ifstream ifs(path, std::ios::binary);
+    if (!ifs) throw std::runtime_error("failed to open npz: " + path);
+    ifs.seekg(0, std::ios::end);
+    std::streamoff n = ifs.tellg();
+    if (n <= 0) return {};
+    ifs.seekg(0, std::ios::beg);
+    std::vector<uint8_t> data((size_t)n);
+    ifs.read(reinterpret_cast<char*>(data.data()), n);
+    if (!ifs) throw std::runtime_error("failed to read npz: " + path);
+    return data;
+}
+
+inline std::vector<uint8_t> inflate_raw(const uint8_t* src, size_t src_len)
+{
+    z_stream zs{};
+    zs.next_in = const_cast<Bytef*>(reinterpret_cast<const Bytef*>(src));
+    zs.avail_in = (uInt)src_len;
+    if (inflateInit2(&zs, -MAX_WBITS) != Z_OK) {
+        throw std::runtime_error("inflateInit2 failed");
+    }
+    std::vector<uint8_t> out;
+    std::array<uint8_t, 16384> chunk{};
+    int ret = Z_OK;
+    while (ret == Z_OK) {
+        zs.next_out = reinterpret_cast<Bytef*>(chunk.data());
+        zs.avail_out = (uInt)chunk.size();
+        ret = inflate(&zs, Z_NO_FLUSH);
+        size_t produced = chunk.size() - zs.avail_out;
+        out.insert(out.end(), chunk.data(), chunk.data() + produced);
+    }
+    inflateEnd(&zs);
+    if (ret != Z_STREAM_END) {
+        throw std::runtime_error("inflate failed with code " + std::to_string(ret));
+    }
+    return out;
+}
+
+inline std::string basename_without_ext(const std::string& name)
+{
+    std::string base = name;
+    size_t slash = base.find_last_of("/\\");
+    if (slash != std::string::npos) base = base.substr(slash + 1);
+    if (base.size() >= 4 && base.substr(base.size() - 4) == ".npy") {
+        base.resize(base.size() - 4);
+    }
+    return base;
+}
+
+inline std::unordered_map<std::string, std::vector<uint8_t>>
+read_npz_entries(const std::string& path)
+{
+    constexpr uint32_t kEOCD = 0x06054b50;
+    constexpr uint32_t kCD   = 0x02014b50;
+    constexpr uint32_t kLFH  = 0x04034b50;
+    auto buf = read_file(path);
+    if (buf.size() < 22) throw std::runtime_error("npz too small: " + path);
+
+    size_t eocd_pos = std::string::npos;
+    size_t search_begin = (buf.size() > 0x10000 + 22) ? (buf.size() - (0x10000 + 22)) : 0;
+    for (size_t i = buf.size() - 22 + 1; i-- > search_begin;) {
+        if (read_u32(buf, i) == kEOCD) {
+            eocd_pos = i;
+            break;
+        }
+        if (i == 0) break;
+    }
+    if (eocd_pos == std::string::npos) throw std::runtime_error("EOCD not found in npz: " + path);
+
+    uint16_t total_entries = read_u16(buf, eocd_pos + 10);
+    uint32_t cd_offset = read_u32(buf, eocd_pos + 16);
+    if (cd_offset >= buf.size()) throw std::runtime_error("invalid central directory offset");
+
+    std::unordered_map<std::string, std::vector<uint8_t>> out;
+    size_t cd_pos = cd_offset;
+    for (uint16_t idx = 0; idx < total_entries; idx++) {
+        if (cd_pos + 46 > buf.size() || read_u32(buf, cd_pos) != kCD) {
+            throw std::runtime_error("invalid central directory entry");
+        }
+        uint16_t compression = read_u16(buf, cd_pos + 10);
+        uint32_t comp_size   = read_u32(buf, cd_pos + 20);
+        uint32_t uncomp_size = read_u32(buf, cd_pos + 24);
+        uint16_t name_len    = read_u16(buf, cd_pos + 28);
+        uint16_t extra_len   = read_u16(buf, cd_pos + 30);
+        uint16_t comment_len = read_u16(buf, cd_pos + 32);
+        uint32_t lfh_off     = read_u32(buf, cd_pos + 42);
+        if (cd_pos + 46 + name_len + extra_len + comment_len > buf.size()) {
+            throw std::runtime_error("central directory entry out of range");
+        }
+        std::string entry_name(reinterpret_cast<const char*>(buf.data() + cd_pos + 46), name_len);
+        cd_pos += 46 + name_len + extra_len + comment_len;
+
+        if (lfh_off + 30 > buf.size() || read_u32(buf, lfh_off) != kLFH) {
+            throw std::runtime_error("invalid local file header");
+        }
+        uint16_t l_name_len  = read_u16(buf, lfh_off + 26);
+        uint16_t l_extra_len = read_u16(buf, lfh_off + 28);
+        size_t data_off = lfh_off + 30 + l_name_len + l_extra_len;
+        if (data_off + comp_size > buf.size()) {
+            throw std::runtime_error("compressed data out of range");
+        }
+        const uint8_t* comp_ptr = buf.data() + data_off;
+        std::vector<uint8_t> payload;
+        if (compression == 0) {
+            payload.assign(comp_ptr, comp_ptr + comp_size);
+        } else if (compression == 8) {
+            payload = inflate_raw(comp_ptr, comp_size);
+        } else {
+            throw std::runtime_error("unsupported npz compression method: " + std::to_string(compression));
+        }
+        if (uncomp_size > 0 && payload.size() != uncomp_size) {
+            throw std::runtime_error("npz uncompressed size mismatch for " + entry_name);
+        }
+        out[basename_without_ext(entry_name)] = std::move(payload);
+    }
+    return out;
+}
+
+struct NpyArrayF32 {
+    std::vector<size_t> shape;
+    std::vector<float> data;
+};
+
+inline NpyArrayF32 parse_npy_f32(const std::vector<uint8_t>& b)
+{
+    if (b.size() < 12) throw std::runtime_error("npy too small");
+    static const uint8_t kMagic[] = {0x93, 'N', 'U', 'M', 'P', 'Y'};
+    if (!std::equal(std::begin(kMagic), std::end(kMagic), b.begin())) {
+        throw std::runtime_error("invalid npy magic");
+    }
+    uint8_t major = b[6];
+    size_t header_len = 0;
+    size_t off = 0;
+    if (major == 1) {
+        header_len = read_u16(b, 8);
+        off = 10;
+    } else if (major >= 2) {
+        header_len = read_u32(b, 8);
+        off = 12;
+    } else {
+        throw std::runtime_error("unsupported npy version");
+    }
+    if (off + header_len > b.size()) throw std::runtime_error("invalid npy header size");
+    std::string header(reinterpret_cast<const char*>(b.data() + off), header_len);
+    size_t data_off = off + header_len;
+
+    std::smatch m;
+    std::regex re_descr("'descr'\\s*:\\s*'([^']+)'");
+    std::regex re_fortran("'fortran_order'\\s*:\\s*(True|False)");
+    std::regex re_shape("'shape'\\s*:\\s*\\(([^\\)]*)\\)");
+    if (!std::regex_search(header, m, re_descr)) throw std::runtime_error("npy missing descr");
+    std::string descr = m[1];
+    if (!std::regex_search(header, m, re_fortran)) throw std::runtime_error("npy missing fortran_order");
+    bool fortran = (m[1] == "True");
+    if (fortran) throw std::runtime_error("fortran-order npy is unsupported");
+    if (!std::regex_search(header, m, re_shape)) throw std::runtime_error("npy missing shape");
+    std::string shape_csv = m[1];
+
+    std::vector<size_t> shape;
+    std::stringstream ss(shape_csv);
+    std::string tok;
+    while (std::getline(ss, tok, ',')) {
+        size_t b0 = tok.find_first_not_of(" \t\r\n");
+        if (b0 == std::string::npos) continue;
+        size_t e0 = tok.find_last_not_of(" \t\r\n");
+        tok = tok.substr(b0, e0 - b0 + 1);
+        if (tok.empty()) continue;
+        shape.push_back((size_t)std::stoull(tok));
+    }
+    if (shape.empty()) throw std::runtime_error("npy empty shape");
+
+    size_t n = 1;
+    for (size_t d : shape) n *= d;
+    size_t elem_size = 0;
+    if (descr == "<f4" || descr == "|f4" || descr == "=f4") elem_size = 4;
+    else if (descr == "<f8" || descr == "|f8" || descr == "=f8") elem_size = 8;
+    else throw std::runtime_error("unsupported npy dtype: " + descr);
+    if (data_off + n * elem_size > b.size()) throw std::runtime_error("npy data out of range");
+
+    NpyArrayF32 arr;
+    arr.shape = std::move(shape);
+    arr.data.resize(n, 0.0f);
+    if (elem_size == 4) {
+        std::memcpy(arr.data.data(), b.data() + data_off, n * sizeof(float));
+    } else {
+        const double* src = reinterpret_cast<const double*>(b.data() + data_off);
+        for (size_t i = 0; i < n; i++) arr.data[i] = (float)src[i];
+    }
+    return arr;
+}
+
+} // namespace npzutil
 
 // ============================================================
 // BeyondMimicPolicy — FSMState subclass
@@ -262,9 +501,14 @@ public:
      */
     BeyondMimicPolicy(StateAndCmd& sc, PolicyOutput& po,
                       const std::string& yaml_path,
-                      float control_dt = 0.02f)
-        : FSMState(FSMStateName::SKILL_BEYOND_MIMIC, "BeyondMimic", sc, po),
-          ort_env_(ORT_LOGGING_LEVEL_WARNING, "BeyondMimic")
+                      float control_dt = 0.02f,
+                      FSMStateName self_state_name = FSMStateName::SKILL_BEYOND_MIMIC,
+                      const std::string& state_label = "BeyondMimic",
+                      bool require_motion_file = false)
+        : FSMState(self_state_name, state_label, sc, po),
+          ort_env_(ORT_LOGGING_LEVEL_WARNING, state_label.c_str()),
+          self_state_name_(self_state_name),
+          require_motion_file_(require_motion_file)
     {
         switch_to_loco_dt_ = std::max(1e-6f, control_dt);
         // ── load config ──────────────────────────────────────────
@@ -330,15 +574,27 @@ public:
         action_buf_.assign(na_, 0.f);
         ref_joint_pos_.assign(na_, 0.f);
         ref_joint_vel_.assign(na_, 0.f);
-        ref_body_quat_w_.assign(14*4, 0.f);  // [14, 4] flattened
+        ref_body_quat_w_.assign((size_t)ref_body_count_ * 4, 0.f);  // [B,4] flattened
         ref_body_quat_w_[0] = 1.f;            // identity for body 0
 
         obs_buf_.assign(no_, 0.f);
         obs_history_.assign(history_length_ * per_frame_dim_, 0.f);
 
+        use_external_motion_ = !cfg_.motion_file.empty();
+        if (require_motion_file_ && !use_external_motion_) {
+            throw std::runtime_error("track-mimic requires 'motion_file' in config");
+        }
+        if (use_external_motion_) {
+            load_external_motion(cfg_.motion_file);
+        }
+
         printf("[BeyondMimic] Loaded: %s\n", cfg_.onnx_path.c_str());
         printf("              na=%d  no=%d  history=%d  anchor_body=%d\n",
                na_, no_, history_length_, anchor_body_idx_);
+        if (use_external_motion_) {
+            printf("[BeyondMimic] external motion loaded: len=%d body_count=%d\n",
+                   motion_length_from_file_, ref_body_count_);
+        }
     }
 
     // ── FSMState interface ────────────────────────────────────────
@@ -347,6 +603,7 @@ public:
     {
         counter_step_ = 0;
         paused_ref_valid_ = false;
+        action_complete_hold_steps_ = 0;
         std::fill(obs_history_.begin(), obs_history_.end(), 0.f);
         std::fill(action_buf_.begin(), action_buf_.end(), 0.f);
         std::fill(ref_joint_pos_.begin(), ref_joint_pos_.end(), 0.f);
@@ -356,6 +613,9 @@ public:
 
         // warm-up run with zeros so outputs are valid before first real step
         warm_up();
+        if (use_external_motion_) {
+            set_ref_from_motion(0);
+        }
         printf("[BeyondMimic] Entered\n");
     }
 
@@ -363,6 +623,9 @@ public:
     {
         bool paused = sc_.pause;
         if (paused && !paused_ref_valid_) {
+            if (use_external_motion_) {
+                set_ref_from_motion(counter_step_);
+            }
             paused_ref_joint_pos_  = ref_joint_pos_;
             paused_ref_joint_vel_  = ref_joint_vel_;
             paused_ref_body_quat_w_ = ref_body_quat_w_;
@@ -375,6 +638,8 @@ public:
             ref_joint_pos_    = paused_ref_joint_pos_;
             ref_joint_vel_    = paused_ref_joint_vel_;
             ref_body_quat_w_  = paused_ref_body_quat_w_;
+        } else if (use_external_motion_) {
+            set_ref_from_motion(counter_step_);
         }
 
         // ── read + sanitize state ─────────────────────────────────
@@ -465,7 +730,8 @@ public:
             int loop_steps = get_loop_steps();
             step_val = (float)(counter_step_ % std::max(1, loop_steps));
         }
-        if (sc_.policy_step_override >= 0)
+        if (self_state_name_ != FSMStateName::SKILL_TRACK_MIMIC &&
+            sc_.policy_step_override >= 0)
             step_val = (float)sc_.policy_step_override;
 
         std::vector<Ort::Value> inputs;
@@ -494,12 +760,11 @@ public:
         // output[1]: ref_joint_pos [1, na]
         // output[2]: ref_joint_vel [1, na]
         // output[4]: ref_body_quat_w [1, 14, 4]
-        copy_tensor(outputs[0], action_buf_,       na_);
-        if (!paused) {
-            copy_tensor(outputs[1], ref_joint_pos_, na_);
-            copy_tensor(outputs[2], ref_joint_vel_, na_);
-            if (n_outputs_ > 4)
-                copy_tensor(outputs[4], ref_body_quat_w_, 14*4);
+        copy_tensor(outputs[0], action_buf_, na_);
+        if (!paused && !use_external_motion_) {
+            if (n_outputs_ > 1) copy_tensor(outputs[1], ref_joint_pos_, na_);
+            if (n_outputs_ > 2) copy_tensor(outputs[2], ref_joint_vel_, na_);
+            if (n_outputs_ > 4) copy_tensor(outputs[4], ref_body_quat_w_, ref_body_count_ * 4);
         }
 
         // ── decode target joint positions ─────────────────────────
@@ -559,11 +824,15 @@ public:
     FSMStateName check_change() override
     {
         if (is_action_complete()) {
+            if (self_state_name_ == FSMStateName::SKILL_TRACK_MIMIC) {
+                sc_.skill_cmd = FSMCommand::INVALID;
+                return FSMStateName::SKILL_COOLDOWN;
+            }
             // switch_to_loco_delay_s semantics:
             // <0: never auto-return; 0: return immediately; >0: return after delay.
             if (cfg_.switch_to_loco_delay_s < 0.0f) {
                 sc_.skill_cmd = FSMCommand::INVALID;
-                return FSMStateName::SKILL_BEYOND_MIMIC;
+                return self_state_name_;
             }
             int delay_steps = std::max(
                 0,
@@ -575,7 +844,7 @@ public:
                 return FSMStateName::SKILL_COOLDOWN;
             }
             sc_.skill_cmd = FSMCommand::INVALID;
-            return FSMStateName::SKILL_BEYOND_MIMIC;
+            return self_state_name_;
         }
         action_complete_hold_steps_ = 0;
 
@@ -592,7 +861,7 @@ public:
             return FSMStateName::FIXEDPOSE;
         }
         sc_.skill_cmd = FSMCommand::INVALID;
-        return FSMStateName::SKILL_BEYOND_MIMIC;
+        return self_state_name_;
     }
 
 private:
@@ -605,6 +874,9 @@ private:
     std::vector<std::string>         output_names_owned_;
     std::vector<const char*>         input_names_;
     std::vector<const char*>         output_names_;
+    FSMStateName                     self_state_name_{ FSMStateName::SKILL_BEYOND_MIMIC };
+    bool                             require_motion_file_{ false };
+    bool                             use_external_motion_{ false };
 
     // ── config + derived arrays ───────────────────────────────────
     BeyondMimicConfig                cfg_;
@@ -620,6 +892,8 @@ private:
     int                              history_length_{ 1 };
     int                              anchor_body_idx_{ 7 };
     int                              model_motion_length_{ 0 };
+    int                              ref_body_count_{ 14 };
+    int                              motion_length_from_file_{ 0 };
 
     // ── runtime buffers ───────────────────────────────────────────
     std::vector<float> action_buf_;
@@ -640,8 +914,118 @@ private:
     std::vector<float> paused_ref_joint_pos_;
     std::vector<float> paused_ref_joint_vel_;
     std::vector<float> paused_ref_body_quat_w_;
+    std::vector<float> motion_joint_pos_;    // [T, na]
+    std::vector<float> motion_joint_vel_;    // [T, na]
+    std::vector<float> motion_body_quat_w_;  // [T, B, 4]
 
     // ── helpers ───────────────────────────────────────────────────
+
+    void load_external_motion(const std::string& npz_path)
+    {
+        auto entries = npzutil::read_npz_entries(npz_path);
+        auto it_pos = entries.find("joint_pos");
+        auto it_vel = entries.find("joint_vel");
+        auto it_quat = entries.find("body_quat_w");
+        if (it_pos == entries.end() || it_vel == entries.end() || it_quat == entries.end()) {
+            throw std::runtime_error("motion_file must contain joint_pos/joint_vel/body_quat_w");
+        }
+        auto joint_pos = npzutil::parse_npy_f32(it_pos->second);
+        auto joint_vel = npzutil::parse_npy_f32(it_vel->second);
+        auto body_quat = npzutil::parse_npy_f32(it_quat->second);
+        if (joint_pos.shape.size() != 2 || joint_vel.shape.size() != 2) {
+            throw std::runtime_error("joint_pos/joint_vel must be [T, num_actions]");
+        }
+        if (body_quat.shape.size() != 3 || body_quat.shape[2] != 4) {
+            throw std::runtime_error("body_quat_w must be [T, B, 4]");
+        }
+
+        size_t T = joint_pos.shape[0];
+        if (joint_vel.shape[0] != T || body_quat.shape[0] != T) {
+            throw std::runtime_error("motion_file arrays have mismatched time dimension");
+        }
+        if (T == 0) throw std::runtime_error("motion_file is empty");
+
+        auto pad_rows = [](const std::vector<float>& src, size_t rows, size_t cols_src, size_t cols_dst) {
+            std::vector<float> dst(rows * cols_dst, 0.0f);
+            size_t copy_cols = std::min(cols_src, cols_dst);
+            for (size_t r = 0; r < rows; r++) {
+                const float* s = src.data() + r * cols_src;
+                float* d = dst.data() + r * cols_dst;
+                std::copy(s, s + copy_cols, d);
+            }
+            return dst;
+        };
+        motion_joint_pos_ = pad_rows(joint_pos.data, T, joint_pos.shape[1], (size_t)na_);
+        motion_joint_vel_ = pad_rows(joint_vel.data, T, joint_vel.shape[1], (size_t)na_);
+
+        size_t src_body_count = body_quat.shape[1];
+        std::vector<int> body_ids;
+        if (!cfg_.motion_body_ids.empty()) {
+            body_ids = cfg_.motion_body_ids;
+            int target_body_count = ref_body_count_;
+            if ((int)body_ids.size() != target_body_count) {
+                printf("[TrackMimic][WARN] motion_body_ids len=%zu != target_body_count=%d\n",
+                       body_ids.size(), target_body_count);
+            }
+        } else {
+            int target_body_count = ref_body_count_;
+            if ((int)src_body_count == target_body_count) {
+                body_ids.reserve(src_body_count);
+                for (size_t i = 0; i < src_body_count; i++) body_ids.push_back((int)i);
+            } else if ((int)src_body_count > target_body_count) {
+                printf("[TrackMimic][WARN] motion bodies=%zu > target_body_count=%d; using first %d\n",
+                       src_body_count, target_body_count, target_body_count);
+                body_ids.reserve((size_t)target_body_count);
+                for (int i = 0; i < target_body_count; i++) body_ids.push_back(i);
+            } else {
+                throw std::runtime_error(
+                    "motion body count " + std::to_string(src_body_count)
+                    + " < target_body_count " + std::to_string(target_body_count));
+            }
+        }
+        if (body_ids.empty()) {
+            throw std::runtime_error("resolved empty motion body id list");
+        }
+        ref_body_count_ = (int)body_ids.size();
+        motion_body_quat_w_.assign(T * (size_t)ref_body_count_ * 4, 0.0f);
+        for (size_t t = 0; t < T; t++) {
+            for (int b = 0; b < ref_body_count_; b++) {
+                int src_b = body_ids[b];
+                if (src_b < 0 || (size_t)src_b >= src_body_count) {
+                    throw std::runtime_error("motion_body_ids contains out-of-range index");
+                }
+                const size_t src_off = (t * src_body_count + (size_t)src_b) * 4;
+                const size_t dst_off = (t * (size_t)ref_body_count_ + (size_t)b) * 4;
+                std::copy(body_quat.data.begin() + (ptrdiff_t)src_off,
+                          body_quat.data.begin() + (ptrdiff_t)src_off + 4,
+                          motion_body_quat_w_.begin() + (ptrdiff_t)dst_off);
+            }
+        }
+
+        motion_length_from_file_ = (int)T;
+        if (cfg_.motion_length > 0) cfg_.motion_length = std::min(cfg_.motion_length, motion_length_from_file_);
+        else                        cfg_.motion_length = motion_length_from_file_;
+        ref_body_quat_w_.assign((size_t)ref_body_count_ * 4, 0.0f);
+        ref_body_quat_w_[0] = 1.0f;
+    }
+
+    void set_ref_from_motion(int step)
+    {
+        if (!use_external_motion_ || motion_length_from_file_ <= 0) return;
+        int idx = step % motion_length_from_file_;
+        if (idx < 0) idx += motion_length_from_file_;
+        size_t off_joint = (size_t)idx * (size_t)na_;
+        size_t off_body = (size_t)idx * (size_t)ref_body_count_ * 4;
+        std::copy(motion_joint_pos_.begin() + (ptrdiff_t)off_joint,
+                  motion_joint_pos_.begin() + (ptrdiff_t)off_joint + na_,
+                  ref_joint_pos_.begin());
+        std::copy(motion_joint_vel_.begin() + (ptrdiff_t)off_joint,
+                  motion_joint_vel_.begin() + (ptrdiff_t)off_joint + na_,
+                  ref_joint_vel_.begin());
+        std::copy(motion_body_quat_w_.begin() + (ptrdiff_t)off_body,
+                  motion_body_quat_w_.begin() + (ptrdiff_t)off_body + (size_t)ref_body_count_ * 4,
+                  ref_body_quat_w_.begin());
+    }
 
     /** Parse model metadata to set obs_names, per_frame_dim, history_length. */
     void parse_metadata()
@@ -691,6 +1075,9 @@ private:
         std::string anchor_name    = get_meta("anchor_body_name");
         if (!body_names_str.empty() && !anchor_name.empty()) {
             auto bnames = split_csv(body_names_str);
+            if (!bnames.empty()) {
+                ref_body_count_ = std::max(1, (int)bnames.size());
+            }
             for (int i = 0; i < (int)bnames.size(); i++) {
                 if (bnames[i] == anchor_name) { anchor_body_idx_ = i; break; }
             }
@@ -766,7 +1153,7 @@ private:
     /** Extract ref anchor quaternion [w,x,y,z] from ref_body_quat_w_. */
     qmath::Vec4 get_ref_anchor_quat() const
     {
-        int idx = std::min(anchor_body_idx_, 13);
+        int idx = std::clamp(anchor_body_idx_, 0, std::max(0, ref_body_count_ - 1));
         int off = idx * 4;
         if (off + 3 >= (int)ref_body_quat_w_.size())
             return {1,0,0,0};
@@ -836,7 +1223,9 @@ private:
     static void copy_tensor(const Ort::Value& t, std::vector<float>& dst, int n)
     {
         const float* ptr = t.GetTensorData<float>();
-        for (int i = 0; i < n && i < (int)dst.size(); i++)
+        size_t elem_count = t.GetTensorTypeAndShapeInfo().GetElementCount();
+        size_t m = std::min({ (size_t)std::max(0, n), dst.size(), elem_count });
+        for (size_t i = 0; i < m; i++)
             dst[i] = std::isfinite(ptr[i]) ? ptr[i] : 0.f;
     }
 
@@ -874,10 +1263,11 @@ private:
                 input_names_.data(), inputs.data(), inputs.size(),
                 output_names_.data(), n_outputs_);
             copy_tensor(out[0], action_buf_,    na_);
-            copy_tensor(out[1], ref_joint_pos_, na_);
-            copy_tensor(out[2], ref_joint_vel_, na_);
-            if (n_outputs_ > 4)
-                copy_tensor(out[4], ref_body_quat_w_, 14*4);
+            if (!use_external_motion_) {
+                if (n_outputs_ > 1) copy_tensor(out[1], ref_joint_pos_, na_);
+                if (n_outputs_ > 2) copy_tensor(out[2], ref_joint_vel_, na_);
+                if (n_outputs_ > 4) copy_tensor(out[4], ref_body_quat_w_, ref_body_count_ * 4);
+            }
         } catch (...) {}
     }
 

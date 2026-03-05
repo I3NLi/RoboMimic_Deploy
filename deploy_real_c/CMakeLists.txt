@@ -9,6 +9,7 @@ find_package(unitree_sdk2 REQUIRED)
 
 # ── yaml-cpp ───────────────────────────────────────────────────────────────────
 find_package(yaml-cpp REQUIRED)
+find_package(ZLIB REQUIRED)
 
 # ── ONNX Runtime ───────────────────────────────────────────────────────────────
 # Bypass the broken cmake targets file (it points to lib64/ instead of lib/).
@@ -64,6 +65,7 @@ target_link_libraries(deploy_real_onnx
     unitree_sdk2
     pthread
     yaml-cpp
+    ZLIB::ZLIB
     "${ORT_SO}"
 )
 target_compile_options(deploy_real_onnx PRIVATE -O2 -Wall -Wextra)

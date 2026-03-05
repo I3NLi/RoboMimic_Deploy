@@ -57,7 +57,20 @@ cd /home/hiyio/RoboMimic_Deploy
   --shadow \
   --sync-lowstate \
   --net lo \
-  --yaml policy/beyond_mimic/config/BeyondMimic.yaml
+  --yaml policy/beyond_mimic/config/BeyondMimic.yaml \
+  --shadow-state beyond
+```
+
+TrackMimic 对比模式：
+
+```bash
+./deploy_real_c/build/deploy_real_onnx \
+  --shadow \
+  --sync-lowstate \
+  --net lo \
+  --yaml policy/beyond_mimic/config/BeyondMimic.yaml \
+  --track-yaml policy/track_mimic/config/BeyondMimic.yaml \
+  --shadow-state track
 ```
 
 ## 4. 命令行参数
@@ -66,6 +79,7 @@ cd /home/hiyio/RoboMimic_Deploy
 - `--joints N`：关节数（默认 29）
 - `--yaml PATH`：BeyondMimic YAML 配置路径
 - `--track-yaml PATH`：TrackMimic YAML 配置路径（可选）
+- `--shadow-state {beyond|track}`：`--shadow` 启动后自动 force 的 FSM 状态（默认 `beyond`）
 - `--shadow`：跳过 `zero_torque_state()` 启动等待（用于仿真对比）
 - `--sync-lowstate`：按 LowState tick 驱动控制循环（推荐用于 shadow compare）
 - `--safety`：启用安全过滤器
@@ -96,9 +110,9 @@ cd /home/hiyio/RoboMimic_Deploy
 - `SKILL_CAST`：ONNX 实现（15DoF 下肢 + 上肢插值）
 - `SKILL_COOLDOWN`：ONNX 实现（15DoF 下肢 + 上肢回归）
 - `SKILL_BEYOND_MIMIC`：ONNX 实现，已用于严格对比验证
-- `SKILL_TRACK_MIMIC`：可通过 `--track-yaml` 注册 ONNX；未注册时回退到占位模式
+- `SKILL_TRACK_MIMIC`：ONNX + `motion_file(npz)` 实现；需通过 `--track-yaml` 注册，未注册时回退占位模式
 - `JOINT_ZERO_CHECK`：已实现（配置镜像）
-- `IMU_CALIB`：已实现（配置镜像）
+- `IMU_CALIB`：已实现（运行时复用 LocoMode 输出）
 
 ## 7. 一键验证（推荐）
 
@@ -106,6 +120,14 @@ cd /home/hiyio/RoboMimic_Deploy
 
 ```bash
 bash start_compare.sh --verify --net lo
+```
+
+TrackMimic 验证：
+
+```bash
+bash start_compare.sh --verify --net lo \
+  --shadow-state track \
+  --track-yaml policy/track_mimic/config/BeyondMimic.yaml
 ```
 
 该命令会：
