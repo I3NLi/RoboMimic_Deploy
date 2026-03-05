@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c \"import pynput\")",
+      "Bash(python3 -c \"import pynput; print\\(pynput.__version__\\)\")",
+      "Bash(pip3 show pynput)",
+      "Bash(cmd.exe /c \"where python\")",
+      "Bash(cmd.exe /c \"python --version\")"
+    ]
+  }
+}

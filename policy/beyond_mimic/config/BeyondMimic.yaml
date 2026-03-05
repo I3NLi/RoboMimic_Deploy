@@ -1,4 +1,4 @@
-onnx_path: "gvhmr/2026-02-11_11-49-25_GVHMR_telegram_0039+Tracking-Flat-G1-Wo-State-Estimation-v0.onnx"
+onnx_path: "C:/G1_Deploy/policy/beyond_mimic/model/2026_03_04_20_55_27_img_0714_216_20260304_011711+Tracking_Flat_G.onnx"
 motion_length: 0
 # 动作结束后自动切回 LOCO 的延时（秒）：
 #   < 0: 不自动返回（保持在 SKILL_BEYOND_MIMIC）
