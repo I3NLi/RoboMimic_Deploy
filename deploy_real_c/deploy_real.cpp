@@ -171,6 +171,7 @@ struct Config {
     bool  safety_dry_run          = false;
     bool  safety_log_events       = true;
     bool  sync_on_lowstate        = false;  // shadow compare helper
+    bool  wait_for_lowstate_on_init = true;
     int   command_hold_frames     = 3;
     float max_action_abs          = 3.5f;
     float max_action_delta        = 0.25f;
@@ -1162,7 +1163,11 @@ public:
         state_sub_.InitChannel(
             [this](const void* msg) { this->low_state_handler(msg); }, 10);
 
-        wait_for_low_state();
+        if (config_.wait_for_lowstate_on_init) {
+            wait_for_low_state();
+        } else {
+            printf("[Controller] Init without blocking for LowState (shadow prewarm).\n");
+        }
         init_cmd();
 
         printf("[Controller] Ready — %d joints @ %.0f Hz, safety=%s\n",
@@ -1460,6 +1465,11 @@ int main(int argc, char* argv[])
             config.num_joints = std::atoi(arg.c_str());  // positional arg 2: joints
         }
     }
+    if (shadow) {
+        // In shadow-compare, avoid blocking constructor on first LowState.
+        // This lets policy/model load run in parallel with MuJoCo startup.
+        config.wait_for_lowstate_on_init = false;
+    }
 
     printf("=== RoboMimic Deploy Real (C++ version) ===\n");
     printf("Interface : %s\n", config.net.c_str());
@@ -1469,6 +1479,7 @@ int main(int argc, char* argv[])
     printf("Safety    : %s\n", config.safety_enable ? "enabled" : "disabled");
     printf("Shadow    : %s\n", shadow ? "yes (no zero_torque wait)" : "no");
     printf("SyncTick  : %s\n", config.sync_on_lowstate ? "yes" : "no");
+    printf("WaitState : %s\n", config.wait_for_lowstate_on_init ? "yes" : "no (shadow prewarm)");
 #ifdef ENABLE_BEYOND_MIMIC
     printf("ONNX yaml : %s\n", yaml_path.empty() ? "(none)" : yaml_path.c_str());
     printf("Track yaml: %s\n", track_yaml_path.empty() ? "(none)" : track_yaml_path.c_str());

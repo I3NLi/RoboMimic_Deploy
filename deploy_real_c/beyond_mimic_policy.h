@@ -621,10 +621,16 @@ public:
 
     void run() override
     {
+        int ref_step = counter_step_;
+        if (self_state_name_ == FSMStateName::SKILL_TRACK_MIMIC &&
+            sc_.policy_step_override >= 0) {
+            ref_step = sc_.policy_step_override;
+        }
+
         bool paused = sc_.pause;
         if (paused && !paused_ref_valid_) {
             if (use_external_motion_) {
-                set_ref_from_motion(counter_step_);
+                set_ref_from_motion(ref_step);
             }
             paused_ref_joint_pos_  = ref_joint_pos_;
             paused_ref_joint_vel_  = ref_joint_vel_;
@@ -639,7 +645,7 @@ public:
             ref_joint_vel_    = paused_ref_joint_vel_;
             ref_body_quat_w_  = paused_ref_body_quat_w_;
         } else if (use_external_motion_) {
-            set_ref_from_motion(counter_step_);
+            set_ref_from_motion(ref_step);
         }
 
         // ── read + sanitize state ─────────────────────────────────
@@ -730,8 +736,7 @@ public:
             int loop_steps = get_loop_steps();
             step_val = (float)(counter_step_ % std::max(1, loop_steps));
         }
-        if (self_state_name_ != FSMStateName::SKILL_TRACK_MIMIC &&
-            sc_.policy_step_override >= 0)
+        if (sc_.policy_step_override >= 0)
             step_val = (float)sc_.policy_step_override;
 
         std::vector<Ort::Value> inputs;

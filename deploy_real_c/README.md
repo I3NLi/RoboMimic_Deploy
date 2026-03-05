@@ -80,7 +80,7 @@ TrackMimic 对比模式：
 - `--yaml PATH`：BeyondMimic YAML 配置路径
 - `--track-yaml PATH`：TrackMimic YAML 配置路径（可选）
 - `--shadow-state {beyond|track}`：`--shadow` 启动后自动 force 的 FSM 状态（默认 `beyond`）
-- `--shadow`：跳过 `zero_torque_state()` 启动等待（用于仿真对比）
+- `--shadow`：跳过 `zero_torque_state()` 启动等待，并启用 LowState 非阻塞预热（用于仿真对比）
 - `--sync-lowstate`：按 LowState tick 驱动控制循环（推荐用于 shadow compare）
 - `--safety`：启用安全过滤器
 - `--dry-run`：只算不发
@@ -169,6 +169,8 @@ bash start_compare.sh --verify --net lo \
 ### 8.3 verify 偶发首段误差偏大
 
 建议保持默认 `warmup_steps=80`，避免初始两帧姿态对齐阶段影响统计。
+
+在 `--shadow --sync-lowstate` 下，控制器会先完成策略加载再等待 LowState tick 驱动，从而避免 TrackMimic 因启动相位错位导致的早期大误差。
 
 ### 8.4 SkillCast/SkillCooldown 模型格式
 
