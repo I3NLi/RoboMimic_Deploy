@@ -13,7 +13,7 @@ import os
 
 # Set this to an absolute config path to override the default config file.
 # Leave empty to use ./config/BeyondMimic.yaml
-BEYOND_MIMIC_CONFIG_PATH = ""
+BEYOND_MIMIC_CONFIG_PATH = "C:/G1_Deploy/policy/beyond_mimic/config/BeyondMimic_20260307_000502_lexiang.yaml"
 
 
 class BeyondMimic(FSMState):

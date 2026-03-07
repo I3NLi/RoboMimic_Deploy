@@ -49,8 +49,11 @@ class FSM:
         
         print("initalized all policies!!!")
         
-        self.cur_policy = self.passive_mode
+        # Default boot policy: start directly in BeyondMimic.
+        self.cur_policy = self.beyond_mimic_policy
+        self.cur_policy.enter()
         print("current policy is ", self.cur_policy.name_str)
+        self._print_mode_hints(self.cur_policy.name)
         
         
         

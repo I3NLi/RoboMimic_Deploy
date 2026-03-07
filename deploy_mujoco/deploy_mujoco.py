@@ -72,6 +72,25 @@ def sanitize_ctrl(ctrl, model, fallback=None):
     return np.clip(out, -300.0, 300.0).astype(np.float32)
 
 
+_DIM_WARNED = set()
+
+
+def align_joint_vec(vec, size, name):
+    """Pad/trim vectors to current robot joint count."""
+    arr = np.asarray(vec, dtype=np.float32).reshape(-1)
+    n = arr.size
+    if n == size:
+        return arr.copy()
+    key = (name, n, size)
+    if key not in _DIM_WARNED:
+        mode = "trim" if n > size else "pad"
+        print(f"[DimAlign] {name}: {n} -> {size} ({mode})")
+        _DIM_WARNED.add(key)
+    out = np.zeros(size, dtype=np.float32)
+    out[: min(n, size)] = arr[: min(n, size)]
+    return out
+
+
 def randomize_cube_obstacles(model, data, cfg):
     """Randomize cube obstacle poses/colors by body name prefix.
 
@@ -563,9 +582,11 @@ if __name__ == "__main__":
                         state_cmd.ang_vel = omega.copy()
 
                         FSM_controller.run()
-                        policy_output_action = policy_output.actions.copy()
-                        kps = policy_output.kps.copy()
-                        kds = policy_output.kds.copy()
+                        policy_output_action = align_joint_vec(
+                            policy_output.actions, num_joints, "policy_output.actions"
+                        )
+                        kps = align_joint_vec(policy_output.kps, num_joints, "policy_output.kps")
+                        kds = align_joint_vec(policy_output.kds, num_joints, "policy_output.kds")
 
                         policy_output_action, kps, kds, force_damping = safety.filter_actions(
                             policy_output_action, kps, kds

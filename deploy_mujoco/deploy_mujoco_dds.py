@@ -340,6 +340,25 @@ def sanitize_ctrl(ctrl, model, fallback=None):
     return np.clip(out, -300.0, 300.0).astype(np.float32)
 
 
+_DIM_WARNED = set()
+
+
+def align_joint_vec(vec, size, name):
+    """Pad/trim vectors to current robot joint count."""
+    arr = np.asarray(vec, dtype=np.float32).reshape(-1)
+    n = arr.size
+    if n == size:
+        return arr.copy()
+    key = (name, n, size)
+    if key not in _DIM_WARNED:
+        mode = "trim" if n > size else "pad"
+        print(f"[DimAlign] {name}: {n} -> {size} ({mode})")
+        _DIM_WARNED.add(key)
+    out = np.zeros(size, dtype=np.float32)
+    out[: min(n, size)] = arr[: min(n, size)]
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -576,9 +595,11 @@ def main():
 
                     # ── Python policy ─────────────────────────────────────
                     fsm_ctrl.run()
-                    py_actions = policy_output.actions.copy()
-                    py_kps     = policy_output.kps.copy()
-                    py_kds     = policy_output.kds.copy()
+                    py_actions = align_joint_vec(
+                        policy_output.actions, num_joints, "policy_output.actions"
+                    )
+                    py_kps = align_joint_vec(policy_output.kps, num_joints, "policy_output.kps")
+                    py_kds = align_joint_vec(policy_output.kds, num_joints, "policy_output.kds")
 
                     py_actions, py_kps, py_kds, force_damping = safety.filter_actions(
                         py_actions, py_kps, py_kds

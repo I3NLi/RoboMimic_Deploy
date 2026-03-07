@@ -28,6 +28,25 @@ from common.safety import load_safety_config, SafetyFilter, HoldToConfirm
 from config import Config
 
 
+_DIM_WARNED = set()
+
+
+def align_joint_vec(vec, size, name):
+    """Pad/trim vectors to current robot joint count."""
+    arr = np.asarray(vec, dtype=np.float32).reshape(-1)
+    n = arr.size
+    if n == size:
+        return arr.copy()
+    key = (name, n, size)
+    if key not in _DIM_WARNED:
+        mode = "trim" if n > size else "pad"
+        print(f"[DimAlign] {name}: {n} -> {size} ({mode})")
+        _DIM_WARNED.add(key)
+    out = np.zeros(size, dtype=np.float32)
+    out[: min(n, size)] = arr[: min(n, size)]
+    return out
+
+
 class Controller:
     def __init__(self, config: Config):
         self.config = config
@@ -175,9 +194,11 @@ class Controller:
             self.state_cmd.base_quat = quat
             
             self.FSM_controller.run()
-            policy_output_action = self.policy_output.actions.copy()
-            kps = self.policy_output.kps.copy()
-            kds = self.policy_output.kds.copy()
+            policy_output_action = align_joint_vec(
+                self.policy_output.actions, self.num_joints, "policy_output.actions"
+            )
+            kps = align_joint_vec(self.policy_output.kps, self.num_joints, "policy_output.kps")
+            kds = align_joint_vec(self.policy_output.kds, self.num_joints, "policy_output.kds")
 
             policy_output_action, kps, kds, force_damping = self.safety.filter_actions(
                 policy_output_action, kps, kds
