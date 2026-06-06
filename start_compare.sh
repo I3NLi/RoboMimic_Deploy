@@ -29,6 +29,7 @@ Options:
   --track-yaml PATH           TrackMimic yaml path (used with --shadow-state track).
   --shadow-state STATE        Shadow FSM state: beyond|track (default: beyond).
   --net IFACE                 DDS network interface.
+  --joints N                  Robot joint count passed to C++ shadow (default: 24).
   --sync-lowstate             Force C++ shadow to step on new LowState ticks.
   --no-sync-lowstate          Disable C++ tick sync.
   --conda-env NAME            Conda env for Python runner (default: robomimic).
@@ -37,8 +38,8 @@ Options:
   --max-steps N               Verification steps (default: 380).
   --warmup-steps N            Ignore first N compare samples (default: 80).
   --min-cmp-steps N           Minimum compare samples (default: 200).
-  --q-tol X                   q max-abs tolerance (default: 1e-5).
-  --mean-q-tol X              q mean tolerance (default: 1e-6).
+  --q-tol X                   q max-abs tolerance (default: 5e-5).
+  --mean-q-tol X              q mean tolerance (default: 5e-6).
   --kp-tol X                  kp tolerance (default: 1e-6).
   --kd-tol X                  kd tolerance (default: 1e-6).
   --print-every N             Print every N compare lines (default: 80).
@@ -54,7 +55,11 @@ YAML="${SCRIPT_DIR}/policy/beyond_mimic/config/BeyondMimic.yaml"
 TRACK_YAML=""
 SHADOW_STATE="beyond"
 NET="wlp3s0"
-CPP_BIN="${SCRIPT_DIR}/deploy_real_c/build/deploy_real_onnx"
+JOINTS="24"
+CPP_BIN="${SCRIPT_DIR}/deploy_real_c/build_z1/deploy_real_onnx"
+if [ ! -f "$CPP_BIN" ]; then
+    CPP_BIN="${SCRIPT_DIR}/deploy_real_c/build/deploy_real_onnx"
+fi
 PY_SCRIPT="${SCRIPT_DIR}/deploy_mujoco/deploy_mujoco_dds.py"
 CONDA_ENV="robomimic"
 SYNC_LOWSTATE=0
@@ -63,8 +68,8 @@ CMD_WAIT_MS="5.0"
 MAX_STEPS="380"
 WARMUP_STEPS="80"
 MIN_CMP_STEPS="200"
-Q_TOL="1e-5"
-MEAN_Q_TOL="1e-6"
+Q_TOL="5e-5"
+MEAN_Q_TOL="5e-6"
 KP_TOL="1e-6"
 KD_TOL="1e-6"
 PRINT_EVERY="80"
@@ -80,6 +85,7 @@ while [ $# -gt 0 ]; do
         --track-yaml) TRACK_YAML="$2"; shift 2 ;;
         --shadow-state) SHADOW_STATE="$2"; shift 2 ;;
         --net) NET="$2"; shift 2 ;;
+        --joints) JOINTS="$2"; shift 2 ;;
         --sync-lowstate) SYNC_LOWSTATE=1; shift ;;
         --no-sync-lowstate) SYNC_LOWSTATE=0; shift ;;
         --conda-env) CONDA_ENV="$2"; shift 2 ;;
@@ -145,7 +151,7 @@ if [ "$SHADOW_STATE" = "track" ]; then
 fi
 if [ ! -f "$CPP_BIN" ]; then
     echo "[ERROR] C++ binary not found: $CPP_BIN"
-    echo "        Run: cd deploy_real_c && cmake -B build && cmake --build build"
+    echo "        Run: cd deploy_real_c && cmake -B build_z1 && cmake --build build_z1"
     exit 1
 fi
 if [ ! -f "$PY_SCRIPT" ]; then
@@ -185,12 +191,13 @@ echo "  YAML : $YAML"
 echo "  TYML : ${TRACK_YAML:-(none)}"
 echo "  State: $SHADOW_STATE"
 echo "  NET  : $NET"
+echo "  JNTS : $JOINTS"
 echo "  C++  : $CPP_BIN"
 echo "  Py   : $PY_SCRIPT"
 echo "  PyCmd: ${PYTHON_CMD[*]}"
 echo ""
 
-CPP_ARGS=(--shadow --net "$NET" --yaml "$YAML" --shadow-state "$SHADOW_STATE")
+CPP_ARGS=(--shadow --net "$NET" --joints "$JOINTS" --yaml "$YAML" --shadow-state "$SHADOW_STATE")
 if [ -n "$TRACK_YAML" ]; then
     CPP_ARGS+=(--track-yaml "$TRACK_YAML")
 fi

@@ -121,17 +121,29 @@ pip install -e .
 - Dance / whole-body tracking: `policy/beyond_mimic/model/policy.onnx`
 - BeyondMimic source:
   `/home/hiyio/whole_body_tracking/logs/rsl_rl/magicbot_z1_flat/2026-05-03_13-51-53_magicbot_spike_smooth_head_aligned_to_aiming1_height+Tracking-Flat-MagicBot-Z1-Wo-State-Estimation-v0_resume-model_124000/exported/policy.onnx`
-- ONNX shape: `obs [1,124]` + `time_step [1,1]`, 24-DoF action output with embedded reference trajectory, motion length `5515`.
+- ONNX shape: `obs [1,124]` + `time_step [1,1]`, 24-DoF action output with embedded reference trajectory, motion length `3309`.
 ---
 ## 4. Real Robot Operation Instructions
 
-1. Power on the robot and suspend it (e.g., with a harness). and then hold L2+R2
-2. Run the deploy_real program:
+For MagicBot Z1 real-robot work, prefer the official MagicBot SDK backend:
+
 ```bash
-python deploy_real/deploy_real.py
+cd /home/hiyio/MaigcLab/RoboMimic_Deploy_magicbot
+deploy_real/run_magicbot_loco.sh --dry-run
+deploy_real/run_magicbot_loco.sh --connect-check --local-ip 192.168.54.119
+deploy_real/run_magicbot_loco.sh --read-state --local-ip 192.168.54.119 --duration 3
 ```
-3. Press the ​​Start​​ button to enter position control mode.
-4. Subsequent operations are the same as in simulation.
+
+Safe sequence:
+
+1. Suspend the robot and verify the emergency stop / power-off path.
+2. `--dry-run`: load the RoboMimic loco YAML/ONNX only; no robot connection.
+3. `--connect-check`: connect/disconnect through the SDK only; no LowLevel switch.
+4. `--read-state`: switch `HighLevel -> GAIT_RECOVERY_STAND -> LowLevel`, subscribe low-level states, and publish no `JointCommand`.
+5. Only after the checks pass, explicitly use `--run --stand-only --duration N` or `--run --duration N`.
+
+The legacy `deploy_real/deploy_real.py` path is still Unitree DDS
+`rt/lowcmd`/`rt/lowstate`; it is not the current MagicBot Z1 real-robot backend.
 
 ---
 ## Debug Safety (New)
@@ -142,12 +154,11 @@ python deploy_real/deploy_real.py
 ---
 ## Important Notes
 ### 1. Framework Compatibility Notice
-The original framework targeted G1; this workspace is now adapted for MagicBot Z1 simulation. Real-robot deployment still needs a full Z1 SDK and motor-order audit. For onboard Orin deployment, we recommend the following alternative solution:
+The original framework targeted G1; this workspace is now adapted for MagicBot Z1 simulation. Real-robot deployment must use the MagicBot Z1 SDK and the audited physical motor order.
 
-- Replace with [unitree_sdk2](https://github.com/unitreerobotics/unitree_sdk2) (official C++ SDK)
-- Implement a dual-node ROS architecture:
-  - **C++ Node**: Handles data transmission between robot and controller
-  - **Python Node**: Dedicated to policy inference
+- `deploy_real/run_magicbot_loco.sh` is the new MagicBot SDK loco backend.
+- `deploy_real/deploy_real.py` and `deploy_real_c` still keep the Unitree DDS / shadow-compare logic and should not be treated as the MagicBot Z1 real-robot backend.
+- The BeyondMimic/dance SDK backend still needs to be ported from the simulation policy; do not run it directly on the real robot yet.
 
 ### 2. Mimic Policy Reliability Warning
 The Mimic policy does not guarantee 100% success rate, particularly on slippery/sandy surfaces. In case of robot instability:

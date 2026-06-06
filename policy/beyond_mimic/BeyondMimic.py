@@ -6,10 +6,14 @@ from collections import Counter
 import numpy as np
 import yaml
 from common.utils import FSMCommand, progress_bar
-import onnx
 import onnxruntime
-import torch
 import os
+
+try:
+    import onnx
+except Exception as exc:
+    onnx = None
+    print(f"[BeyondMimic][WARN] onnx import failed, graph metadata inference disabled: {exc}")
 
 # Optional hardcoded override for local debugging.
 # Leave empty in normal usage and use env var BEYOND_MIMIC_CONFIG_PATH when needed.
@@ -118,20 +122,25 @@ class BeyondMimic(FSMState):
             self.ref_body_lin_vel_w = np.zeros((1, 14, 3), dtype=np.float32)
             self.ref_body_ang_vel_w = np.zeros((1, 14, 3), dtype=np.float32)
             # load policy
-            self.onnx_model = onnx.load(self.onnx_path)
+            self.onnx_model = onnx.load(self.onnx_path) if onnx is not None else None
             self.ort_session = onnxruntime.InferenceSession(self.onnx_path)
             ort_inputs = self.ort_session.get_inputs()
             self.input_name = [getattr(inpt, "name", inpt) for inpt in ort_inputs]
 
-            metadata = {p.key: p.value for p in self.onnx_model.metadata_props}
+            metadata = self._load_onnx_metadata()
             meta_motion_len = self._get_meta_int(metadata, ["motion_length", "motion_len", "traj_length"])
             if meta_motion_len is not None:
                 self.model_motion_length = int(meta_motion_len)
-            else:
+            elif self.onnx_model is not None:
                 graph_motion_len = self._infer_motion_length_from_graph(self.onnx_model)
                 if graph_motion_len is not None:
                     self.model_motion_length = int(graph_motion_len)
                     print(f"[BeyondMimic] motion_length inferred from ONNX graph: {self.model_motion_length}")
+            elif self.motion_length <= 0:
+                print(
+                    "[BeyondMimic][WARN] model motion_length unavailable without onnx; "
+                    "set motion_length explicitly in YAML for non-loop playback."
+                )
 
             # Keep negative YAML motion_length as loop-mode flag.
             # For non-negative values, prefer model-provided trajectory length when available.
@@ -388,7 +397,23 @@ class BeyondMimic(FSMState):
                 continue
         return None
 
+    def _load_onnx_metadata(self) -> dict:
+        metadata = {}
+        if self.onnx_model is not None:
+            try:
+                metadata.update({p.key: p.value for p in self.onnx_model.metadata_props})
+            except Exception:
+                pass
+        try:
+            ort_metadata = self.ort_session.get_modelmeta().custom_metadata_map
+            metadata.update(dict(ort_metadata or {}))
+        except Exception:
+            pass
+        return metadata
+
     def _infer_motion_length_from_graph(self, onnx_model) -> int | None:
+        if onnx is None:
+            return None
         # Infer trajectory length from ONNX graph constants used by time_step gathers.
         try:
             graph = onnx_model.graph

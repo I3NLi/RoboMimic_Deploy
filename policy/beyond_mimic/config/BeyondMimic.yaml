@@ -1,6 +1,6 @@
 onnx_path: "policy.onnx"
 
-motion_length: 0
+motion_length: 3309
 motion_start_step: 0
 switch_to_loco_delay_s: -1.0
 hold_last_frame_on_complete: true

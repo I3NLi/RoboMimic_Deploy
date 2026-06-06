@@ -131,28 +131,36 @@ pip install -e .
 - 舞蹈/全身跟踪：`policy/beyond_mimic/model/policy.onnx`
 - BeyondMimic 来源：
   `/home/hiyio/whole_body_tracking/logs/rsl_rl/magicbot_z1_flat/2026-05-03_13-51-53_magicbot_spike_smooth_head_aligned_to_aiming1_height+Tracking-Flat-MagicBot-Z1-Wo-State-Estimation-v0_resume-model_124000/exported/policy.onnx`
-- ONNX 形态：`obs [1,124]` + `time_step [1,1]`，输出 24DoF actions 和内嵌参考轨迹，motion length 为 `5515`
+- ONNX 形态：`obs [1,124]` + `time_step [1,1]`，输出 24DoF actions 和内嵌参考轨迹，motion length 为 `3309`
 ---
 ## 4. 真机操作说明
-1. 开机后将机器人吊起来，按L2+R2进入调试模式
+当前 Z1 真机入口优先使用 MagicBot 官方 SDK 后端：
 
-2. 运行deploy_real程序：
 ```bash
-python deploy_real/deploy_real.py
+cd /home/hiyio/MaigcLab/RoboMimic_Deploy_magicbot
+deploy_real/run_magicbot_loco.sh --dry-run
+deploy_real/run_magicbot_loco.sh --connect-check --local-ip 192.168.54.119
+deploy_real/run_magicbot_loco.sh --read-state --local-ip 192.168.54.119 --duration 3
 ```
-3. Start键进入位控模式
 
-4. 后续操作与仿真中一致
+安全顺序：
+
+1. 机器人吊起，确认急停/断电链路可用。
+2. `--dry-run`：只加载 RoboMimic loco YAML/ONNX，不连接机器人。
+3. `--connect-check`：只连接/断开 SDK，不切 LowLevel。
+4. `--read-state`：按 `HighLevel -> GAIT_RECOVERY_STAND -> LowLevel` 顺序切入，只订阅低层状态，不发布 `JointCommand`。
+5. 只有在上述检查通过后，才允许显式使用 `--run --stand-only --duration N` 或 `--run --duration N`。
+
+旧的 `deploy_real/deploy_real.py` 仍是 Unitree DDS `rt/lowcmd`/`rt/lowstate` 架构，不是当前 MagicBot Z1 实机入口。
 
 ---
 ## 注意事项
 ### 1. 框架兼容性说明
-原始框架面向 G1；当前工作区已改为 MagicBot Z1 仿真适配。真机侧仍需按 Z1 SDK 和实际电机顺序重新核对部署链路。针对机载 Orin 平台的部署需求，建议采用以下替代方案：
+原始框架面向 G1；当前工作区已改为 MagicBot Z1 仿真适配。真机侧必须使用 MagicBot Z1 SDK 和实际电机顺序重新核对部署链路。
 
-- 使用[unitree_sdk2](https://github.com/unitreerobotics/unitree_sdk2)替代原Python SDK
-- 基于ROS构建双节点架构：
-  - **C++节点**：负责机器人与遥控器之间的数据收发
-  - **Python节点**：专用于策略推理
+- `deploy_real/run_magicbot_loco.sh` 是当前新增的 MagicBot SDK loco 后端。
+- `deploy_real/deploy_real.py` 和 `deploy_real_c` 仍保留 Unitree DDS/shadow compare 逻辑，不能直接视为 MagicBot Z1 真机后端。
+- BeyondMimic/舞蹈真机 SDK 后端仍需继续从仿真策略迁移，当前不要直接上实机。
 
 ### 2. Mimic策略可靠性警告
 Mimic策略不保证100%成功率，特别是在湿滑/沙地等复杂地面上。若出现机器人失控情况：
