@@ -40,7 +40,7 @@ class LocoMode(FSMState):
             self.ang_vel_scale = config["ang_vel_scale"]
             self.dof_pos_scale = config["dof_pos_scale"]
             self.dof_vel_scale = config["dof_vel_scale"]
-            self.action_scale = config["action_scale"]
+            self.action_scale = np.array(config["action_scale"], dtype=np.float32)
             self.cmd_scale = np.array(config["cmd_scale"], dtype=np.float32)
             cmd_deadzone = config.get("cmd_deadzone", 0.0)
             self.cmd_deadzone = np.array(cmd_deadzone, dtype=np.float32)
@@ -176,19 +176,9 @@ class LocoMode(FSMState):
     
     def checkChange(self):
         if(self.state_cmd.skill_cmd == FSMCommand.SKILL_1):
-            return FSMStateName.SKILL_Dance
-        elif(self.state_cmd.skill_cmd == FSMCommand.SKILL_2):
-            return FSMStateName.SKILL_KungFu
-        elif(self.state_cmd.skill_cmd == FSMCommand.SKILL_3):
-            return FSMStateName.SKILL_KICK
+            return FSMStateName.SKILL_BEYOND_MIMIC
         elif(self.state_cmd.skill_cmd == FSMCommand.SKILL_4):
             return FSMStateName.SKILL_BEYOND_MIMIC
-        elif(self.state_cmd.skill_cmd == FSMCommand.SKILL_5):
-            return FSMStateName.JOINT_ZERO_CHECK
-        elif(self.state_cmd.skill_cmd == FSMCommand.SKILL_6):
-            return FSMStateName.IMU_CALIB
-        elif(self.state_cmd.skill_cmd == FSMCommand.SKILL_7):
-            return FSMStateName.SKILL_TRACK_MIMIC
         elif(self.state_cmd.skill_cmd == FSMCommand.PASSIVE):
             return FSMStateName.PASSIVE
         else:

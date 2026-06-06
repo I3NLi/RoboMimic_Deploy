@@ -6,16 +6,16 @@
 </div>
 
 <p align="center">
-  <strong>​RoboMimic Deploy​​ is a multi-policy robot deployment framework based on a state-switching mechanism. Currently, the included policies are designed for the ​​Unitree G1 robot (29-DoF)​​.</strong> 
+  <strong>​RoboMimic Deploy​​ is a multi-policy robot deployment framework based on a state-switching mechanism. This workspace is currently adapted for MagicBot Z1 24-DoF MuJoCo deployment.</strong> 
 </p>
 
 ## Preface
 
-- **​This deployment framework is only applicable to G1 robots with a 3-DOF waist. If a waist fixing bracket is installed, it must be unlocked according to the official tutorial before this framework can be used normally.​​**
+- **This `/home/hiyio/MaigcLab/RoboMimic_Deploy_magicbot` workspace uses the MagicBot Z1 24-DoF configuration, not the original G1 29-DoF setup.**
 
-- **It is recommended to remove the hands, as dance movements may cause interference.​**
+- **The MuJoCo XML is `/home/hiyio/HoloMotion/thirdparties/GMR/assets/magicbot_z1/mjcf/MAGICBOTZ1.xml`.**
   
-- **When deploying real robots, if something goes wrong, it's probably the policy's fault—not your hardware. Don't waste time second-guessing your robot's physical setup.**
+- **The current validated target is simulation. For real-robot deployment, re-check the Z1 SDK, motor order, limits, initial pose, and emergency stop path first.**
 
 - **[video instruction](https://www.bilibili.com/video/BV1VTKHzSE6C/?vd_source=713b35f59bdf42930757aea07a44e7cb#reply114743994027967)**
 
@@ -83,7 +83,7 @@ pip install -e .
 
 ## 1. Run Mujoco Simulation
 ```bash
-python deploy_mujoco/deploy_mujoco.py
+/home/hiyio/anaconda3/envs/robomimic/bin/python -u deploy_mujoco/deploy_mujoco.py
 ```
 
 ## 2. Policy Descriptions
@@ -91,8 +91,9 @@ python deploy_mujoco/deploy_mujoco.py
 |------------------|-----------------------------------------------------------------------------|
 | **PassiveMode**  | Damping protection mode                                                     |
 | **FixedPose**    | Position control reset to default joint values                              |
-| **LocoMode**     | Stable walking control mode                                                 |
-| **Dance**        | Charleston dance routine                                                    |
+| **LocoMode**     | Z1 locomotion entry still needs re-adaptation from the LeggedLab config; current dance testing can bypass it |
+| **BeyondMimic**  | Z1 24-DoF dance / whole-body tracking policy: `policy/beyond_mimic/model/policy.onnx` |
+| **Dance**        | Legacy entry; current Z1 dance routing is mapped to BeyondMimic             |
 | **KungFu**       | Martial arts movement                                                       |
 | **KungFu2**      | Failed martial arts training                                     |
 | **Kick**         | Bad mimic policy                                     |
@@ -105,19 +106,22 @@ python deploy_mujoco/deploy_mujoco.py
 1. Connect an Xbox controller.
 2. Run the simulation program:
 ```bash
-python deploy_mujoco/deploy_mujoco.py
+/home/hiyio/anaconda3/envs/robomimic/bin/python -u deploy_mujoco/deploy_mujoco.py
 ```
-3. Press the ​​Start​​ button to enter position control mode.
-4. Hold ​​R1 + A​​ to enter ​​LocoMode​​, then press BACKSPACE in the simulation to make the robot stand. Afterward, use the joystick to control walking.
-5. Hold ​​R1 + X​​ to enter ​​Dance​​ mode—the robot will perform the Charleston. In this mode:
-    - Press ​​Select​​ at any time to switch to damping protection mode.
-    - Hold ​​R1 + A​​ to return to walking mode (not recommended).
-    - Press ​​Start​​ to return to position control mode.
+3. The program starts in `PassiveMode`.
+4. Hold `START` to enter `FixedPose`.
+5. Hold `R1 + A` to enter `LocoMode`; walk still needs full re-adaptation from the LeggedLab config, so dance testing does not require this mode.
+6. In `FixedPose` or `LocoMode`, hold `R1 + X` or `L1 + Y` to enter `BeyondMimic` and run the current Z1 dance / whole-body tracking policy.
+7. In `BeyondMimic`, press `UP` to pause/resume the reference frame, hold `R1 + A` to return to locomotion, press `START` for position reset, or press `L3` for damping protection.
+8. Hold `SELECT` to exit the MuJoCo control program.
 
-6. The terminal will display a progress bar for the dance. After completion, press ​​R1 + A​​ to return to normal walking mode.
-7. In ​​LocoMode​​, pressing ​​R1 + Y​​ triggers a Martial arts movement —​ ​use only in simulation​​.
-8. In ​​LocoMode​​, pressing ​​L1 + Y​​ triggers a Martial arts movement(Failed) —​ ​use only in simulation​​.
-9. In ​​LocoMode​​, pressing ​​R1 + B​ triggers a Kick movement(Failed) —​ ​use only in simulation​​.
+### Current Z1 Policy Baseline
+
+- Locomotion: not switched to the latest LeggedLab strategy yet; it needs re-adaptation of observations, normalization, joint order, and action scaling from `/home/hiyio/LeggedLab`
+- Dance / whole-body tracking: `policy/beyond_mimic/model/policy.onnx`
+- BeyondMimic source:
+  `/home/hiyio/whole_body_tracking/logs/rsl_rl/magicbot_z1_flat/2026-05-03_13-51-53_magicbot_spike_smooth_head_aligned_to_aiming1_height+Tracking-Flat-MagicBot-Z1-Wo-State-Estimation-v0_resume-model_124000/exported/policy.onnx`
+- ONNX shape: `obs [1,124]` + `time_step [1,1]`, 24-DoF action output with embedded reference trajectory, motion length `5515`.
 ---
 ## 4. Real Robot Operation Instructions
 
@@ -138,7 +142,7 @@ python deploy_real/deploy_real.py
 ---
 ## Important Notes
 ### 1. Framework Compatibility Notice
-The current framework does not natively support deployment on G1 robots equipped with Orin NX platforms. Preliminary analysis suggests compatibility issues with the `unitree_python_sdk` on Orin systems. For onboard Orin deployment, we recommend the following alternative solution:
+The original framework targeted G1; this workspace is now adapted for MagicBot Z1 simulation. Real-robot deployment still needs a full Z1 SDK and motor-order audit. For onboard Orin deployment, we recommend the following alternative solution:
 
 - Replace with [unitree_sdk2](https://github.com/unitreerobotics/unitree_sdk2) (official C++ SDK)
 - Implement a dual-node ROS architecture:
@@ -150,11 +154,12 @@ The Mimic policy does not guarantee 100% success rate, particularly on slippery/
 - Press `F1` to activate **PassiveMode** (damping protection)
 - Press `Select` to immediately terminate the control program
 
-### 3. Charleston Dance (R1+X) - Stable Policy Notes
-Currently the only verified stable policy on physical robots:
+### 3. Z1 BeyondMimic Dance - Current Baseline
+The current Z1 dance entry is `BeyondMimic`, not the legacy `policy/dance/Dance.py` path:
 
 ⚠️ **Important Precautions**:
-- **Palm Removal Recommended**: The original training didn't account for palm collisions (author's G1 lacked palms)
+- **Model Path**: `policy/beyond_mimic/model/policy.onnx`
+- **Control Entry**: `R1 + X` or `L1 + Y`
 - **Initial/Final Stabilization**: Brief manual stabilization may be required when starting/ending the dance
 - **Post-Dance Transition**: While switching to **Locomotion/PositionControl/PassiveMode** is possible, we recommend:
   - First transition to **PositionControl** or **PassiveMode**

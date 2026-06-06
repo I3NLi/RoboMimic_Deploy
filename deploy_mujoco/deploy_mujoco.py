@@ -27,12 +27,26 @@ except Exception:
     HeadCameraRos2Publisher = None
 
 
+class NullJoyStick:
+    def update(self):
+        return None
+
+    def is_button_pressed(self, _button_id):
+        return False
+
+    def is_button_released(self, _button_id):
+        return False
+
+    def get_axis_value(self, _axis_id):
+        return 0.0
+
+
 def pd_control(target_q, q, kp, target_dq, dq, kd):
     """Calculates torques from position commands"""
     return (target_q - q) * kp + (target_dq - dq) * kd
 
 
-def sanitize_ctrl(ctrl, model, fallback=None):
+def sanitize_ctrl(ctrl, model, fallback=None, ctrl_limit=None):
     """Ensure finite actuator controls and clamp to actuator ctrlrange if available."""
     out = np.asarray(ctrl, dtype=np.float32).reshape(-1)
     if fallback is None:
@@ -46,6 +60,12 @@ def sanitize_ctrl(ctrl, model, fallback=None):
         out = np.where(finite_mask, out, fallback)
     out = np.nan_to_num(out, nan=0.0, posinf=0.0, neginf=0.0)
 
+    if ctrl_limit is not None:
+        limit = np.asarray(ctrl_limit, dtype=np.float32).reshape(-1)
+        if limit.size == out.size and np.any(limit > 0.0):
+            limit = np.maximum(limit, 0.0)
+            return np.clip(out, -limit, limit).astype(np.float32)
+
     ctrl_range = getattr(model, "actuator_ctrlrange", None)
     if ctrl_range is not None and ctrl_range.shape[0] == out.size:
         lo = ctrl_range[:, 0]
@@ -57,6 +77,183 @@ def sanitize_ctrl(ctrl, model, fallback=None):
     return np.clip(out, -300.0, 300.0).astype(np.float32)
 
 
+def resolve_project_path(path_value):
+    if not path_value:
+        return None
+    path_value = os.path.expanduser(os.path.expandvars(str(path_value)))
+    if os.path.isabs(path_value):
+        return path_value
+    return os.path.join(PROJECT_ROOT, path_value)
+
+
+def load_initial_joint_targets(yaml_path, num_joints):
+    """Load lab-order BeyondMimic joint values and map them into MuJoCo actuator order."""
+    if not yaml_path or not os.path.isfile(yaml_path):
+        return None, None, None, None
+    with open(yaml_path, "r") as f:
+        cfg = yaml.load(f, Loader=yaml.FullLoader) or {}
+
+    mj2lab = np.array(cfg.get("mj2lab", []), dtype=np.int32)
+    default_lab = np.array(cfg.get("default_angles_lab", []), dtype=np.float32)
+    kp_lab = np.array(cfg.get("kp_lab", []), dtype=np.float32)
+    kd_lab = np.array(cfg.get("kd_lab", []), dtype=np.float32)
+    tau_lab = np.array(cfg.get("tau_limit", []), dtype=np.float32)
+
+    if mj2lab.size == 0 or default_lab.size == 0:
+        return None, None, None, None
+
+    default_mj = np.zeros(num_joints, dtype=np.float32)
+    kp_mj = np.zeros(num_joints, dtype=np.float32)
+    kd_mj = np.zeros(num_joints, dtype=np.float32)
+    tau_mj = np.zeros(num_joints, dtype=np.float32)
+
+    for lab_idx, mj_idx in enumerate(mj2lab):
+        if not (0 <= mj_idx < num_joints):
+            continue
+        if lab_idx < default_lab.size:
+            default_mj[mj_idx] = default_lab[lab_idx]
+        if lab_idx < kp_lab.size:
+            kp_mj[mj_idx] = kp_lab[lab_idx]
+        if lab_idx < kd_lab.size:
+            kd_mj[mj_idx] = kd_lab[lab_idx]
+        if lab_idx < tau_lab.size:
+            tau_mj[mj_idx] = tau_lab[lab_idx]
+    return default_mj, kp_mj, kd_mj, tau_mj
+
+
+def parse_initial_command(name):
+    if not name:
+        return FSMCommand.INVALID
+    key = str(name).strip().upper()
+    return getattr(FSMCommand, key, FSMCommand.INVALID)
+
+
+def parse_bool(value, default=False):
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+    return default
+
+
+def actuator_joint_indices(model):
+    """Return qpos/qvel indices in actuator order, excluding the floating base offsets."""
+    qpos_idx = np.zeros(model.nu, dtype=np.int32)
+    qvel_idx = np.zeros(model.nu, dtype=np.int32)
+    for actuator_id in range(model.nu):
+        joint_id = int(model.actuator_trnid[actuator_id, 0])
+        qpos_idx[actuator_id] = int(model.jnt_qposadr[joint_id] - 7)
+        qvel_idx[actuator_id] = int(model.jnt_dofadr[joint_id] - 6)
+    return qpos_idx, qvel_idx
+
+
+def get_actuator_order_state(data, qpos_idx, qvel_idx):
+    return data.qpos[7 + qpos_idx].copy(), data.qvel[6 + qvel_idx].copy()
+
+
+def fit_vector(values, size, fill=0.0):
+    out = np.full(size, fill, dtype=np.float32)
+    if values is None:
+        return out
+    arr = np.asarray(values, dtype=np.float32).reshape(-1)
+    n = min(size, arr.size)
+    if n > 0:
+        out[:n] = arr[:n]
+    return out
+
+
+def set_ghost_pose_from_policy(ghost_data, sim_data, policy, qpos_actuator_idx, num_joints):
+    """Update ghost qpos from the active mimic policy reference joint pose."""
+    ref_joint_pos = getattr(policy, "ref_joint_pos", None)
+    mj2lab = getattr(policy, "mj2lab", None)
+    if ref_joint_pos is None or mj2lab is None:
+        return False
+
+    ref_lab = fit_vector(ref_joint_pos, num_joints)
+    mj2lab = np.asarray(mj2lab, dtype=np.int32).reshape(-1)
+    if mj2lab.size == 0:
+        return False
+
+    ref_mj = np.zeros(num_joints, dtype=np.float32)
+    for lab_idx, mj_idx in enumerate(mj2lab):
+        if lab_idx < ref_lab.size and 0 <= mj_idx < num_joints:
+            ref_mj[mj_idx] = ref_lab[lab_idx]
+
+    ghost_data.qpos[:] = sim_data.qpos
+    ghost_data.qvel[:] = 0.0
+    ghost_data.qpos[7 + qpos_actuator_idx] = ref_mj
+    return True
+
+
+def update_ghost_scene(model, ghost_data, viewer, rgba):
+    """Render a transparent reference robot through viewer.user_scn."""
+    user_scn = getattr(viewer, "user_scn", None)
+    if user_scn is None:
+        return
+    mujoco.mj_forward(model, ghost_data)
+    mujoco.mjv_updateScene(
+        model,
+        ghost_data,
+        viewer.opt,
+        None,
+        viewer.cam,
+        int(mujoco.mjtCatBit.mjCAT_DYNAMIC),
+        user_scn,
+    )
+    rgba = np.asarray(rgba, dtype=np.float32).reshape(-1)
+    if rgba.size != 4:
+        rgba = np.array([0.1, 0.6, 1.0, 0.28], dtype=np.float32)
+    for geom_id in range(user_scn.ngeom):
+        user_scn.geoms[geom_id].rgba[:] = rgba
+
+
+def clear_ghost_scene(viewer):
+    user_scn = getattr(viewer, "user_scn", None)
+    if user_scn is not None:
+        user_scn.ngeom = 0
+
+
+def resolve_contact_geom_ids(model, body_keywords):
+    keywords = [str(v).lower() for v in (body_keywords or []) if str(v).strip()]
+    if not keywords:
+        return set(range(model.ngeom))
+    geom_ids = set()
+    for geom_id in range(model.ngeom):
+        body_id = int(model.geom_bodyid[geom_id])
+        body_name = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_BODY, body_id) or ""
+        body_name = body_name.lower()
+        if any(keyword in body_name for keyword in keywords):
+            geom_ids.add(geom_id)
+    return geom_ids
+
+
+def correct_ground_penetration(model, data, floor_geom_id, contact_geom_ids, max_penetration):
+    if floor_geom_id < 0 or max_penetration is None or max_penetration < 0:
+        return 0.0
+    min_dist = 0.0
+    for contact_id in range(data.ncon):
+        contact = data.contact[contact_id]
+        geom1 = int(contact.geom1)
+        geom2 = int(contact.geom2)
+        if geom1 == floor_geom_id and geom2 in contact_geom_ids:
+            min_dist = min(min_dist, float(contact.dist))
+        elif geom2 == floor_geom_id and geom1 in contact_geom_ids:
+            min_dist = min(min_dist, float(contact.dist))
+
+    allowed_dist = -float(max_penetration)
+    if min_dist >= allowed_dist:
+        return 0.0
+
+    correction = allowed_dist - min_dist
+    data.qpos[2] += correction
+    if data.qvel.shape[0] > 2 and data.qvel[2] < 0.0:
+        data.qvel[2] = 0.0
+    mujoco.mj_forward(model, data)
+    return correction
+
+
 if __name__ == "__main__":
     current_dir = os.path.dirname(os.path.abspath(__file__))
     mujoco_yaml_path = os.path.join(current_dir, "config", "mujoco.yaml")
@@ -65,6 +262,13 @@ if __name__ == "__main__":
         xml_path = os.path.join(PROJECT_ROOT, config["xml_path"])
         simulation_dt = config["simulation_dt"]
         control_decimation = config["control_decimation"]
+        render_fps = float(config.get("render_fps", 60))
+        perf_log_interval_s = float(config.get("perf_log_interval_s", 0.0))
+        initial_pose_yaml = resolve_project_path(config.get("initial_pose_yaml", None))
+        initial_command = parse_initial_command(config.get("initial_command", ""))
+        abnormal_log_interval = max(1, int(config.get("abnormal_torque_log_interval_steps", 100)))
+        ground_correction_cfg = config.get("ground_penetration_correction", {}) or {}
+        ghost_cfg = config.get("ghost", {}) or {}
 
     safety_yaml_path = os.path.join(current_dir, "config", "safety.yaml")
     safety_cfg = load_safety_config(safety_yaml_path)
@@ -81,19 +285,52 @@ if __name__ == "__main__":
 
     m = mujoco.MjModel.from_xml_path(xml_path)
     d = mujoco.MjData(m)
+    ghost_d = mujoco.MjData(m)
     m.opt.timestep = simulation_dt
     mj_per_step_duration = simulation_dt * control_decimation
     num_joints = m.nu
+    qpos_actuator_idx, qvel_actuator_idx = actuator_joint_indices(m)
     policy_output_action = np.zeros(num_joints, dtype=np.float32)
     kps = np.zeros(num_joints, dtype=np.float32)
     kds = np.zeros(num_joints, dtype=np.float32)
     sim_counter = 0
+    last_abnormal_log_step = -abnormal_log_interval
+    ground_correction_enable = parse_bool(ground_correction_cfg.get("enable", False), False)
+    ground_correction_floor_id = mujoco.mj_name2id(
+        m,
+        mujoco.mjtObj.mjOBJ_GEOM,
+        str(ground_correction_cfg.get("floor_geom", "floor")),
+    )
+    ground_correction_geom_ids = resolve_contact_geom_ids(
+        m,
+        ground_correction_cfg.get("body_keywords", []),
+    )
+    ground_correction_max_penetration = float(ground_correction_cfg.get("max_penetration", 0.0))
+    ghost_enable = parse_bool(ghost_cfg.get("enable", False), False)
+    ghost_alpha = float(ghost_cfg.get("alpha", 0.28))
+    ghost_rgba = np.asarray(ghost_cfg.get("rgba", [0.1, 0.6, 1.0, ghost_alpha]), dtype=np.float32)
+    if ghost_rgba.size != 4:
+        ghost_rgba = np.array([0.1, 0.6, 1.0, ghost_alpha], dtype=np.float32)
+    ghost_rgba[3] = ghost_alpha
+
+    init_q, init_kp, init_kd, ctrl_limit = load_initial_joint_targets(initial_pose_yaml, num_joints)
+    if init_q is not None:
+        d.qpos[7 + qpos_actuator_idx] = init_q
+        d.qvel[:] = 0.0
+        mujoco.mj_forward(m, d)
+        policy_output_action = init_q.copy()
+        if init_kp is not None:
+            kps = init_kp.copy()
+        if init_kd is not None:
+            kds = init_kd.copy()
+        print(f"[MuJoCo] initialized joint pose from {initial_pose_yaml}")
 
     state_cmd = StateAndCmd(num_joints)
     policy_output = PolicyOutput(num_joints)
     FSM_controller = FSM(state_cmd, policy_output)
     safety = SafetyFilter(num_joints, safety_cfg)
     command_gate = HoldToConfirm(safety_cfg.command_hold_frames)
+    state_cmd.skill_cmd = initial_command
 
     head_cam_stream = None
     if head_cam_enable:
@@ -138,69 +375,35 @@ if __name__ == "__main__":
                 head_cam_ros2 = None
                 print(f"[CameraROS2] failed to start: {e}")
 
-    joystick = JoyStick()
+    try:
+        joystick = JoyStick()
+    except RuntimeError as e:
+        print(f"[Joystick][WARN] {e} Falling back to neutral NullJoyStick.")
+        joystick = NullJoyStick()
     Running = True
     try:
         with mujoco.viewer.launch_passive(m, d) as viewer:
-            sim_start_time = time.time()
+            wall_start_time = time.perf_counter()
+            last_viewer_sync_time = wall_start_time
+            render_interval = 1.0 / max(render_fps, 1e-6)
+            last_perf_log_time = wall_start_time
+            last_perf_log_step = sim_counter
             while viewer.is_running() and Running:
                 try:
-                    if(joystick.is_button_pressed(JoystickButton.SELECT)):
-                        Running = False
-
-                    joystick.update()
-                    if joystick.is_button_released(JoystickButton.L3):
-                        state_cmd.skill_cmd = FSMCommand.PASSIVE
-                    if joystick.is_button_released(JoystickButton.UP):
-                        state_cmd.skill_cmd = FSMCommand.PAUSE
-                    if command_gate.trigger("POS_RESET", joystick.is_button_pressed(JoystickButton.START)):
-                        state_cmd.skill_cmd = FSMCommand.POS_RESET
-                    if command_gate.trigger(
-                        "LOCO",
-                        joystick.is_button_pressed(JoystickButton.A) and joystick.is_button_pressed(JoystickButton.R1),
-                    ):
-                        state_cmd.skill_cmd = FSMCommand.LOCO
-                    if command_gate.trigger(
-                        "SKILL_1",
-                        joystick.is_button_pressed(JoystickButton.X) and joystick.is_button_pressed(JoystickButton.R1),
-                    ):
-                        state_cmd.skill_cmd = FSMCommand.SKILL_1
-                    if command_gate.trigger(
-                        "SKILL_2",
-                        joystick.is_button_pressed(JoystickButton.Y) and joystick.is_button_pressed(JoystickButton.R1),
-                    ):
-                        state_cmd.skill_cmd = FSMCommand.SKILL_2
-                    if joystick.is_button_released(JoystickButton.B) and joystick.is_button_pressed(JoystickButton.R1):
-                        state_cmd.skill_cmd = FSMCommand.SKILL_3
-                    if command_gate.trigger(
-                        "SKILL_4",
-                        joystick.is_button_pressed(JoystickButton.Y) and joystick.is_button_pressed(JoystickButton.L1),
-                    ):
-                        state_cmd.skill_cmd = FSMCommand.SKILL_4
-                    if joystick.is_button_released(JoystickButton.B) and joystick.is_button_pressed(JoystickButton.L1):
-                        state_cmd.skill_cmd = FSMCommand.SKILL_5
-                    if command_gate.trigger(
-                        "SKILL_6",
-                        joystick.is_button_pressed(JoystickButton.X) and joystick.is_button_pressed(JoystickButton.L1),
-                    ):
-                        state_cmd.skill_cmd = FSMCommand.SKILL_6
-                    if command_gate.trigger(
-                        "SKILL_7",
-                        joystick.is_button_pressed(JoystickButton.A) and joystick.is_button_pressed(JoystickButton.L1),
-                    ):
-                        state_cmd.skill_cmd = FSMCommand.SKILL_7
-
-                    state_cmd.vel_cmd[0] = -joystick.get_axis_value(1)
-                    state_cmd.vel_cmd[1] = -joystick.get_axis_value(0)
-                    state_cmd.vel_cmd[2] = -joystick.get_axis_value(3)
-
-                    step_start = time.time()
-
-                    raw_tau = pd_control(policy_output_action, d.qpos[7:], kps, np.zeros_like(kps), d.qvel[6:], kds)
-                    fallback_tau = -safety_cfg.damping_kd * np.asarray(d.qvel[6:], dtype=np.float32)
-                    tau = sanitize_ctrl(raw_tau, m, fallback=fallback_tau)
+                    q_act, dq_act = get_actuator_order_state(d, qpos_actuator_idx, qvel_actuator_idx)
+                    raw_tau = pd_control(policy_output_action, q_act, kps, np.zeros_like(kps), dq_act, kds)
+                    fallback_tau = -safety_cfg.damping_kd * np.asarray(dq_act, dtype=np.float32)
+                    tau = sanitize_ctrl(raw_tau, m, fallback=fallback_tau, ctrl_limit=ctrl_limit)
                     if (not np.isfinite(raw_tau).all()) or np.max(np.abs(raw_tau)) > 1e4:
-                        print("[Safety] abnormal torque detected; sanitized before applying ctrl.")
+                        if sim_counter - last_abnormal_log_step >= abnormal_log_interval:
+                            last_abnormal_log_step = sim_counter
+                            max_tau = float(np.nanmax(np.abs(raw_tau))) if raw_tau.size else 0.0
+                            max_q = float(np.nanmax(np.abs(q_act))) if q_act.size else 0.0
+                            max_dq = float(np.nanmax(np.abs(dq_act))) if dq_act.size else 0.0
+                            print(
+                                "[Safety] abnormal torque detected; sanitized before applying ctrl. "
+                                f"max_tau={max_tau:.1f} max_q={max_q:.3f} max_dq={max_dq:.1f}"
+                            )
                     if safety_cfg.dry_run:
                         d.ctrl[:] = 0
                     else:
@@ -211,6 +414,14 @@ if __name__ == "__main__":
                         mujoco.mjv_applyPerturbForce(m, d, viewer.pert)
                     mujoco.mj_step(m, d)
                     sim_counter += 1
+                    if ground_correction_enable:
+                        correct_ground_penetration(
+                            m,
+                            d,
+                            ground_correction_floor_id,
+                            ground_correction_geom_ids,
+                            ground_correction_max_penetration,
+                        )
 
                     if head_cam_stream is not None and (sim_counter % head_cam_every_n_steps == 0):
                         head_cam_stream.update()
@@ -218,9 +429,55 @@ if __name__ == "__main__":
                         head_cam_ros2.publish()
 
                     if sim_counter % control_decimation == 0:
+                        joystick.update()
+                        if joystick.is_button_pressed(JoystickButton.SELECT):
+                            Running = False
+                        if joystick.is_button_released(JoystickButton.L3):
+                            state_cmd.skill_cmd = FSMCommand.PASSIVE
+                        if joystick.is_button_released(JoystickButton.UP):
+                            state_cmd.skill_cmd = FSMCommand.PAUSE
+                        if command_gate.trigger("POS_RESET", joystick.is_button_pressed(JoystickButton.START)):
+                            state_cmd.skill_cmd = FSMCommand.POS_RESET
+                        if command_gate.trigger(
+                            "LOCO",
+                            joystick.is_button_pressed(JoystickButton.A) and joystick.is_button_pressed(JoystickButton.R1),
+                        ):
+                            state_cmd.skill_cmd = FSMCommand.LOCO
+                        if command_gate.trigger(
+                            "SKILL_1",
+                            joystick.is_button_pressed(JoystickButton.X) and joystick.is_button_pressed(JoystickButton.R1),
+                        ):
+                            state_cmd.skill_cmd = FSMCommand.SKILL_1
+                        if command_gate.trigger(
+                            "SKILL_2",
+                            joystick.is_button_pressed(JoystickButton.Y) and joystick.is_button_pressed(JoystickButton.R1),
+                        ):
+                            state_cmd.skill_cmd = FSMCommand.SKILL_2
+                        if joystick.is_button_released(JoystickButton.B) and joystick.is_button_pressed(JoystickButton.R1):
+                            state_cmd.skill_cmd = FSMCommand.SKILL_3
+                        if command_gate.trigger(
+                            "SKILL_4",
+                            joystick.is_button_pressed(JoystickButton.Y) and joystick.is_button_pressed(JoystickButton.L1),
+                        ):
+                            state_cmd.skill_cmd = FSMCommand.SKILL_4
+                        if joystick.is_button_released(JoystickButton.B) and joystick.is_button_pressed(JoystickButton.L1):
+                            state_cmd.skill_cmd = FSMCommand.SKILL_5
+                        if command_gate.trigger(
+                            "SKILL_6",
+                            joystick.is_button_pressed(JoystickButton.X) and joystick.is_button_pressed(JoystickButton.L1),
+                        ):
+                            state_cmd.skill_cmd = FSMCommand.SKILL_6
+                        if command_gate.trigger(
+                            "SKILL_7",
+                            joystick.is_button_pressed(JoystickButton.A) and joystick.is_button_pressed(JoystickButton.L1),
+                        ):
+                            state_cmd.skill_cmd = FSMCommand.SKILL_7
 
-                        qj = d.qpos[7:]
-                        dqj = d.qvel[6:]
+                        state_cmd.vel_cmd[0] = -joystick.get_axis_value(1)
+                        state_cmd.vel_cmd[1] = -joystick.get_axis_value(0)
+                        state_cmd.vel_cmd[2] = -joystick.get_axis_value(3)
+
+                        qj, dqj = get_actuator_order_state(d, qpos_actuator_idx, qvel_actuator_idx)
                         quat = d.qpos[3:7]
 
                         omega = d.qvel[3:6]
@@ -241,7 +498,7 @@ if __name__ == "__main__":
                             policy_output_action, kps, kds
                         )
                         if force_damping:
-                            policy_output_action = d.qpos[7:].copy()
+                            policy_output_action = qj.copy()
                             kps = np.zeros_like(kps)
                             kds = np.ones_like(kds) * safety_cfg.damping_kd
                         if safety_cfg.dry_run:
@@ -250,10 +507,42 @@ if __name__ == "__main__":
                 except ValueError as e:
                     print(str(e))
 
-                viewer.sync()
-                time_until_next_step = m.opt.timestep - (time.time() - step_start)
-                if time_until_next_step > 0:
-                    time.sleep(time_until_next_step)
+                now = time.perf_counter()
+                if now - last_viewer_sync_time >= render_interval:
+                    if ghost_enable:
+                        with viewer.lock():
+                            if set_ghost_pose_from_policy(
+                                ghost_d,
+                                d,
+                                FSM_controller.cur_policy,
+                                qpos_actuator_idx,
+                                num_joints,
+                            ):
+                                update_ghost_scene(m, ghost_d, viewer, ghost_rgba)
+                            else:
+                                clear_ghost_scene(viewer)
+                    else:
+                        with viewer.lock():
+                            clear_ghost_scene(viewer)
+                    viewer.sync()
+                    last_viewer_sync_time = now
+
+                if perf_log_interval_s > 0.0 and now - last_perf_log_time >= perf_log_interval_s:
+                    elapsed = now - last_perf_log_time
+                    steps = sim_counter - last_perf_log_step
+                    sim_hz = steps / max(elapsed, 1e-9)
+                    realtime_factor = sim_hz * simulation_dt
+                    print(
+                        f"[Perf] sim_hz={sim_hz:.1f} realtime={realtime_factor:.2f}x "
+                        f"control_hz={sim_hz / max(control_decimation, 1):.1f} render_fps={render_fps:.1f}"
+                    )
+                    last_perf_log_time = now
+                    last_perf_log_step = sim_counter
+
+                target_wall_time = wall_start_time + sim_counter * simulation_dt
+                sleep_time = target_wall_time - time.perf_counter()
+                if sleep_time > 0:
+                    time.sleep(min(sleep_time, 0.005))
     finally:
         if head_cam_stream is not None:
             head_cam_stream.close()

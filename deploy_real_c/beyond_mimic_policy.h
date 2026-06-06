@@ -33,6 +33,7 @@
 #include <cctype>
 #include <fstream>
 #include <sstream>
+#include <numeric>
 #include <unordered_map>
 #include <regex>
 
@@ -159,6 +160,7 @@ struct BeyondMimicConfig {
     std::string onnx_path;
     std::string motion_file;
     int         motion_length   { 0 };
+    int         motion_start_step { 0 };
     float       switch_to_loco_delay_s { 0.0f };
     bool        use_torso_quat_correction { true };
     int         num_actions     { 29 };
@@ -177,6 +179,10 @@ struct BeyondMimicConfig {
     std::vector<float> action_scale_lab;
     std::vector<int>   mj2lab;
     std::vector<int>   motion_body_ids;
+    std::vector<int>   command_joint_indices;
+    int torso_yaw_idx   { 2 };
+    int torso_roll_idx  { 5 };
+    int torso_pitch_idx { 8 };
 
     static BeyondMimicConfig load(const std::string& yaml_path)
     {
@@ -229,6 +235,8 @@ struct BeyondMimicConfig {
         }
         if (node["motion_length"])
             c.motion_length = node["motion_length"].as<int>();
+        if (node["motion_start_step"])
+            c.motion_start_step = std::max(0, node["motion_start_step"].as<int>());
         if (node["switch_to_loco_delay_s"])
             c.switch_to_loco_delay_s = node["switch_to_loco_delay_s"].as<float>();
         if (node["use_torso_quat_correction"]) {
@@ -273,6 +281,16 @@ struct BeyondMimicConfig {
         read_fvec("action_scale_lab",   c.action_scale_lab);
         read_ivec("mj2lab",             c.mj2lab);
         read_ivec("motion_body_ids",    c.motion_body_ids);
+        read_ivec("command_joint_indices", c.command_joint_indices);
+        if (node["torso_quat_joint_indices"]) {
+            const YAML::Node t = node["torso_quat_joint_indices"];
+            c.torso_yaw_idx = -1;
+            c.torso_roll_idx = -1;
+            c.torso_pitch_idx = -1;
+            if (t["yaw"])   c.torso_yaw_idx   = t["yaw"].as<int>();
+            if (t["roll"])  c.torso_roll_idx  = t["roll"].as<int>();
+            if (t["pitch"]) c.torso_pitch_idx = t["pitch"].as<int>();
+        }
         return c;
     }
 };
@@ -564,6 +582,11 @@ public:
         }
 
         // ── read ONNX metadata ───────────────────────────────────
+        command_joint_indices_ = cfg_.command_joint_indices;
+        if (command_joint_indices_.empty()) {
+            command_joint_indices_.resize((size_t)std::max(0, na_));
+            std::iota(command_joint_indices_.begin(), command_joint_indices_.end(), 0);
+        }
         parse_metadata();
         if (cfg_.motion_length >= 0 && model_motion_length_ > 0) {
             cfg_.motion_length = model_motion_length_;
@@ -601,7 +624,8 @@ public:
 
     void enter() override
     {
-        counter_step_ = 0;
+        counter_step_ = std::max(0, cfg_.motion_start_step);
+        alignment_warmup_counter_ = 0;
         paused_ref_valid_ = false;
         action_complete_hold_steps_ = 0;
         std::fill(obs_history_.begin(), obs_history_.end(), 0.f);
@@ -667,10 +691,9 @@ public:
         using namespace qmath;
         if (cfg_.use_torso_quat_correction) {
             // beyond mimic uses torso as anchor; correct pelvis quat by waist joints
-            // the Python indexing is qj[2]=yaw, qj[5]=roll, qj[8]=pitch in LAB order
-            float torso_yaw   = (na_>2) ? qj[2] : 0.f;
-            float torso_roll  = (na_>5) ? qj[5] : 0.f;
-            float torso_pitch = (na_>8) ? qj[8] : 0.f;
+            float torso_yaw   = torso_joint_angle(qj, cfg_.torso_yaw_idx);
+            float torso_roll  = torso_joint_angle(qj, cfg_.torso_roll_idx);
+            float torso_pitch = torso_joint_angle(qj, cfg_.torso_pitch_idx);
             Vec4 qy = axis_angle_quat(torso_yaw,   'z');
             Vec4 qr = axis_angle_quat(torso_roll,  'x');
             Vec4 qp = axis_angle_quat(torso_pitch, 'y');
@@ -682,11 +705,11 @@ public:
         Vec4 ref_anchor_w = sanitize_quat(get_ref_anchor_quat());
 
         // ── on first 2 steps, compute init→world rotation ─────────
-        if (counter_step_ < 2) {
+        if (alignment_warmup_counter_ < 2) {
             Mat33 init_to_anchor = mat_from_quat(yaw_quat(ref_anchor_w));
             Mat33 world_to_anchor = mat_from_quat(yaw_quat(robot_quat));
             init_to_world_ = matmul(world_to_anchor, mat_T(init_to_anchor));
-            counter_step_++;
+            alignment_warmup_counter_++;
             // Match Python: return early without overriding policy_output.
             return;
         }
@@ -736,7 +759,8 @@ public:
             int loop_steps = get_loop_steps();
             step_val = (float)(counter_step_ % std::max(1, loop_steps));
         }
-        if (sc_.policy_step_override >= 0)
+        if (self_state_name_ == FSMStateName::SKILL_TRACK_MIMIC &&
+            sc_.policy_step_override >= 0)
             step_val = (float)sc_.policy_step_override;
 
         std::vector<Ort::Value> inputs;
@@ -817,6 +841,7 @@ public:
     void exit() override
     {
         counter_step_ = 0;
+        alignment_warmup_counter_ = 0;
         action_complete_hold_steps_ = 0;
         paused_ref_valid_ = false;
         std::fill(action_buf_.begin(),   action_buf_.end(),   0.f);
@@ -890,6 +915,7 @@ private:
     std::vector<float>               kps_mj_;
     std::vector<float>               kds_mj_;
     std::vector<float>               tau_limit_mj_;
+    std::vector<int>                 command_joint_indices_;
 
     // ── model metadata ────────────────────────────────────────────
     std::vector<std::string>         obs_names_;
@@ -912,6 +938,7 @@ private:
         1,0,0, 0,1,0, 0,0,1
     };
     int  counter_step_   { 0 };
+    int  alignment_warmup_counter_ { 0 };
     int  action_complete_hold_steps_ { 0 };
     bool loop_step_warned_ { false };
     float switch_to_loco_dt_ { 0.02f };
@@ -1142,7 +1169,7 @@ private:
     {
         int dim = 0;
         for (auto& n : names) {
-            if (n == "command")               dim += na_ * 2;
+            if (n == "command")               dim += (int)command_joint_indices_.size() * 2;
             else if (n == "motion_anchor_ori_b") dim += 6;
             else if (n == "motion_anchor_pos_b") dim += 3;
             else if (n == "base_gravity" ||
@@ -1179,8 +1206,12 @@ private:
 
         for (auto& name : obs_names_) {
             if (name == "command") {
-                for (float v : ref_joint_pos_) parts.push_back(v);
-                for (float v : ref_joint_vel_) parts.push_back(v);
+                for (int idx : command_joint_indices_) {
+                    parts.push_back((idx >= 0 && idx < (int)ref_joint_pos_.size()) ? ref_joint_pos_[idx] : 0.f);
+                }
+                for (int idx : command_joint_indices_) {
+                    parts.push_back((idx >= 0 && idx < (int)ref_joint_vel_.size()) ? ref_joint_vel_[idx] : 0.f);
+                }
             } else if (name == "motion_anchor_ori_b") {
                 // Match Python: motion_anchor_ori_b[:, :2].reshape(-1)
                 // i.e. first two columns of 3x3, row-major flatten.
@@ -1250,7 +1281,11 @@ private:
     {
         auto mem = Ort::MemoryInfo::CreateCpu(OrtDeviceAllocator, OrtMemTypeCPU);
         std::vector<float> zero_obs(no_, 0.f);
-        float step_val = 0.f;
+        float step_val = (float)counter_step_;
+        if (cfg_.motion_length < 0) {
+            int loop_steps = get_loop_steps();
+            step_val = (float)(counter_step_ % std::max(1, loop_steps));
+        }
         std::array<int64_t,2> obs_shape  {1, (int64_t)no_};
         std::array<int64_t,2> step_shape {1, 1};
 
@@ -1344,6 +1379,12 @@ private:
         if (lab_idx < 0) return -1;
         if (lab_idx >= (int)cfg_.mj2lab.size()) return lab_idx;
         return cfg_.mj2lab[lab_idx];
+    }
+
+    float torso_joint_angle(const std::vector<float>& qj, int idx) const
+    {
+        if (idx < 0 || idx >= (int)qj.size()) return 0.f;
+        return qj[idx];
     }
 
     std::vector<float> gravity_from_quat(const qmath::Vec4& q) const

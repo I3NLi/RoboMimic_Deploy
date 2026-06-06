@@ -1,9 +1,25 @@
-xml_path: "g1_description/scene.xml"
-simulation_dt: 0.003
-control_decimation: 7
+xml_path: "/home/hiyio/HoloMotion/thirdparties/GMR/assets/magicbot_z1/mjcf/MAGICBOTZ1.xml"
+simulation_dt: 0.001
+control_decimation: 20
+render_fps: 60
+perf_log_interval_s: 2.0
+initial_pose_yaml: "deploy_mujoco/config/magicbot_z1_stand.yaml"
+initial_command: "PASSIVE"
+abnormal_torque_log_interval_steps: 100
+
+ghost:
+  enable: true
+  alpha: 0.2
+  rgba: [0.0, 0.85, 0.38, 0.2]
+
+ground_penetration_correction:
+  enable: true
+  floor_geom: "floor"
+  body_keywords: ["ankle_roll_link"]
+  max_penetration: 0.002
 
 head_camera_stream:
-  enable: true
+  enable: false
   camera_name: "head_rgba_camera"
   host: "0.0.0.0"
   port: 18080
@@ -13,7 +29,7 @@ head_camera_stream:
   jpeg_quality: 80
 
 head_camera_ros2:
-  enable: true
+  enable: false
   camera_name: "head_rgba_camera"
   width: 640
   height: 480

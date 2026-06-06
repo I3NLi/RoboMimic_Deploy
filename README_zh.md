@@ -6,16 +6,16 @@
 </div>
 
 <p align="center">
-  🎮🚪 <strong>RoboMimic Deploy 是一个基于状态切换机制的机器人多策略部署框架，目前包含的策略适用于宇树G1机器人(29dof)</strong> 🚪🎮
+  🎮🚪 <strong>RoboMimic Deploy 是一个基于状态切换机制的机器人多策略部署框架。当前工作区已适配 MagicBot Z1 24DoF 仿真部署。</strong> 🚪🎮
 </p>
 
 ## 写在前面
 
-- **本部署框架仅适用于具有三自由度腰部的G1机器人，如果装有腰部固定件的话需要按照官网教程解锁，然后才能正常使用该部署框架。**
+- **当前 `/home/hiyio/MaigcLab/RoboMimic_Deploy_magicbot` 工作区使用 MagicBot Z1 24 自由度模型，不再是原始 G1 29DoF 配置。**
 
-- **建议拆下手掌，舞蹈动作会存在干涉**
+- **MuJoCo XML 使用 `/home/hiyio/HoloMotion/thirdparties/GMR/assets/magicbot_z1/mjcf/MAGICBOTZ1.xml`。**
 
-- **实际机器人部署中出现的问题，十有八九是策略适应性不足所致，大家不必过度怀疑硬件层面的缺陷。**
+- **当前验证重点是仿真环境。真机部署前必须重新确认 SDK、电机顺序、限幅、初始姿态和急停链路。**
 
 - **[视频教程](https://www.bilibili.com/video/BV1VTKHzSE6C/?vd_source=713b35f59bdf42930757aea07a44e7cb#reply114743994027967)**
 
@@ -87,7 +87,7 @@ pip install -e .
 
 ## 1. 运行Mujoco仿真代码
 ```bash
-python deploy_mujoco/deploy_mujoco.py
+/home/hiyio/anaconda3/envs/robomimic/bin/python -u deploy_mujoco/deploy_mujoco.py
 ```
 ---
 ## 2. Policy 说明
@@ -95,8 +95,9 @@ python deploy_mujoco/deploy_mujoco.py
 |------------------|----------------------------------------------------------------------|
 | **PassiveMode**  | 阻尼保护模式                                                         |
 | **FixedPose**    | 位控恢复至默认关节值                                                 |
-| **LocoMode**     | 用于稳定行走的控制模式                                               |
-| **Dance**        | 查尔斯顿舞蹈                                                         |
+| **LocoMode**     | Z1 行走入口仍需按 LeggedLab 配置重新适配；当前 dance 测试可绕开该模式 |
+| **BeyondMimic**  | Z1 24DoF 舞蹈/全身跟踪策略，模型为 `policy/beyond_mimic/model/policy.onnx` |
+| **Dance**        | 旧入口已不作为当前 Z1 舞蹈入口；当前从 FSM 兼容映射到 BeyondMimic |
 | **KungFu**       | 武术动作                                                             |
 | **KungFu2**      | 训练失败的武术动作                                                   |
 | **Kick**         | 拿来凑数的动作                                                       |
@@ -110,21 +111,27 @@ python deploy_mujoco/deploy_mujoco.py
 
 2. 运行仿真程序：
 ```bash
-python deploy_mujoco/deploy_mujoco.py
+/home/hiyio/anaconda3/envs/robomimic/bin/python -u deploy_mujoco/deploy_mujoco.py
 ```
-3. Start键进入位控模式
+3. 默认进入 `PassiveMode` 阻尼保护模式
 
-4. 同时按住R1+A，进入LocoMode，并按下`BACKSPACE`在仿真中使机器人站立，之后能通过摇杆控制机器人行走
+4. 长按 `START` 进入 `FixedPose` 位控站姿
 
-5. 同时按住R1+X，进入Dance，机器人开始跳查尔斯顿舞蹈，在该模式下，可以随时按下Select进入阻尼保护模式，也可以按住R1+A恢复行走模式（不推荐），或按Start进入位控模式（不推荐）
+5. 长按 `R1 + A` 可进入 `LocoMode`，但当前 walk 尚未按 LeggedLab 配置完整重适配，dance 测试不需要使用该模式
 
-6. 终端会显示舞蹈的进度条，结束后可按下R1+A恢复至正常行走模式
+6. 在 `FixedPose` 或 `LocoMode` 下，长按 `R1 + X` 或 `L1 + Y` 进入 `BeyondMimic`，执行当前 Z1 dance/全身跟踪策略
 
-7. 在LocoMode模式下，按R1+Y让机器人表演武术动作，**只推荐在仿真中使用**
+7. 在 `BeyondMimic` 下，按 `UP` 可暂停/恢复参考帧；长按 `R1 + A` 返回行走；按 `START` 回到位控；按 `L3` 进入阻尼保护
 
-8. 在LocoMode模式下，按L1+Y让机器人表演训练失败的武术动作，**只推荐在仿真中使用**
+8. 按住 `SELECT` 会退出 MuJoCo 控制程序
 
-9. 在LocoMode模式下，按R1+B让机器人表演踢腿动作，**只推荐在仿真中使用**
+### 当前 Z1 策略基线
+
+- 行走：暂未切到最新 LeggedLab 策略，后续需要按 `/home/hiyio/LeggedLab` 的观测、归一化、关节顺序和动作缩放重新适配
+- 舞蹈/全身跟踪：`policy/beyond_mimic/model/policy.onnx`
+- BeyondMimic 来源：
+  `/home/hiyio/whole_body_tracking/logs/rsl_rl/magicbot_z1_flat/2026-05-03_13-51-53_magicbot_spike_smooth_head_aligned_to_aiming1_height+Tracking-Flat-MagicBot-Z1-Wo-State-Estimation-v0_resume-model_124000/exported/policy.onnx`
+- ONNX 形态：`obs [1,124]` + `time_step [1,1]`，输出 24DoF actions 和内嵌参考轨迹，motion length 为 `5515`
 ---
 ## 4. 真机操作说明
 1. 开机后将机器人吊起来，按L2+R2进入调试模式
@@ -140,7 +147,7 @@ python deploy_real/deploy_real.py
 ---
 ## 注意事项
 ### 1. 框架兼容性说明
-当前框架暂不支持在搭载Orin NX平台的G1机器人上直接部署。初步分析可能是由于`unitree_python_sdk`在Orin平台上的兼容性问题。针对机载Orin平台的部署需求，建议采用以下替代方案：
+原始框架面向 G1；当前工作区已改为 MagicBot Z1 仿真适配。真机侧仍需按 Z1 SDK 和实际电机顺序重新核对部署链路。针对机载 Orin 平台的部署需求，建议采用以下替代方案：
 
 - 使用[unitree_sdk2](https://github.com/unitreerobotics/unitree_sdk2)替代原Python SDK
 - 基于ROS构建双节点架构：
@@ -152,11 +159,12 @@ Mimic策略不保证100%成功率，特别是在湿滑/沙地等复杂地面上�
 - 按下`F1`键激活**阻尼保护模式**(PassiveMode)
 - 按下`Select`键立即终止控制程序
 
-### 3. 查尔斯顿舞蹈(R1+X) - 稳定策略说明
-目前唯一在真机上验证稳定的策略：
+### 3. Z1 BeyondMimic Dance - 当前稳定基线
+当前 Z1 舞蹈入口是 `BeyondMimic`，不是旧 `policy/dance/Dance.py`：
 
 ⚠️ **重要注意事项**：
-- **建议拆除手掌**：原始训练未考虑手掌碰撞（作者的G1初始无手掌）
+- **模型路径**：`policy/beyond_mimic/model/policy.onnx`
+- **控制入口**：`R1 + X` 或 `L1 + Y`
 - **起止稳定需求**：舞蹈开始/结束时可能需要短暂人工稳定
 - **舞蹈后过渡**：虽然可以切换至**行走模式/位控模式/阻尼模式**，但建议：
   - 先切换至**位控模式**或**阻尼模式**
@@ -172,4 +180,3 @@ Mimic策略不保证100%成功率，特别是在湿滑/沙地等复杂地面上�
 - `deploy_real/config/safety.yaml` 与 `deploy_mujoco/config/safety.yaml` 可配置调试安全参数。
 - 默认开启动作/增益限幅、长按触发（防误触）与故障降级到阻尼模式。
 - 需要干跑时，将 `dry_run: true`（只计算不下发指令）。
-

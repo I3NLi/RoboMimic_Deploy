@@ -34,6 +34,8 @@ class BeyondMimic(FSMState):
         self._switch_to_loco_dt = 0.02
         self._action_complete_hold_steps = 0
         self._loop_step_warned = False
+        self.motion_start_step = 0
+        self._alignment_warmup_counter = 0
         
         current_dir = os.path.dirname(os.path.abspath(__file__))
         env_override = os.environ.get("BEYOND_MIMIC_CONFIG_PATH", "").strip()
@@ -60,8 +62,14 @@ class BeyondMimic(FSMState):
             self.num_actions = config["num_actions"]
             self.num_obs = config["num_obs"]
             self.action_scale_lab = np.array(config["action_scale_lab"], dtype=np.float32)
+            self.command_joint_indices = self._parse_index_list(
+                config.get("command_joint_indices", None),
+                self.num_actions,
+            )
             self.motion_length = int(config.get("motion_length", 0))
+            self.motion_start_step = max(0, int(config.get("motion_start_step", 0)))
             self.switch_to_loco_delay_s = float(config.get("switch_to_loco_delay_s", 0.0))
+            self.torso_quat_joint_indices = config.get("torso_quat_joint_indices", None)
             # Numeric guards (optional in YAML, safe defaults here)
             self.obs_clip = float(config.get("obs_clip", 100.0))
             self.action_clip = float(config.get("action_clip", 20.0))
@@ -178,6 +186,9 @@ class BeyondMimic(FSMState):
 
             print("BeyondMimic-like policy initializing ...")
             print(f"[BeyondMimic] use_torso_quat_correction={self.use_torso_quat_correction}")
+            print(f"[BeyondMimic] command_dim={len(self.command_joint_indices) * 2}")
+            if self.motion_start_step > 0:
+                print(f"[BeyondMimic] motion_start_step={self.motion_start_step}")
 
     def _get_loop_steps(self) -> int:
         # For looping mode (motion_length < 0), prefer model trajectory length.
@@ -199,7 +210,8 @@ class BeyondMimic(FSMState):
     def enter(self):
         self.ref_motion_phase = 0.
         self.motion_time = 0
-        self.counter_step = 0
+        self.counter_step = self.motion_start_step
+        self._alignment_warmup_counter = 0
         self._action_complete_hold_steps = 0
         self._paused_ref_joint_pos = None
         self._paused_ref_joint_vel = None
@@ -207,7 +219,10 @@ class BeyondMimic(FSMState):
 
         observation = {}
         observation[self.input_name[0]] = np.zeros((1, self.num_obs), dtype=np.float32)
-        observation[self.input_name[1]] = np.zeros((1, 1), dtype=np.float32)
+        policy_step = self.counter_step
+        if self.motion_length < 0:
+            policy_step = self.counter_step % self._get_loop_steps()
+        observation[self.input_name[1]] = np.array([[policy_step]], dtype=np.float32)
         outputs_result = self.ort_session.run(None, observation)
         # 处理多个输出
         self.action, self.ref_joint_pos, self.ref_joint_vel, _, self.ref_body_quat_w, _, _ = outputs_result
@@ -324,6 +339,31 @@ class BeyondMimic(FSMState):
             return []
         return [int(float(v)) for v in value.split(',') if v != '']
 
+    def _parse_index_list(self, value, fallback_size: int):
+        if value is None:
+            return np.arange(fallback_size, dtype=np.int32)
+        if isinstance(value, str):
+            raw = [v.strip() for v in value.split(',') if v.strip()]
+            values = [int(float(v)) for v in raw]
+        else:
+            values = [int(v) for v in value]
+        values = [v for v in values if 0 <= v < fallback_size]
+        if not values:
+            return np.arange(fallback_size, dtype=np.int32)
+        return np.array(values, dtype=np.int32)
+
+    def _torso_joint_angle(self, qj, name: str, default_index: int) -> float:
+        raw_indices = self.torso_quat_joint_indices
+        idx = default_index
+        if isinstance(raw_indices, dict):
+            raw = raw_indices.get(name, None)
+            if raw is None:
+                return 0.0
+            idx = int(raw)
+        if idx < 0 or idx >= qj.size:
+            return 0.0
+        return float(qj[idx])
+
     def _get_meta_int(self, metadata: dict, keys: list[str]) -> int | None:
         for key in keys:
             raw = metadata.get(key, "")
@@ -395,7 +435,7 @@ class BeyondMimic(FSMState):
         dim = 0
         for name in names:
             if name == 'command':
-                dim += self.num_actions * 2
+                dim += len(self.command_joint_indices) * 2
             elif name in ('motion_anchor_ori_b',):
                 dim += 6
             elif name in ('motion_anchor_pos_b',):
@@ -440,7 +480,10 @@ class BeyondMimic(FSMState):
 
     def _term_vector(self, name, motion_anchor_ori_b, base_gravity, base_ang_vel, qj, dqj):
         if name == 'command':
-            return np.concatenate((self.ref_joint_pos.squeeze(0), self.ref_joint_vel.squeeze(0)), axis=-1)
+            ref_joint_pos = self._sanitize_vec(self.ref_joint_pos, size=self.num_actions, clip=self.q_clip)
+            ref_joint_vel = self._sanitize_vec(self.ref_joint_vel, size=self.num_actions, clip=self.dq_clip)
+            idx = self.command_joint_indices
+            return np.concatenate((ref_joint_pos[idx], ref_joint_vel[idx]), axis=-1)
         if name == 'motion_anchor_ori_b':
             return motion_anchor_ori_b[:, :2].reshape(-1)
         if name == 'motion_anchor_pos_b':
@@ -516,9 +559,9 @@ class BeyondMimic(FSMState):
         qj = self._sanitize_vec(qj, size=self.num_actions, clip=self.q_clip)
 
         if self.use_torso_quat_correction:
-            base_troso_yaw = qj[2]
-            base_troso_roll = qj[5]
-            base_troso_pitch = qj[8]
+            base_troso_yaw = self._torso_joint_angle(qj, "yaw", 2)
+            base_troso_roll = self._torso_joint_angle(qj, "roll", 5)
+            base_troso_pitch = self._torso_joint_angle(qj, "pitch", 8)
 
             # beyond mimic使用torso姿态作为姿态输入，需要根据腰部位置将pelvis数据转到torso
             quat_yaw = self.euler_single_axis_to_quat(base_troso_yaw, 'z', degrees=False)
@@ -534,12 +577,12 @@ class BeyondMimic(FSMState):
         ref_anchor_ori_w = self._sanitize_quat(ref_anchor_ori_w)
 
         # 在第一帧提取当前机器人yaw方向，与参考动作yaw方向做差（与beyond mimic一致）
-        if(self.counter_step < 2):
+        if self._alignment_warmup_counter < 2:
             init_to_anchor = self.matrix_from_quat(self.yaw_quat(ref_anchor_ori_w))
             world_to_anchor = self.matrix_from_quat(self.yaw_quat(robot_quat))
             self.init_to_world = world_to_anchor @ init_to_anchor.T
             print("self.init_to_world: ", self.init_to_world)
-            self.counter_step += 1
+            self._alignment_warmup_counter += 1
             return
 
         motion_anchor_ori_b = self.matrix_from_quat(robot_quat).T @ self.init_to_world @ self.matrix_from_quat(ref_anchor_ori_w)
@@ -619,6 +662,7 @@ class BeyondMimic(FSMState):
         self.ref_motion_phase = 0.
         self.motion_time = 0
         self.counter_step = 0
+        self._alignment_warmup_counter = 0
         self._action_complete_hold_steps = 0
         self._paused_ref_joint_pos = None
         self._paused_ref_joint_vel = None
