@@ -1,0 +1,3 @@
+<mujoco model="magicbot_z1 scene">
+  <include file="MAGICBOTZ1.xml"/>
+</mujoco>

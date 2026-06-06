@@ -163,7 +163,7 @@ struct BeyondMimicConfig {
     int         motion_start_step { 0 };
     float       switch_to_loco_delay_s { 0.0f };
     bool        use_torso_quat_correction { true };
-    int         num_actions     { 29 };
+    int         num_actions     { 24 };
     int         num_obs         { 154 };
     float       tau_limit_scale { 1.0f };
     float       obs_clip        { 100.0f };
@@ -829,7 +829,7 @@ public:
         target_mj = sanitize_vec(target_mj, cfg_.q_clip);
 
         // ── write policy output ───────────────────────────────────
-        for (int i = 0; i < na_ && i < G1_NUM_MOTOR; i++) {
+        for (int i = 0; i < na_ && i < Z1_NUM_MOTOR; i++) {
             po_.actions[i] = target_mj[i];
             po_.kps[i]     = kps_mj_[i];
             po_.kds[i]     = kds_mj_[i];
@@ -910,7 +910,7 @@ private:
 
     // ── config + derived arrays ───────────────────────────────────
     BeyondMimicConfig                cfg_;
-    int                              na_ { 29 };
+    int                              na_ { 24 };
     int                              no_ { 154 };
     std::vector<float>               kps_mj_;
     std::vector<float>               kds_mj_;
@@ -1269,7 +1269,7 @@ private:
     void fill_output_from_buf(const std::vector<float>& qj_mj,
                               const std::vector<float>& /*dqj_mj*/)
     {
-        for (int i = 0; i < na_ && i < G1_NUM_MOTOR; i++) {
+        for (int i = 0; i < na_ && i < Z1_NUM_MOTOR; i++) {
             po_.actions[i] = qj_mj[i];  // hold current position
             po_.kps[i]     = kps_mj_[i];
             po_.kds[i]     = kds_mj_[i];

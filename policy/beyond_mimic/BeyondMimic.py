@@ -35,6 +35,8 @@ class BeyondMimic(FSMState):
         self._action_complete_hold_steps = 0
         self._loop_step_warned = False
         self.motion_start_step = 0
+        self.hold_last_frame_on_complete = True
+        self._complete_hold_warned = False
         self._alignment_warmup_counter = 0
         
         current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -69,6 +71,16 @@ class BeyondMimic(FSMState):
             self.motion_length = int(config.get("motion_length", 0))
             self.motion_start_step = max(0, int(config.get("motion_start_step", 0)))
             self.switch_to_loco_delay_s = float(config.get("switch_to_loco_delay_s", 0.0))
+            raw_hold_last_frame = config.get("hold_last_frame_on_complete", True)
+            if isinstance(raw_hold_last_frame, str):
+                self.hold_last_frame_on_complete = raw_hold_last_frame.strip().lower() in (
+                    "1",
+                    "true",
+                    "yes",
+                    "on",
+                )
+            else:
+                self.hold_last_frame_on_complete = bool(raw_hold_last_frame)
             self.torso_quat_joint_indices = config.get("torso_quat_joint_indices", None)
             # Numeric guards (optional in YAML, safe defaults here)
             self.obs_clip = float(config.get("obs_clip", 100.0))
@@ -213,6 +225,7 @@ class BeyondMimic(FSMState):
         self.counter_step = self.motion_start_step
         self._alignment_warmup_counter = 0
         self._action_complete_hold_steps = 0
+        self._complete_hold_warned = False
         self._paused_ref_joint_pos = None
         self._paused_ref_joint_vel = None
         self._paused_ref_body_quat_w = None
@@ -606,8 +619,18 @@ class BeyondMimic(FSMState):
 
         # obs0 是网络观测，obs1 是当前时间步，用于输出参考动作信息
         observation[self.input_name[0]] = obs_input.reshape(1, -1).astype(np.float32)
+        complete_holding = (
+            self.hold_last_frame_on_complete
+            and self.motion_length > 0
+            and self.counter_step >= self.motion_length
+        )
         policy_step = self.counter_step
-        if self.motion_length < 0:
+        if complete_holding:
+            policy_step = max(0, self.motion_length - 1)
+            if not self._complete_hold_warned:
+                print(f"[BeyondMimic] motion complete; holding last frame {policy_step}.")
+                self._complete_hold_warned = True
+        elif self.motion_length < 0:
             # Negative motion_length means loop policy time index in-place.
             loop_steps = self._get_loop_steps()
             policy_step = self.counter_step % loop_steps
@@ -653,7 +676,7 @@ class BeyondMimic(FSMState):
         self.policy_output.kds = self.kds_mj.copy()
         
         # update motion phase
-        if not paused:
+        if not paused and not complete_holding:
             self.counter_step += 1
 
     def exit(self):
@@ -664,6 +687,7 @@ class BeyondMimic(FSMState):
         self.counter_step = 0
         self._alignment_warmup_counter = 0
         self._action_complete_hold_steps = 0
+        self._complete_hold_warned = False
         self._paused_ref_joint_pos = None
         self._paused_ref_joint_vel = None
         self._paused_ref_body_quat_w = None
@@ -672,6 +696,15 @@ class BeyondMimic(FSMState):
 
     
     def checkChange(self):
+        if(self.state_cmd.skill_cmd == FSMCommand.LOCO):
+            self.state_cmd.skill_cmd = FSMCommand.INVALID
+            return FSMStateName.SKILL_COOLDOWN
+        elif(self.state_cmd.skill_cmd == FSMCommand.PASSIVE):
+            self.state_cmd.skill_cmd = FSMCommand.INVALID
+            return FSMStateName.PASSIVE
+        elif(self.state_cmd.skill_cmd == FSMCommand.POS_RESET):
+            self.state_cmd.skill_cmd = FSMCommand.INVALID
+            return FSMStateName.FIXEDPOSE
         if self._is_action_complete():
             # switch_to_loco_delay_s semantics:
             # <0: never auto-return; 0: return immediately; >0: return after delay seconds.
@@ -686,15 +719,5 @@ class BeyondMimic(FSMState):
             self.state_cmd.skill_cmd = FSMCommand.INVALID
             return FSMStateName.SKILL_BEYOND_MIMIC
         self._action_complete_hold_steps = 0
-        if(self.state_cmd.skill_cmd == FSMCommand.LOCO):
-            self.state_cmd.skill_cmd = FSMCommand.INVALID
-            return FSMStateName.SKILL_COOLDOWN
-        elif(self.state_cmd.skill_cmd == FSMCommand.PASSIVE):
-            self.state_cmd.skill_cmd = FSMCommand.INVALID
-            return FSMStateName.PASSIVE
-        elif(self.state_cmd.skill_cmd == FSMCommand.POS_RESET):
-            self.state_cmd.skill_cmd = FSMCommand.INVALID
-            return FSMStateName.FIXEDPOSE
-        else:
-            self.state_cmd.skill_cmd = FSMCommand.INVALID
-            return FSMStateName.SKILL_BEYOND_MIMIC
+        self.state_cmd.skill_cmd = FSMCommand.INVALID
+        return FSMStateName.SKILL_BEYOND_MIMIC

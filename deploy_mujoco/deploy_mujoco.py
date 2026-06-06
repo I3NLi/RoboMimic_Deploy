@@ -4,12 +4,14 @@ sys.path.append(str(Path(__file__).parent.parent.absolute()))
 
 from common.path_config import PROJECT_ROOT
 
+import os
+os.environ.setdefault("__GL_SYNC_TO_VBLANK", "0")
+os.environ.setdefault("vblank_mode", "0")
 import time
 import mujoco.viewer
 import mujoco
 import numpy as np
 import yaml
-import os
 from common.ctrlcomp import *
 from FSM.FSM import *
 from common.utils import get_gravity_orientation
@@ -164,6 +166,33 @@ def fit_vector(values, size, fill=0.0):
     return out
 
 
+DEFAULT_GHOST_BODY_NAMES = (
+    "pelvis",
+    "torso_link",
+    "head_link",
+    "left_hip_pitch_link",
+    "left_hip_yaw_link",
+    "left_knee_link",
+    "left_ankle_roll_link",
+    "left_toe_link",
+    "right_hip_pitch_link",
+    "right_hip_yaw_link",
+    "right_knee_link",
+    "right_ankle_roll_link",
+    "right_toe_link",
+    "left_shoulder_pitch_link",
+    "left_shoulder_yaw_link",
+    "left_elbow_link",
+    "left_wrist_yaw_link",
+    "left_hand_palm_link",
+    "right_shoulder_pitch_link",
+    "right_shoulder_yaw_link",
+    "right_elbow_link",
+    "right_wrist_yaw_link",
+    "right_hand_palm_link",
+)
+
+
 def set_ghost_pose_from_policy(ghost_data, sim_data, policy, qpos_actuator_idx, num_joints):
     """Update ghost qpos from the active mimic policy reference joint pose."""
     ref_joint_pos = getattr(policy, "ref_joint_pos", None)
@@ -185,6 +214,110 @@ def set_ghost_pose_from_policy(ghost_data, sim_data, policy, qpos_actuator_idx, 
     ghost_data.qvel[:] = 0.0
     ghost_data.qpos[7 + qpos_actuator_idx] = ref_mj
     return True
+
+
+def resolve_ghost_body_ids(model, body_names):
+    ids = []
+    seen = set()
+    for name in body_names or DEFAULT_GHOST_BODY_NAMES:
+        body_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, str(name))
+        if body_id >= 0 and body_id not in seen:
+            seen.add(body_id)
+            ids.append(body_id)
+    return np.asarray(ids, dtype=np.int32)
+
+
+def build_ghost_body_links(model, body_ids):
+    selected = {int(body_id) for body_id in body_ids}
+    links = []
+    for child_id in body_ids:
+        child_id = int(child_id)
+        parent_id = int(model.body_parentid[child_id])
+        while parent_id > 0:
+            if parent_id in selected:
+                links.append((parent_id, child_id))
+                break
+            parent_id = int(model.body_parentid[parent_id])
+    return links
+
+
+def _next_user_scene_geom(user_scn):
+    if user_scn.ngeom >= len(user_scn.geoms):
+        return None
+    geom = user_scn.geoms[user_scn.ngeom]
+    user_scn.ngeom += 1
+    return geom
+
+
+def update_ghost_skeleton_scene(
+    model,
+    ghost_data,
+    viewer,
+    body_ids,
+    body_links,
+    rgba,
+    marker_radius,
+    link_width,
+    draw_markers=True,
+    use_line_links=False,
+):
+    """Render a light reference outline/skeleton instead of a second mesh robot."""
+    user_scn = getattr(viewer, "user_scn", None)
+    if user_scn is None:
+        return
+
+    mujoco.mj_forward(model, ghost_data)
+    user_scn.ngeom = 0
+
+    rgba = np.asarray(rgba, dtype=np.float32).reshape(-1)
+    if rgba.size != 4:
+        rgba = np.array([0.0, 0.85, 0.38, 0.42], dtype=np.float32)
+    identity = np.eye(3, dtype=np.float64).reshape(-1)
+    zero_size = np.zeros(3, dtype=np.float64)
+    zero_pos = np.zeros(3, dtype=np.float64)
+
+    link_geom_type = int(mujoco.mjtGeom.mjGEOM_LINE if use_line_links else mujoco.mjtGeom.mjGEOM_CAPSULE)
+    for parent_id, child_id in body_links:
+        start = np.asarray(ghost_data.xpos[parent_id], dtype=np.float64)
+        end = np.asarray(ghost_data.xpos[child_id], dtype=np.float64)
+        if np.linalg.norm(end - start) < 1e-5:
+            continue
+        geom = _next_user_scene_geom(user_scn)
+        if geom is None:
+            return
+        mujoco.mjv_initGeom(
+            geom,
+            link_geom_type,
+            zero_size,
+            zero_pos,
+            identity,
+            rgba,
+        )
+        mujoco.mjv_connector(
+            geom,
+            link_geom_type,
+            float(link_width),
+            start,
+            end,
+        )
+        geom.rgba[:] = rgba
+
+    if not draw_markers:
+        return
+
+    sphere_size = np.array([marker_radius, marker_radius, marker_radius], dtype=np.float64)
+    for body_id in body_ids:
+        geom = _next_user_scene_geom(user_scn)
+        if geom is None:
+            return
+        mujoco.mjv_initGeom(
+            geom,
+            int(mujoco.mjtGeom.mjGEOM_SPHERE),
+            sphere_size,
+            np.asarray(ghost_data.xpos[int(body_id)], dtype=np.float64),
+            identity,
+            rgba,
+        )
 
 
 def update_ghost_scene(model, ghost_data, viewer, rgba):
@@ -307,11 +440,30 @@ if __name__ == "__main__":
     )
     ground_correction_max_penetration = float(ground_correction_cfg.get("max_penetration", 0.0))
     ghost_enable = parse_bool(ghost_cfg.get("enable", False), False)
+    ghost_mode = str(ghost_cfg.get("mode", "outline")).strip().lower()
+    if ghost_mode not in {"outline", "skeleton", "mesh"}:
+        print(f"[Ghost] unknown mode '{ghost_mode}', fallback to outline.")
+        ghost_mode = "outline"
+    ghost_update_fps = float(ghost_cfg.get("update_fps", 8.0 if ghost_mode in {"outline", "skeleton"} else render_fps))
+    ghost_update_interval = 1.0 / max(ghost_update_fps, 1e-6)
+    ghost_marker_radius = float(ghost_cfg.get("marker_radius", 0.025))
+    ghost_link_width = float(ghost_cfg.get("link_width", 0.012))
+    ghost_line_width = float(ghost_cfg.get("line_width", 3.0))
+    ghost_draw_markers = parse_bool(ghost_cfg.get("draw_markers", ghost_mode == "skeleton"), ghost_mode == "skeleton")
     ghost_alpha = float(ghost_cfg.get("alpha", 0.28))
     ghost_rgba = np.asarray(ghost_cfg.get("rgba", [0.1, 0.6, 1.0, ghost_alpha]), dtype=np.float32)
     if ghost_rgba.size != 4:
         ghost_rgba = np.array([0.1, 0.6, 1.0, ghost_alpha], dtype=np.float32)
     ghost_rgba[3] = ghost_alpha
+    ghost_body_ids = resolve_ghost_body_ids(m, ghost_cfg.get("body_names", DEFAULT_GHOST_BODY_NAMES))
+    if ghost_body_ids.size == 0:
+        ghost_body_ids = resolve_ghost_body_ids(m, ("pelvis",))
+    ghost_body_links = build_ghost_body_links(m, ghost_body_ids)
+    if ghost_enable:
+        print(
+            f"[Ghost] mode={ghost_mode} update_fps={ghost_update_fps:.1f} "
+            f"bodies={ghost_body_ids.size} links={len(ghost_body_links)}"
+        )
 
     init_q, init_kp, init_kd, ctrl_limit = load_initial_joint_targets(initial_pose_yaml, num_joints)
     if init_q is not None:
@@ -365,10 +517,10 @@ if __name__ == "__main__":
                     camera_name=ros2_cam_cfg.get("camera_name", "head_rgba_camera"),
                     width=int(ros2_cam_cfg.get("width", 640)),
                     height=int(ros2_cam_cfg.get("height", 480)),
-                    topic_rgb=ros2_cam_cfg.get("topic_rgb", "/g1/head_camera/rgb"),
-                    topic_rgba=ros2_cam_cfg.get("topic_rgba", "/g1/head_camera/rgba"),
+                    topic_rgb=ros2_cam_cfg.get("topic_rgb", "/z1/head_camera/rgb"),
+                    topic_rgba=ros2_cam_cfg.get("topic_rgba", "/z1/head_camera/rgba"),
                     frame_id=ros2_cam_cfg.get("frame_id", "head_rgba_camera"),
-                    node_name=ros2_cam_cfg.get("node_name", "g1_head_camera_publisher"),
+                    node_name=ros2_cam_cfg.get("node_name", "z1_head_camera_publisher"),
                     qos_depth=int(ros2_cam_cfg.get("qos_depth", 5)),
                 )
             except Exception as e:
@@ -381,12 +533,28 @@ if __name__ == "__main__":
         print(f"[Joystick][WARN] {e} Falling back to neutral NullJoyStick.")
         joystick = NullJoyStick()
     Running = True
+    command_input_armed = False
+    command_buttons = (
+        JoystickButton.SELECT,
+        JoystickButton.L3,
+        JoystickButton.UP,
+        JoystickButton.START,
+        JoystickButton.A,
+        JoystickButton.B,
+        JoystickButton.X,
+        JoystickButton.Y,
+        JoystickButton.L1,
+        JoystickButton.R1,
+    )
     try:
         with mujoco.viewer.launch_passive(m, d) as viewer:
-            wall_start_time = time.perf_counter()
-            last_viewer_sync_time = wall_start_time
+            loop_start_time = time.perf_counter()
+            next_step_time = loop_start_time
+            last_viewer_sync_time = loop_start_time
             render_interval = 1.0 / max(render_fps, 1e-6)
-            last_perf_log_time = wall_start_time
+            last_ghost_update_time = loop_start_time - ghost_update_interval
+            ghost_scene_active = False
+            last_perf_log_time = loop_start_time
             last_perf_log_step = sim_counter
             while viewer.is_running() and Running:
                 try:
@@ -430,48 +598,55 @@ if __name__ == "__main__":
 
                     if sim_counter % control_decimation == 0:
                         joystick.update()
-                        if joystick.is_button_pressed(JoystickButton.SELECT):
-                            Running = False
-                        if joystick.is_button_released(JoystickButton.L3):
-                            state_cmd.skill_cmd = FSMCommand.PASSIVE
-                        if joystick.is_button_released(JoystickButton.UP):
-                            state_cmd.skill_cmd = FSMCommand.PAUSE
-                        if command_gate.trigger("POS_RESET", joystick.is_button_pressed(JoystickButton.START)):
-                            state_cmd.skill_cmd = FSMCommand.POS_RESET
-                        if command_gate.trigger(
-                            "LOCO",
-                            joystick.is_button_pressed(JoystickButton.A) and joystick.is_button_pressed(JoystickButton.R1),
-                        ):
-                            state_cmd.skill_cmd = FSMCommand.LOCO
-                        if command_gate.trigger(
-                            "SKILL_1",
-                            joystick.is_button_pressed(JoystickButton.X) and joystick.is_button_pressed(JoystickButton.R1),
-                        ):
-                            state_cmd.skill_cmd = FSMCommand.SKILL_1
-                        if command_gate.trigger(
-                            "SKILL_2",
-                            joystick.is_button_pressed(JoystickButton.Y) and joystick.is_button_pressed(JoystickButton.R1),
-                        ):
-                            state_cmd.skill_cmd = FSMCommand.SKILL_2
-                        if joystick.is_button_released(JoystickButton.B) and joystick.is_button_pressed(JoystickButton.R1):
-                            state_cmd.skill_cmd = FSMCommand.SKILL_3
-                        if command_gate.trigger(
-                            "SKILL_4",
-                            joystick.is_button_pressed(JoystickButton.Y) and joystick.is_button_pressed(JoystickButton.L1),
-                        ):
-                            state_cmd.skill_cmd = FSMCommand.SKILL_4
-                        if joystick.is_button_released(JoystickButton.B) and joystick.is_button_pressed(JoystickButton.L1):
-                            state_cmd.skill_cmd = FSMCommand.SKILL_5
-                        if command_gate.trigger(
-                            "SKILL_6",
-                            joystick.is_button_pressed(JoystickButton.X) and joystick.is_button_pressed(JoystickButton.L1),
-                        ):
-                            state_cmd.skill_cmd = FSMCommand.SKILL_6
-                        if command_gate.trigger(
-                            "SKILL_7",
-                            joystick.is_button_pressed(JoystickButton.A) and joystick.is_button_pressed(JoystickButton.L1),
-                        ):
-                            state_cmd.skill_cmd = FSMCommand.SKILL_7
+                        command_buttons_idle = not any(
+                            joystick.is_button_pressed(button)
+                            for button in command_buttons
+                        )
+                        if not command_input_armed:
+                            command_input_armed = command_buttons_idle
+                        if command_input_armed:
+                            if joystick.is_button_pressed(JoystickButton.SELECT):
+                                Running = False
+                            if joystick.is_button_released(JoystickButton.L3):
+                                state_cmd.skill_cmd = FSMCommand.PASSIVE
+                            if joystick.is_button_released(JoystickButton.UP):
+                                state_cmd.skill_cmd = FSMCommand.PAUSE
+                            if command_gate.trigger("POS_RESET", joystick.is_button_pressed(JoystickButton.START)):
+                                state_cmd.skill_cmd = FSMCommand.POS_RESET
+                            if command_gate.trigger(
+                                "LOCO",
+                                joystick.is_button_pressed(JoystickButton.A) and joystick.is_button_pressed(JoystickButton.R1),
+                            ):
+                                state_cmd.skill_cmd = FSMCommand.LOCO
+                            if command_gate.trigger(
+                                "SKILL_1",
+                                joystick.is_button_pressed(JoystickButton.X) and joystick.is_button_pressed(JoystickButton.R1),
+                            ):
+                                state_cmd.skill_cmd = FSMCommand.SKILL_1
+                            if command_gate.trigger(
+                                "SKILL_2",
+                                joystick.is_button_pressed(JoystickButton.Y) and joystick.is_button_pressed(JoystickButton.R1),
+                            ):
+                                state_cmd.skill_cmd = FSMCommand.SKILL_2
+                            if joystick.is_button_released(JoystickButton.B) and joystick.is_button_pressed(JoystickButton.R1):
+                                state_cmd.skill_cmd = FSMCommand.SKILL_3
+                            if command_gate.trigger(
+                                "SKILL_4",
+                                joystick.is_button_pressed(JoystickButton.Y) and joystick.is_button_pressed(JoystickButton.L1),
+                            ):
+                                state_cmd.skill_cmd = FSMCommand.SKILL_4
+                            if joystick.is_button_released(JoystickButton.B) and joystick.is_button_pressed(JoystickButton.L1):
+                                state_cmd.skill_cmd = FSMCommand.SKILL_5
+                            if command_gate.trigger(
+                                "SKILL_6",
+                                joystick.is_button_pressed(JoystickButton.X) and joystick.is_button_pressed(JoystickButton.L1),
+                            ):
+                                state_cmd.skill_cmd = FSMCommand.SKILL_6
+                            if command_gate.trigger(
+                                "SKILL_7",
+                                joystick.is_button_pressed(JoystickButton.A) and joystick.is_button_pressed(JoystickButton.L1),
+                            ):
+                                state_cmd.skill_cmd = FSMCommand.SKILL_7
 
                         state_cmd.vel_cmd[0] = -joystick.get_axis_value(1)
                         state_cmd.vel_cmd[1] = -joystick.get_axis_value(0)
@@ -510,22 +685,43 @@ if __name__ == "__main__":
                 now = time.perf_counter()
                 if now - last_viewer_sync_time >= render_interval:
                     if ghost_enable:
-                        with viewer.lock():
-                            if set_ghost_pose_from_policy(
-                                ghost_d,
-                                d,
-                                FSM_controller.cur_policy,
-                                qpos_actuator_idx,
-                                num_joints,
-                            ):
-                                update_ghost_scene(m, ghost_d, viewer, ghost_rgba)
-                            else:
-                                clear_ghost_scene(viewer)
+                        if now - last_ghost_update_time >= ghost_update_interval:
+                            with viewer.lock():
+                                if set_ghost_pose_from_policy(
+                                    ghost_d,
+                                    d,
+                                    FSM_controller.cur_policy,
+                                    qpos_actuator_idx,
+                                    num_joints,
+                                ):
+                                    if ghost_mode == "mesh":
+                                        update_ghost_scene(m, ghost_d, viewer, ghost_rgba)
+                                    else:
+                                        update_ghost_skeleton_scene(
+                                            m,
+                                            ghost_d,
+                                            viewer,
+                                            ghost_body_ids,
+                                            ghost_body_links,
+                                            ghost_rgba,
+                                            ghost_marker_radius,
+                                            ghost_line_width if ghost_mode == "outline" else ghost_link_width,
+                                            ghost_draw_markers,
+                                            ghost_mode == "outline",
+                                        )
+                                    ghost_scene_active = True
+                                elif ghost_scene_active:
+                                    clear_ghost_scene(viewer)
+                                    ghost_scene_active = False
+                            last_ghost_update_time = now
                     else:
-                        with viewer.lock():
-                            clear_ghost_scene(viewer)
+                        if ghost_scene_active:
+                            with viewer.lock():
+                                clear_ghost_scene(viewer)
+                            ghost_scene_active = False
                     viewer.sync()
-                    last_viewer_sync_time = now
+                    last_viewer_sync_time = time.perf_counter()
+                    now = last_viewer_sync_time
 
                 if perf_log_interval_s > 0.0 and now - last_perf_log_time >= perf_log_interval_s:
                     elapsed = now - last_perf_log_time
@@ -539,10 +735,18 @@ if __name__ == "__main__":
                     last_perf_log_time = now
                     last_perf_log_step = sim_counter
 
-                target_wall_time = wall_start_time + sim_counter * simulation_dt
-                sleep_time = target_wall_time - time.perf_counter()
-                if sleep_time > 0:
-                    time.sleep(min(sleep_time, 0.005))
+                next_step_time += simulation_dt
+                now = time.perf_counter()
+                if now >= next_step_time:
+                    # Drop accumulated timing debt instead of running a burst of
+                    # catch-up steps, which makes the robot appear fast/slow.
+                    next_step_time = now
+                else:
+                    while True:
+                        sleep_time = next_step_time - time.perf_counter()
+                        if sleep_time <= 0:
+                            break
+                        time.sleep(min(sleep_time, 0.001))
     finally:
         if head_cam_stream is not None:
             head_cam_stream.close()

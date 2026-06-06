@@ -19,10 +19,10 @@ class HeadCameraRos2Publisher:
         camera_name="head_rgba_camera",
         width=640,
         height=480,
-        topic_rgb="/g1/head_camera/rgb",
-        topic_rgba="/g1/head_camera/rgba",
+        topic_rgb="/z1/head_camera/rgb",
+        topic_rgba="/z1/head_camera/rgba",
         frame_id="head_rgba_camera",
-        node_name="g1_head_camera_publisher",
+        node_name="z1_head_camera_publisher",
         qos_depth=5,
     ):
         # Lazy import so deploy script can run without ROS2 installed.

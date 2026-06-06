@@ -1,4 +1,4 @@
 control_dt: 0.02
 settle_time: 2.0
 sample_time: 3.0
-onnx_path: "/home/hiyio/RoboMimic_Deploy/policy/beyond_mimic/model/2026-02-03_13-15-46_dance1_subject2+Tracking-Flat-G1-Wo-State-Estimation-v0.onnx"
+onnx_path: "/home/hiyio/MaigcLab/RoboMimic_Deploy_magicbot/policy/beyond_mimic/model/policy.onnx"

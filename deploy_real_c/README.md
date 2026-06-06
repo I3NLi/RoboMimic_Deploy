@@ -2,7 +2,7 @@
 
 ## 1. 目标与范围
 
-`deploy_real_c` 是 `deploy_real/deploy_real.py` 的 C++ 版控制入口，面向 Unitree G1（29 DoF）。
+`deploy_real_c` 是 `deploy_real/deploy_real.py` 的 C++ 版控制入口，当前按 MagicBot Z1（24 DoF）配置。
 
 当前重点对齐路径：
 
@@ -76,7 +76,7 @@ TrackMimic 对比模式：
 ## 4. 命令行参数
 
 - `--net IFACE`：DDS 网卡（例如 `enp4s0`、`lo`）
-- `--joints N`：关节数（默认 29）
+- `--joints N`：关节数（默认 24）
 - `--yaml PATH`：BeyondMimic YAML 配置路径
 - `--track-yaml PATH`：TrackMimic YAML 配置路径（可选）
 - `--shadow-state {beyond|track}`：`--shadow` 启动后自动 force 的 FSM 状态（默认 `beyond`）
@@ -107,8 +107,8 @@ TrackMimic 对比模式：
 - `SKILL_KUNGFU`：ONNX 实现
 - `SKILL_KICK`：ONNX 实现
 - `SKILL_KUNGFU2`：ONNX 实现
-- `SKILL_CAST`：ONNX 实现（15DoF 下肢 + 上肢插值）
-- `SKILL_COOLDOWN`：ONNX 实现（15DoF 下肢 + 上肢回归）
+- `SKILL_CAST`：ONNX 实现（按配置关节集合插值）
+- `SKILL_COOLDOWN`：ONNX/占位实现（按 Z1 24DoF 固定姿态回归）
 - `SKILL_BEYOND_MIMIC`：ONNX 实现，已用于严格对比验证
 - `SKILL_TRACK_MIMIC`：ONNX + `motion_file(npz)` 实现；需通过 `--track-yaml` 注册，未注册时回退占位模式
 - `JOINT_ZERO_CHECK`：已实现（配置镜像）

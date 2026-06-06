@@ -1,6 +1,6 @@
 /**
  * deploy_real.cpp
- * C++ port of deploy_real/deploy_real.py for the Unitree G1 robot.
+ * C++ port of deploy_real/deploy_real.py for the MagicBot Z1 robot.
  *
  * Mirrors the Python version faithfully:
  *  - DDS communication via unitree_sdk2 C++ API
@@ -13,7 +13,7 @@
  *
  * Usage:
  *   ./deploy_real [network_interface] [num_joints] [--yaml PATH] [--track-yaml PATH]
- *   e.g.  ./deploy_real enp4s0 29
+ *   e.g.  ./deploy_real enp4s0 24
  *
  * Build: see CMakeLists.txt
  */
@@ -55,61 +55,66 @@ using namespace unitree_hg::msg::dds_;
 // Constants
 // ============================================================
 
-static constexpr int    G1_NUM_MOTOR    = 29;
+static constexpr int    Z1_NUM_MOTOR    = 24;
 static constexpr float  DEFAULT_CTRL_DT = 0.02f;   // 50 Hz
 static constexpr int    DEFAULT_ERR_OT  = 5;
 static constexpr float  DAMPING_KD      = 8.0f;
 
 // JointZeroCheck config mirror (policy/joint_zero_check/config/JointZeroCheck.yaml)
-static const std::array<float, G1_NUM_MOTOR> JOINT_ZERO_KP = {
-    100.f,100.f,100.f,150.f,40.f,40.f,
-    100.f,100.f,100.f,150.f,40.f,40.f,
-    300.f,300.f,300.f,
-    100.f,100.f,50.f,50.f,20.f,20.f,20.f,
-    100.f,100.f,50.f,50.f,20.f,20.f,20.f
+static const std::array<float, Z1_NUM_MOTOR> JOINT_ZERO_KP = {
+    113.02670959481426f,113.02670959481426f,113.02670959481426f,113.02670959481426f,59.33606165595733f,59.33606165595733f,
+    113.02670959481426f,113.02670959481426f,113.02670959481426f,113.02670959481426f,59.33606165595733f,59.33606165595733f,
+    113.02670959481426f,
+    59.33606165595733f,59.33606165595733f,59.33606165595733f,59.33606165595733f,59.33606165595733f,
+    59.33606165595733f,59.33606165595733f,59.33606165595733f,59.33606165595733f,59.33606165595733f,
+    59.33606165595733f
 };
-static const std::array<float, G1_NUM_MOTOR> JOINT_ZERO_KD = {
-    2.f,2.f,2.f,4.f,2.f,2.f,
-    2.f,2.f,2.f,4.f,2.f,2.f,
-    3.f,3.f,3.f,
-    2.f,2.f,2.f,2.f,1.f,1.f,1.f,
-    2.f,2.f,2.f,2.f,1.f,1.f,1.f
+static const std::array<float, Z1_NUM_MOTOR> JOINT_ZERO_KD = {
+    7.1955038135764f,7.1955038135764f,7.1955038135764f,7.1955038135764f,3.7774510065684f,3.7774510065684f,
+    7.1955038135764f,7.1955038135764f,7.1955038135764f,7.1955038135764f,3.7774510065684f,3.7774510065684f,
+    7.1955038135764f,
+    3.7774510065684f,3.7774510065684f,3.7774510065684f,3.7774510065684f,3.7774510065684f,
+    3.7774510065684f,3.7774510065684f,3.7774510065684f,3.7774510065684f,3.7774510065684f,
+    3.7774510065684f
 };
-static const std::array<float, G1_NUM_MOTOR> JOINT_ZERO_DEFAULT = {
-    -0.2f,0.f,0.f,0.42f,-0.23f,0.f,
-    -0.2f,0.f,0.f,0.42f,-0.23f,0.f,
-    0.f,0.f,0.f,
-    0.35f,0.18f,0.f,0.87f,0.f,0.f,0.f,
-    0.35f,-0.18f,0.f,0.87f,0.f,0.f,0.f
+static const std::array<float, Z1_NUM_MOTOR> JOINT_ZERO_DEFAULT = {
+    0.f,0.f,0.f,0.35f,-0.18f,0.f,
+    0.f,0.f,0.f,0.35f,-0.18f,0.f,
+    0.f,
+    0.15f,0.15f,0.f,0.5f,0.f,
+    0.15f,-0.15f,0.f,0.5f,0.f,
+    0.f
 };
 
 // SkillCooldown config mirror (policy/skill_cooldown/config/SkillCooldown.yaml)
-static const std::array<float, G1_NUM_MOTOR> SKILL_CD_KP = {
-    100.f,100.f,100.f,150.f,40.f,40.f,
-    100.f,100.f,100.f,150.f,40.f,40.f,
-    200.f,200.f,200.f,
-    100.f,100.f,50.f,50.f,20.f,20.f,20.f,
-    100.f,100.f,50.f,50.f,20.f,20.f,20.f
+static const std::array<float, Z1_NUM_MOTOR> SKILL_CD_KP = {
+    113.02670959481426f,113.02670959481426f,113.02670959481426f,113.02670959481426f,59.33606165595733f,59.33606165595733f,
+    113.02670959481426f,113.02670959481426f,113.02670959481426f,113.02670959481426f,59.33606165595733f,59.33606165595733f,
+    113.02670959481426f,
+    59.33606165595733f,59.33606165595733f,59.33606165595733f,59.33606165595733f,59.33606165595733f,
+    59.33606165595733f,59.33606165595733f,59.33606165595733f,59.33606165595733f,59.33606165595733f,
+    59.33606165595733f
 };
-static const std::array<float, G1_NUM_MOTOR> SKILL_CD_KD = {
-    2.f,2.f,2.f,4.f,2.f,2.f,
-    2.f,2.f,2.f,4.f,2.f,2.f,
-    5.f,5.f,5.f,
-    2.f,2.f,2.f,2.f,1.f,1.f,1.f,
-    2.f,2.f,2.f,2.f,1.f,1.f,1.f
+static const std::array<float, Z1_NUM_MOTOR> SKILL_CD_KD = {
+    7.1955038135764f,7.1955038135764f,7.1955038135764f,7.1955038135764f,3.7774510065684f,3.7774510065684f,
+    7.1955038135764f,7.1955038135764f,7.1955038135764f,7.1955038135764f,3.7774510065684f,3.7774510065684f,
+    7.1955038135764f,
+    3.7774510065684f,3.7774510065684f,3.7774510065684f,3.7774510065684f,3.7774510065684f,
+    3.7774510065684f,3.7774510065684f,3.7774510065684f,3.7774510065684f,3.7774510065684f,
+    3.7774510065684f
 };
-static const std::array<float, G1_NUM_MOTOR> SKILL_CD_DEFAULT = {
-    -0.1f,0.f,0.f,0.3f,-0.2f,0.f,
-    -0.1f,0.f,0.f,0.3f,-0.2f,0.f,
-    0.f,0.f,0.f,
-    0.35f,0.18f,0.f,0.87f,0.f,0.f,0.f,
-    0.35f,-0.18f,0.f,0.87f,0.f,0.f,0.f
+static const std::array<float, Z1_NUM_MOTOR> SKILL_CD_DEFAULT = {
+    0.f,0.f,0.f,0.35f,-0.18f,0.f,
+    0.f,0.f,0.f,0.35f,-0.18f,0.f,
+    0.f,
+    0.15f,0.15f,0.f,0.5f,0.f,
+    0.15f,-0.15f,0.f,0.5f,0.f,
+    0.f
 };
-static const std::array<int, 15> SKILL_CD_LOWER_IDX = {
-    0,1,2,3,4,5,6,7,8,9,10,11,12,13,14
-};
-static const std::array<int, 14> SKILL_CD_UPPER_IDX = {
-    15,16,17,18,19,20,21,22,23,24,25,26,27,28
+static const std::array<int, 0> SKILL_CD_LOWER_IDX = {};
+static const std::array<int, Z1_NUM_MOTOR> SKILL_CD_UPPER_IDX = {
+    0,1,2,3,4,5,6,7,8,9,10,11,
+    12,13,14,15,16,17,18,19,20,21,22,23
 };
 
 // ============================================================
@@ -160,7 +165,7 @@ static inline void sleep_sec(double s)
 struct Config {
     // real.yaml
     std::string net             = "enp4s0";
-    int         num_joints      = G1_NUM_MOTOR;
+    int         num_joints      = Z1_NUM_MOTOR;
     std::string lowcmd_topic    = "rt/lowcmd";
     std::string lowstate_topic  = "rt/lowstate";
     float       control_dt      = DEFAULT_CTRL_DT;
@@ -281,10 +286,10 @@ enum class FSMStateName {
 struct StateAndCmd {
     int num_joints;
 
-    std::array<float, G1_NUM_MOTOR> q   {};
-    std::array<float, G1_NUM_MOTOR> dq  {};
-    std::array<float, G1_NUM_MOTOR> ddq {};
-    std::array<float, G1_NUM_MOTOR> tau_est {};
+    std::array<float, Z1_NUM_MOTOR> q   {};
+    std::array<float, Z1_NUM_MOTOR> dq  {};
+    std::array<float, Z1_NUM_MOTOR> ddq {};
+    std::array<float, Z1_NUM_MOTOR> tau_est {};
 
     std::array<float, 3> gravity_ori { 0.f, 0.f, -1.f };
     std::array<float, 3> ang_vel     {};
@@ -304,9 +309,9 @@ struct StateAndCmd {
 
 struct PolicyOutput {
     int num_joints;
-    std::array<float, G1_NUM_MOTOR> actions {};
-    std::array<float, G1_NUM_MOTOR> kps     {};
-    std::array<float, G1_NUM_MOTOR> kds     {};
+    std::array<float, Z1_NUM_MOTOR> actions {};
+    std::array<float, Z1_NUM_MOTOR> kps     {};
+    std::array<float, Z1_NUM_MOTOR> kds     {};
 
     explicit PolicyOutput(int n) : num_joints(n) {}
 };
@@ -367,9 +372,9 @@ public:
      * Returns true if force-damping should be applied.
      */
     bool filter_actions(
-        std::array<float, G1_NUM_MOTOR>& actions,
-        std::array<float, G1_NUM_MOTOR>& kps,
-        std::array<float, G1_NUM_MOTOR>& kds)
+        std::array<float, Z1_NUM_MOTOR>& actions,
+        std::array<float, Z1_NUM_MOTOR>& kps,
+        std::array<float, Z1_NUM_MOTOR>& kds)
     {
         step_++;
         if (!cfg_.safety_enable) return false;
@@ -432,9 +437,9 @@ private:
     int   fault_until_step_{ 0 };
     double latch_until_    { 0.0 };
 
-    std::array<float, G1_NUM_MOTOR> prev_action_{};
-    std::array<float, G1_NUM_MOTOR> prev_kp_    {};
-    std::array<float, G1_NUM_MOTOR> prev_kd_    {};
+    std::array<float, Z1_NUM_MOTOR> prev_action_{};
+    std::array<float, Z1_NUM_MOTOR> prev_kp_    {};
+    std::array<float, Z1_NUM_MOTOR> prev_kd_    {};
 
     void fault(const std::string& reason)
     {
@@ -569,10 +574,10 @@ private:
     float control_dt_;
     float duration_ { 2.0f };
     float elapsed_  { 0.0f };
-    std::array<float, G1_NUM_MOTOR> init_pos_{};
-    const std::array<float, G1_NUM_MOTOR> default_pos_ { JOINT_ZERO_DEFAULT };
-    const std::array<float, G1_NUM_MOTOR> kps_ { JOINT_ZERO_KP };
-    const std::array<float, G1_NUM_MOTOR> kds_ { JOINT_ZERO_KD };
+    std::array<float, Z1_NUM_MOTOR> init_pos_{};
+    const std::array<float, Z1_NUM_MOTOR> default_pos_ { JOINT_ZERO_DEFAULT };
+    const std::array<float, Z1_NUM_MOTOR> kps_ { JOINT_ZERO_KP };
+    const std::array<float, Z1_NUM_MOTOR> kds_ { JOINT_ZERO_KD };
 };
 
 // ============================================================
@@ -655,7 +660,7 @@ public:
 private:
     float kp_;
     float kd_;
-    std::array<float, G1_NUM_MOTOR> hold_q_{};
+    std::array<float, Z1_NUM_MOTOR> hold_q_{};
 };
 
 class MimicFallbackMode : public FSMState {
@@ -701,7 +706,7 @@ public:
 private:
     float kp_;
     float kd_;
-    std::array<float, G1_NUM_MOTOR> hold_q_{};
+    std::array<float, Z1_NUM_MOTOR> hold_q_{};
 };
 
 class SkillCooldownPlaceholder : public FSMState {
@@ -767,7 +772,7 @@ private:
     int   num_step_   { 1 };
     int   cur_step_   { 0 };
     float alpha_      { 0.0f };
-    std::array<float, 14> upper_init_{};
+    std::array<float, Z1_NUM_MOTOR> upper_init_{};
 };
 
 class JointZeroCheckMode : public FSMState {
@@ -923,7 +928,7 @@ private:
     void report()
     {
         const float inv_n = 1.0f / (float)std::max(1, sample_count_);
-        std::array<float, G1_NUM_MOTOR> mean_q{};
+        std::array<float, Z1_NUM_MOTOR> mean_q{};
         std::array<float, 3> mean_g{}, mean_w{};
         for (int i = 0; i < sc_.num_joints; i++) mean_q[i] = sum_q_[i] * inv_n;
         for (int i = 0; i < 3; i++) {
@@ -968,7 +973,7 @@ private:
     bool  done_        { false };
     bool  warned_no_loco_{ false };
     LocoProvider loco_provider_{};
-    std::array<float, G1_NUM_MOTOR> sum_q_{};
+    std::array<float, Z1_NUM_MOTOR> sum_q_{};
     std::array<float, 3> sum_g_{};
     std::array<float, 3> sum_w_{};
 };
@@ -1267,7 +1272,7 @@ public:
         if (force_damping) {
             create_damping_cmd();
         } else {
-            low_cmd_.mode_pr()      = 0;   // PR mode for G1
+            low_cmd_.mode_pr()      = 0;   // PR mode for Z1
             low_cmd_.mode_machine() = mode_machine_;
             for (int i = 0; i < config_.num_joints; i++) {
                 low_cmd_.motor_cmd()[i].mode() = 1;
@@ -1539,7 +1544,7 @@ int main(int argc, char* argv[])
             try_register(
                 FSMStateName::SKILL_DANCE,
                 [&]() {
-                    return std::make_unique<onnx_skill::Motion23Policy>(
+                    return std::make_unique<onnx_skill::MotionPolicy>(
                         FSMStateName::SKILL_DANCE, "Dance",
                         controller.get_state_cmd(), controller.get_policy_output(),
                         dance_yaml.string(),
@@ -1554,7 +1559,7 @@ int main(int argc, char* argv[])
             try_register(
                 FSMStateName::SKILL_KUNGFU,
                 [&]() {
-                    return std::make_unique<onnx_skill::Motion23Policy>(
+                    return std::make_unique<onnx_skill::MotionPolicy>(
                         FSMStateName::SKILL_KUNGFU, "KungFu",
                         controller.get_state_cmd(), controller.get_policy_output(),
                         kungfu_yaml.string(),
@@ -1569,7 +1574,7 @@ int main(int argc, char* argv[])
             try_register(
                 FSMStateName::SKILL_KICK,
                 [&]() {
-                    return std::make_unique<onnx_skill::Motion23Policy>(
+                    return std::make_unique<onnx_skill::MotionPolicy>(
                         FSMStateName::SKILL_KICK, "Kick",
                         controller.get_state_cmd(), controller.get_policy_output(),
                         kick_yaml.string(),
@@ -1584,7 +1589,7 @@ int main(int argc, char* argv[])
             try_register(
                 FSMStateName::SKILL_KUNGFU2,
                 [&]() {
-                    return std::make_unique<onnx_skill::Motion23Policy>(
+                    return std::make_unique<onnx_skill::MotionPolicy>(
                         FSMStateName::SKILL_KUNGFU2, "KungFu2",
                         controller.get_state_cmd(), controller.get_policy_output(),
                         kungfu2_yaml.string(),

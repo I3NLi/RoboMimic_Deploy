@@ -32,6 +32,8 @@ If --yaml is omitted the identity mapping is assumed (MuJoCo order == lab order)
 
 import sys
 import os
+os.environ.setdefault("__GL_SYNC_TO_VBLANK", "0")
+os.environ.setdefault("vblank_mode", "0")
 import time
 import struct
 import threading

@@ -3,11 +3,11 @@
  *
  * Extra C++ policy ports for deploy_real_onnx:
  *  - LocoMode (policy/loco_mode/LocoMode.py)
- *  - Dance/KungFu/Kick/KungFu2 (23-DoF motion policies)
- *  - SkillCooldown / SkillCast (15-DoF lower-body policies)
+ *  - Dance/KungFu/Kick/KungFu2 motion policies
+ *  - SkillCooldown / SkillCast transition policies
  *
  * This header is intended to be included after deploy_real.cpp defines:
- *   - G1_NUM_MOTOR
+ *   - Z1_NUM_MOTOR
  *   - FSMState / FSMStateName / FSMCommand
  *   - StateAndCmd / PolicyOutput
  */
@@ -291,7 +291,7 @@ public:
             }
         }
 
-        for (int i = 0; i < num_actions_ && i < G1_NUM_MOTOR; i++) {
+        for (int i = 0; i < num_actions_ && i < Z1_NUM_MOTOR; i++) {
             po_.actions[i] = target_mj[i];
             po_.kps[i] = kps_mj_[i];
             po_.kds[i] = kds_mj_[i];
@@ -337,7 +337,7 @@ private:
         return out;
     }
 
-    int num_actions_{29};
+    int num_actions_{24};
     int num_obs_{96};
     float ang_vel_scale_{1.f};
     float dof_pos_scale_{1.f};
@@ -357,9 +357,9 @@ private:
     std::vector<float> action_, obs_, qj_obs_, dqj_obs_;
 };
 
-class Motion23Policy final : public FSMState, private OrtPolicyBase {
+class MotionPolicy final : public FSMState, private OrtPolicyBase {
 public:
-    Motion23Policy(
+    MotionPolicy(
         FSMStateName state_name,
         const std::string& label,
         StateAndCmd& sc, PolicyOutput& po,
@@ -379,8 +379,8 @@ public:
         kps_ = read_fvec(cfg, "kps");
         kds_ = read_fvec(cfg, "kds");
         default_angles_ = read_fvec(cfg, "default_angles");
-        dof23_index_ = read_ivec(cfg, "dof23_index");
-        num_actions_ = cfg["num_actions"].as<int>();   // 23
+        motion_dof_index_ = read_ivec(cfg, "dof23_index");
+        num_actions_ = cfg["num_actions"].as<int>();
         num_obs_ = cfg["num_obs"].as<int>();           // 380
         history_length_ = cfg["history_length"].as<int>();
         motion_length_ = cfg["motion_length"].as<float>();
@@ -391,8 +391,8 @@ public:
 
         action_.assign(num_actions_, 0.f);
         obs_.assign(num_obs_, 0.f);
-        qj23_.assign(num_actions_, 0.f);
-        dqj23_.assign(num_actions_, 0.f);
+        qj_motion_.assign(num_actions_, 0.f);
+        dqj_motion_.assign(num_actions_, 0.f);
         ang_vel_buf_.assign(3 * history_length_, 0.f);
         proj_g_buf_.assign(3 * history_length_, 0.f);
         dof_pos_buf_.assign(num_actions_ * history_length_, 0.f);
@@ -429,12 +429,13 @@ public:
         };
 
         for (int i = 0; i < num_actions_; i++) {
-            int m = i < (int)dof23_index_.size() ? dof23_index_[i] : i;
+            int m = i < (int)motion_dof_index_.size() ? motion_dof_index_[i] : i;
+            if (m < 0 || m >= Z1_NUM_MOTOR) continue;
             float q = sc_.q[m];
             float dq = sc_.dq[m];
             float def = m < (int)default_angles_.size() ? default_angles_[m] : 0.f;
-            qj23_[i] = (q - def) * dof_pos_scale_;
-            dqj23_[i] = dq * dof_vel_scale_;
+            qj_motion_[i] = (q - def) * dof_pos_scale_;
+            dqj_motion_[i] = dq * dof_vel_scale_;
         }
 
         if (update_history_before_obs_) {
@@ -455,8 +456,8 @@ public:
         obs_.reserve(num_obs_);
         obs_.insert(obs_.end(), action_.begin(), action_.end());
         obs_.insert(obs_.end(), w.begin(), w.end());
-        obs_.insert(obs_.end(), qj23_.begin(), qj23_.end());
-        obs_.insert(obs_.end(), dqj23_.begin(), dqj23_.end());
+        obs_.insert(obs_.end(), qj_motion_.begin(), qj_motion_.end());
+        obs_.insert(obs_.end(), dqj_motion_.begin(), dqj_motion_.end());
         obs_.insert(obs_.end(), hist.begin(), hist.end());
         obs_.insert(obs_.end(), g.begin(), g.end());
         obs_.push_back(std::min(ref_phase_, 1.0f));
@@ -474,24 +475,18 @@ public:
             push_history(w, g);
         }
 
-        std::array<float, G1_NUM_MOTOR> target{};
-        for (int i = 0; i < 15; i++) {
-            target[i] = action_[i] * action_scale_ + default_angles_[i];
+        std::array<float, Z1_NUM_MOTOR> target{};
+        for (int i = 0; i < Z1_NUM_MOTOR; i++) {
+            target[i] = i < (int)default_angles_.size() ? default_angles_[i] : sc_.q[i];
         }
-        for (int i = 15; i < 19; i++) {
-            target[i] = action_[i] * action_scale_ + default_angles_[i];
+        for (int i = 0; i < num_actions_ && i < (int)action_.size(); i++) {
+            int m = i < (int)motion_dof_index_.size() ? motion_dof_index_[i] : i;
+            if (m < 0 || m >= Z1_NUM_MOTOR) continue;
+            float def = m < (int)default_angles_.size() ? default_angles_[m] : 0.f;
+            target[m] = action_[i] * action_scale_ + def;
         }
-        for (int i = 19; i < 23; i++) {
-            target[22 + (i - 19)] = action_[i] * action_scale_ + default_angles_[22 + (i - 19)];
-        }
-        target[19] = default_angles_[19];
-        target[20] = default_angles_[20];
-        target[21] = default_angles_[21];
-        target[26] = default_angles_[26];
-        target[27] = default_angles_[27];
-        target[28] = default_angles_[28];
 
-        for (int i = 0; i < G1_NUM_MOTOR; i++) {
+        for (int i = 0; i < Z1_NUM_MOTOR; i++) {
             po_.actions[i] = target[i];
             po_.kps[i] = i < (int)kps_.size() ? kps_[i] : 0.f;
             po_.kds[i] = i < (int)kds_.size() ? kds_[i] : 0.f;
@@ -532,8 +527,8 @@ private:
     {
         roll_insert(ang_vel_buf_, 3, w.data());
         roll_insert(proj_g_buf_, 3, g.data());
-        roll_insert(dof_pos_buf_, num_actions_, qj23_.data());
-        roll_insert(dof_vel_buf_, num_actions_, dqj23_.data());
+        roll_insert(dof_pos_buf_, num_actions_, qj_motion_.data());
+        roll_insert(dof_vel_buf_, num_actions_, dqj_motion_.data());
         roll_insert(action_buf_, num_actions_, action_.data());
         float ph = std::min(ref_phase_, 1.0f);
         roll_insert(phase_buf_, 1, &ph);
@@ -552,9 +547,9 @@ private:
     int counter_step_{0};
     float ref_phase_{0.f};
 
-    std::vector<int> dof23_index_;
+    std::vector<int> motion_dof_index_;
     std::vector<float> kps_, kds_, default_angles_;
-    std::vector<float> action_, obs_, qj23_, dqj23_;
+    std::vector<float> action_, obs_, qj_motion_, dqj_motion_;
     std::vector<float> ang_vel_buf_, proj_g_buf_, dof_pos_buf_, dof_vel_buf_, action_buf_, phase_buf_;
 };
 
@@ -651,7 +646,7 @@ protected:
             float def = m < (int)default_angles_.size() ? default_angles_[m] : 0.f;
             po_.actions[m] = action_[i] * action_scale_ + def;
         }
-        for (int i = 0; i < G1_NUM_MOTOR; i++) {
+        for (int i = 0; i < Z1_NUM_MOTOR; i++) {
             po_.kps[i] = i < (int)kps_.size() ? kps_[i] : 0.f;
             po_.kds[i] = i < (int)kds_.size() ? kds_[i] : 0.f;
         }

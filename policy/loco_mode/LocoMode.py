@@ -35,13 +35,23 @@ class LocoMode(FSMState):
             self.joint2motor_idx =  np.array(config["joint2motor_idx"], dtype=np.int32)
             self.tau_limit =  np.array(config["tau_limit"], dtype=np.float32)
             self.tau_limit_scale = float(config.get("tau_limit_scale", 1.0))
-            self.num_actions = config["num_actions"]
-            self.num_obs = config["num_obs"]
+            self.num_actions = int(config["num_actions"])
+            self.num_obs = int(config["num_obs"])
             self.ang_vel_scale = config["ang_vel_scale"]
             self.dof_pos_scale = config["dof_pos_scale"]
             self.dof_vel_scale = config["dof_vel_scale"]
             self.action_scale = np.array(config["action_scale"], dtype=np.float32)
-            self.cmd_scale = np.array(config["cmd_scale"], dtype=np.float32)
+            self.cmd_scale = np.array(config["cmd_scale"], dtype=np.float32).reshape(-1)
+            self.command_dim = int(config.get("command_dim", self.cmd_scale.size))
+            if self.command_dim not in (3, 4):
+                raise ValueError(f"LocoMode supports 3D or 4D commands, got command_dim={self.command_dim}.")
+            if self.cmd_scale.size != self.command_dim:
+                raise ValueError(
+                    f"LocoMode command_dim={self.command_dim} does not match cmd_scale len={self.cmd_scale.size}."
+                )
+            if self.command_dim >= 4 and "root_height_command" not in config:
+                raise ValueError("LocoMode 4D command config must provide `root_height_command`.")
+            self.root_height_command = float(config.get("root_height_command", 0.0))
             cmd_deadzone = config.get("cmd_deadzone", 0.0)
             self.cmd_deadzone = np.array(cmd_deadzone, dtype=np.float32)
             if self.cmd_deadzone.size == 1:
@@ -50,10 +60,11 @@ class LocoMode(FSMState):
             self.range_velx = np.array([self.cmd_range["lin_vel_x"][0], self.cmd_range["lin_vel_x"][1]], dtype=np.float32)
             self.range_vely = np.array([self.cmd_range["lin_vel_y"][0], self.cmd_range["lin_vel_y"][1]], dtype=np.float32)
             self.range_velz = np.array([self.cmd_range["ang_vel_z"][0], self.cmd_range["ang_vel_z"][1]], dtype=np.float32)
+            self._validate_config(config_path, config)
             
             self.qj_obs = np.zeros(self.num_actions, dtype=np.float32)
             self.dqj_obs = np.zeros(self.num_actions, dtype=np.float32)
-            self.cmd = np.array(config["cmd_init"], dtype=np.float32)
+            self.cmd = self._fit_command(config.get("cmd_init", [0.0, 0.0, 0.0]))
             self.obs = np.zeros(self.num_obs, dtype=np.float32)
             self.action = np.zeros(self.num_actions, dtype=np.float32)
 
@@ -65,7 +76,21 @@ class LocoMode(FSMState):
                         f"onnxruntime is required for ONNX policy: {self.policy_path}"
                     )
                 self.ort_session = onnxruntime.InferenceSession(self.policy_path)
-                self.input_name = self.ort_session.get_inputs()[0].name
+                model_input = self.ort_session.get_inputs()[0]
+                self.input_name = model_input.name
+                model_obs_dim = model_input.shape[-1]
+                if isinstance(model_obs_dim, int) and model_obs_dim != self.num_obs:
+                    raise ValueError(
+                        f"LocoMode num_obs={self.num_obs} does not match ONNX input dim={model_obs_dim}: "
+                        f"{self.policy_path}"
+                    )
+                model_output = self.ort_session.get_outputs()[0]
+                model_action_dim = model_output.shape[-1]
+                if isinstance(model_action_dim, int) and model_action_dim != self.num_actions:
+                    raise ValueError(
+                        f"LocoMode num_actions={self.num_actions} does not match ONNX output dim={model_action_dim}: "
+                        f"{self.policy_path}"
+                    )
             else:
                 self.policy = torch.jit.load(self.policy_path)
 
@@ -74,7 +99,11 @@ class LocoMode(FSMState):
                 self._policy_forward(obs_tensor)
                     
             backend = "ONNX" if self._use_onnx else "TorchScript"
-            print(f"Locomotion policy initializing ... ({backend})")
+            print(
+                f"Locomotion policy initializing ... ({backend}) "
+                f"policy={os.path.basename(self.policy_path)} num_obs={self.num_obs} "
+                f"num_actions={self.num_actions} command_dim={self.command_dim}"
+            )
 
     def _policy_forward(self, obs_tensor: np.ndarray) -> np.ndarray:
         if self._use_onnx:
@@ -85,6 +114,61 @@ class LocoMode(FSMState):
                 out = self.policy(torch.from_numpy(obs_tensor).clip(-100, 100))
             out = out.detach().cpu().numpy().astype(np.float32)
         return np.clip(out, -100.0, 100.0)
+
+    def _fit_command(self, cmd) -> np.ndarray:
+        out = np.zeros(self.command_dim, dtype=np.float32)
+        arr = np.asarray(cmd, dtype=np.float32).reshape(-1)
+        n = min(3, arr.size)
+        if n > 0:
+            out[:n] = arr[:n]
+        if self.command_dim >= 4:
+            out[3] = float(arr[3]) if arr.size > 3 else self.root_height_command
+        return out
+
+    def _validate_config(self, config_path: str, config: dict):
+        expected_obs = 6 + self.command_dim + self.num_actions * 3
+        if self.num_obs != expected_obs:
+            raise ValueError(
+                f"{config_path}: num_obs={self.num_obs} does not match LocoMode obs layout "
+                f"6 + command_dim({self.command_dim}) + 3*num_actions({self.num_actions}) = {expected_obs}."
+            )
+
+        action_fields = {
+            "kps": self.kps,
+            "kds": self.kds,
+            "default_angles": self.default_angles,
+            "joint2motor_idx": self.joint2motor_idx,
+            "tau_limit": self.tau_limit,
+        }
+        for name, values in action_fields.items():
+            if values.size != self.num_actions:
+                raise ValueError(
+                    f"{config_path}: {name} len={values.size} must match num_actions={self.num_actions}."
+                )
+
+        if self.action_scale.size not in (1, self.num_actions):
+            raise ValueError(
+                f"{config_path}: action_scale len={self.action_scale.size} must be scalar or num_actions={self.num_actions}."
+            )
+
+        joint_ids = self.joint2motor_idx.astype(np.int32).tolist()
+        if sorted(joint_ids) != list(range(self.num_actions)):
+            raise ValueError(
+                f"{config_path}: joint2motor_idx must be a permutation of 0..{self.num_actions - 1}."
+            )
+
+        if self.cmd_deadzone.size != 3:
+            raise ValueError(f"{config_path}: cmd_deadzone must be scalar or len=3.")
+
+        cmd_init = np.asarray(config.get("cmd_init", []), dtype=np.float32).reshape(-1)
+        if cmd_init.size != self.command_dim:
+            raise ValueError(
+                f"{config_path}: cmd_init len={cmd_init.size} must match command_dim={self.command_dim}."
+            )
+
+        for key in ("lin_vel_x", "lin_vel_y", "ang_vel_z"):
+            if key not in self.cmd_range or len(self.cmd_range[key]) != 2:
+                raise ValueError(f"{config_path}: cmd_range.{key} must be [min, max].")
                 
     @staticmethod
     def _apply_deadzone(cmd: np.ndarray, deadzone: np.ndarray) -> np.ndarray:
@@ -101,7 +185,7 @@ class LocoMode(FSMState):
     
     def _scale_cmd(self, cmd: np.ndarray) -> np.ndarray:
         ranges = (self.range_velx, self.range_vely, self.range_velz)
-        out = np.zeros_like(cmd, dtype=np.float32)
+        out = np.zeros(self.command_dim, dtype=np.float32)
         for i, (val, rng) in enumerate(zip(cmd, ranges)):
             lo = float(rng[0])
             hi = float(rng[1])
@@ -109,6 +193,8 @@ class LocoMode(FSMState):
                 out[i] = val * (hi if val >= 0.0 else abs(lo))
             else:
                 out[i] = scale_values([val], [(lo, hi)])[0]
+        if self.command_dim >= 4:
+            out[3] = self.root_height_command
         return out
     
     def enter(self):
@@ -144,10 +230,14 @@ class LocoMode(FSMState):
         
         self.obs[:3] = self.ang_vel.copy()
         self.obs[3:6] = self.gravity_orientation.copy()
-        self.obs[6:9] = self.cmd.copy()
-        self.obs[9: 9 + self.num_actions] = self.qj_obs.copy()
-        self.obs[9 + self.num_actions: 9 + self.num_actions * 2] = self.dqj_obs.copy()
-        self.obs[9 + self.num_actions * 2: 9 + self.num_actions * 3] = self.action.copy()
+        cmd_end = 6 + self.command_dim
+        joint_pos_start = cmd_end
+        joint_vel_start = joint_pos_start + self.num_actions
+        action_start = joint_vel_start + self.num_actions
+        self.obs[6:cmd_end] = self.cmd.copy()
+        self.obs[joint_pos_start: joint_pos_start + self.num_actions] = self.qj_obs.copy()
+        self.obs[joint_vel_start: joint_vel_start + self.num_actions] = self.dqj_obs.copy()
+        self.obs[action_start: action_start + self.num_actions] = self.action.copy()
         
         obs_tensor = self.obs.reshape(1, -1).astype(np.float32)
         self.action = self._policy_forward(obs_tensor).squeeze()

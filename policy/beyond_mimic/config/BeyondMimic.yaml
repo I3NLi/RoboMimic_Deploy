@@ -1,8 +1,9 @@
 onnx_path: "policy.onnx"
 
 motion_length: 0
-motion_start_step: 2000
-switch_to_loco_delay_s: 0.0
+motion_start_step: 0
+switch_to_loco_delay_s: -1.0
+hold_last_frame_on_complete: true
 use_torso_quat_correction: true
 
 # MagicBot Z1 has only waist yaw between pelvis and torso.
