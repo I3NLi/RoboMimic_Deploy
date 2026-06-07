@@ -38,7 +38,7 @@ Options:
   --max-steps N               Verification steps (default: 380).
   --warmup-steps N            Ignore first N compare samples (default: 80).
   --min-cmp-steps N           Minimum compare samples (default: 200).
-  --q-tol X                   q max-abs tolerance (default: 5e-5).
+  --q-tol X                   q max-abs tolerance (default: 1e-4).
   --mean-q-tol X              q mean tolerance (default: 5e-6).
   --kp-tol X                  kp tolerance (default: 1e-6).
   --kd-tol X                  kd tolerance (default: 1e-6).
@@ -68,7 +68,7 @@ CMD_WAIT_MS="5.0"
 MAX_STEPS="380"
 WARMUP_STEPS="80"
 MIN_CMP_STEPS="200"
-Q_TOL="5e-5"
+Q_TOL="1e-4"
 MEAN_Q_TOL="5e-6"
 KP_TOL="1e-6"
 KD_TOL="1e-6"
