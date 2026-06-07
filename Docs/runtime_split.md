@@ -24,6 +24,13 @@ MuJoCo C API state -> DDS LowState -> deploy_real_onnx --shadow inference
                    -> DDS LowCmd -> PD control -> MuJoCo C API actuator
 ```
 
+The C++ simulator keeps these responsibilities split across runtime threads:
+
+- InputThread: samples operator input. It currently publishes a neutral command snapshot and is the hook for a virtual or physical remote.
+- InferenceThread: converts the external DDS LowCmd stream into the latest action snapshot. In this shadow setup, ONNX inference still lives in `deploy_real_onnx --shadow`.
+- ControlThread: owns MuJoCo stepping, LowState publish, action safety, and PD actuator writes.
+- ViewThread: reads status snapshots only. It never writes commands or touches MuJoCo state.
+
 Example:
 
 ```bash

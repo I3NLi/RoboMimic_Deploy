@@ -23,7 +23,9 @@
 #include <filesystem>
 #include <mutex>
 #include <string>
+#include <thread>
 #include <time.h>
+#include <utility>
 #include <vector>
 
 #include <mujoco/mujoco.h>
@@ -388,6 +390,196 @@ void apply_pd_control(
     }
 }
 
+struct CommandSnapshot {
+    uint64_t seq{0};
+    double stamp{0.0};
+    bool estop{false};
+};
+
+struct ActionSnapshot {
+    uint64_t seq{0};
+    uint64_t lowcmd_recv{0};
+    double stamp{0.0};
+    bool valid{false};
+    std::vector<double> target_q;
+    std::vector<double> kp;
+    std::vector<double> kd;
+};
+
+struct ViewSnapshot {
+    int control_step{0};
+    uint64_t lowcmd_recv{0};
+    double q0{0.0};
+    double dq0{0.0};
+    double hz{0.0};
+    bool done{false};
+};
+
+template <typename T>
+class SharedValue {
+public:
+    SharedValue() = default;
+    explicit SharedValue(T value) : value_(std::move(value)) {}
+
+    void store(const T& value)
+    {
+        std::lock_guard<std::mutex> lk(mtx_);
+        value_ = value;
+    }
+
+    T load() const
+    {
+        std::lock_guard<std::mutex> lk(mtx_);
+        return value_;
+    }
+
+private:
+    mutable std::mutex mtx_;
+    T value_{};
+};
+
+struct RuntimeBuffers {
+    std::atomic<bool> stop{false};
+    SharedValue<CommandSnapshot> command;
+    SharedValue<ActionSnapshot> action;
+    SharedValue<ViewSnapshot> view;
+};
+
+void input_thread_fn(RuntimeBuffers& buffers, double period_s)
+{
+    uint64_t seq = 0;
+    while (!buffers.stop.load()) {
+        CommandSnapshot cmd;
+        cmd.seq = ++seq;
+        cmd.stamp = now_sec();
+        cmd.estop = false;
+        buffers.command.store(cmd);
+        sleep_sec(period_s);
+    }
+}
+
+void inference_thread_fn(
+    RuntimeBuffers& buffers,
+    DdsBridge& bridge,
+    int num_joints)
+{
+    uint64_t last_recv = 0;
+    uint64_t seq = 0;
+    std::vector<double> target_q(num_joints, 0.0);
+    std::vector<double> kp(num_joints, 0.0);
+    std::vector<double> kd(num_joints, 0.0);
+
+    while (!buffers.stop.load()) {
+        uint64_t recv = bridge.recv_count();
+        if (recv != last_recv) {
+            bridge.snapshot_cmd(target_q, kp, kd);
+            ActionSnapshot action;
+            action.seq = ++seq;
+            action.lowcmd_recv = recv;
+            action.stamp = now_sec();
+            action.valid = recv > 0;
+            action.target_q = target_q;
+            action.kp = kp;
+            action.kd = kd;
+            buffers.action.store(action);
+            last_recv = recv;
+        } else {
+            sleep_sec(0.0005);
+        }
+    }
+}
+
+void view_thread_fn(const Args& args, RuntimeBuffers& buffers)
+{
+    int last_printed = -1;
+    while (!buffers.stop.load()) {
+        ViewSnapshot view = buffers.view.load();
+        if (view.done) break;
+        if (view.control_step != last_printed &&
+            (view.control_step % args.print_every) == 0) {
+            std::printf(
+                "[view step=%d] lowcmd_recv=%llu q0=%.5f dq0=%.5f hz=%.2f\n",
+                view.control_step,
+                static_cast<unsigned long long>(view.lowcmd_recv),
+                view.q0,
+                view.dq0,
+                view.hz);
+            last_printed = view.control_step;
+        }
+        sleep_sec(0.01);
+    }
+}
+
+void control_thread_fn(
+    const Args& args,
+    mjModel* model,
+    mjData* data,
+    DdsBridge& bridge,
+    RuntimeBuffers& buffers,
+    const std::vector<int>& qpos_idx,
+    const std::vector<int>& qvel_idx)
+{
+    std::vector<double> target_q(model->nu, 0.0);
+    std::vector<double> kp(model->nu, 0.0);
+    std::vector<double> kd(model->nu, 0.0);
+
+    int control_step = 0;
+    double t0 = now_sec();
+    while (!buffers.stop.load() && control_step < args.max_steps) {
+        double step_start = now_sec();
+        CommandSnapshot command = buffers.command.load();
+        ActionSnapshot action = buffers.action.load();
+        if (action.valid &&
+            action.target_q.size() == static_cast<size_t>(model->nu) &&
+            action.kp.size() == static_cast<size_t>(model->nu) &&
+            action.kd.size() == static_cast<size_t>(model->nu)) {
+            target_q = action.target_q;
+            kp = action.kp;
+            kd = action.kd;
+        }
+        Args control_args = args;
+        if (command.estop) control_args.dry_run = true;
+
+        for (int i = 0; i < args.control_decimation; i++) {
+            apply_pd_control(control_args, model, data, target_q, kp, kd, qpos_idx, qvel_idx);
+            mj_step(model, data);
+        }
+
+        bridge.publish_state(model, data);
+        if (args.wait_cmd_ms > 0.0) {
+            double deadline = now_sec() + args.wait_cmd_ms * 1e-3;
+            while (bridge.recv_count() <= action.lowcmd_recv && now_sec() < deadline) {
+                sleep_sec(0.0002);
+            }
+        }
+
+        double elapsed = now_sec() - t0;
+        ViewSnapshot view;
+        view.control_step = control_step;
+        view.lowcmd_recv = bridge.recv_count();
+        view.q0 = data->qpos[7 + qpos_idx[0]];
+        view.dq0 = data->qvel[6 + qvel_idx[0]];
+        view.hz = (control_step + 1) / std::max(elapsed, 1e-9);
+        buffers.view.store(view);
+
+        if (args.realtime) {
+            double control_dt = args.sim_dt * args.control_decimation;
+            double remain = control_dt - (now_sec() - step_start);
+            if (remain > 0.0) sleep_sec(remain);
+        }
+        control_step++;
+    }
+
+    double elapsed = now_sec() - t0;
+    ViewSnapshot done = buffers.view.load();
+    done.control_step = control_step;
+    done.lowcmd_recv = bridge.recv_count();
+    done.hz = control_step / std::max(elapsed, 1e-9);
+    done.done = true;
+    buffers.view.store(done);
+    buffers.stop.store(true);
+}
+
 }  // namespace
 
 int main(int argc, char** argv)
@@ -424,10 +616,6 @@ int main(int argc, char** argv)
     ChannelFactory::Instance()->Init(0, args.net);
     DdsBridge bridge(args, num_joints, mj2lab, qpos_idx, qvel_idx);
 
-    std::vector<double> target_q(num_joints, 0.0);
-    std::vector<double> kp(num_joints, 0.0);
-    std::vector<double> kd(num_joints, 0.0);
-
     std::printf("=== MuJoCo DDS Sim (C++ MuJoCo API) ===\n");
     std::printf("XML      : %s\n", xml_path.string().c_str());
     std::printf("NET      : %s\n", args.net.c_str());
@@ -442,47 +630,41 @@ int main(int argc, char** argv)
                 args.state_lab_order ? "lab" : "mujoco",
                 args.cmd_lab_order ? "lab" : "mujoco");
 
-    uint64_t last_recv = 0;
-    int control_step = 0;
-    double t0 = now_sec();
-    while (control_step < args.max_steps) {
-        double step_start = now_sec();
-        bridge.snapshot_cmd(target_q, kp, kd);
-        for (int i = 0; i < args.control_decimation; i++) {
-            apply_pd_control(args, model, data, target_q, kp, kd, qpos_idx, qvel_idx);
-            mj_step(model, data);
-        }
+    RuntimeBuffers buffers;
+    ActionSnapshot initial_action;
+    initial_action.target_q.assign(num_joints, 0.0);
+    initial_action.kp.assign(num_joints, 0.0);
+    initial_action.kd.assign(num_joints, 0.0);
+    buffers.action.store(initial_action);
+    ViewSnapshot initial_view;
+    initial_view.q0 = data->qpos[7 + qpos_idx[0]];
+    initial_view.dq0 = data->qvel[6 + qvel_idx[0]];
+    buffers.view.store(initial_view);
 
-        bridge.publish_state(model, data);
-        if (args.wait_cmd_ms > 0.0) {
-            double deadline = now_sec() + args.wait_cmd_ms * 1e-3;
-            while (bridge.recv_count() <= last_recv && now_sec() < deadline) {
-                sleep_sec(0.0002);
-            }
-        }
-        last_recv = bridge.recv_count();
+    std::thread input_thread(input_thread_fn, std::ref(buffers), args.sim_dt * args.control_decimation);
+    std::thread inference_thread(inference_thread_fn, std::ref(buffers), std::ref(bridge), num_joints);
+    std::thread view_thread(view_thread_fn, std::cref(args), std::ref(buffers));
+    std::thread control_thread(
+        control_thread_fn,
+        std::cref(args),
+        model,
+        data,
+        std::ref(bridge),
+        std::ref(buffers),
+        std::cref(qpos_idx),
+        std::cref(qvel_idx));
 
-        if ((control_step % args.print_every) == 0) {
-            std::printf("[sim step=%d] lowcmd_recv=%llu q0=%.5f dq0=%.5f\n",
-                        control_step,
-                        static_cast<unsigned long long>(last_recv),
-                        data->qpos[7 + qpos_idx[0]],
-                        data->qvel[6 + qvel_idx[0]]);
-        }
-        if (args.realtime) {
-            double control_dt = args.sim_dt * args.control_decimation;
-            double remain = control_dt - (now_sec() - step_start);
-            if (remain > 0.0) sleep_sec(remain);
-        }
-        control_step++;
-    }
+    control_thread.join();
+    buffers.stop.store(true);
+    input_thread.join();
+    inference_thread.join();
+    view_thread.join();
 
-    double elapsed = now_sec() - t0;
-    std::printf("[Summary] control_steps=%d lowcmd_recv=%llu elapsed=%.3fs hz=%.2f\n",
-                control_step,
-                static_cast<unsigned long long>(bridge.recv_count()),
-                elapsed,
-                control_step / std::max(elapsed, 1e-9));
+    ViewSnapshot summary = buffers.view.load();
+    std::printf("[Summary] control_steps=%d lowcmd_recv=%llu hz=%.2f\n",
+                summary.control_step,
+                static_cast<unsigned long long>(summary.lowcmd_recv),
+                summary.hz);
 
     mj_deleteData(data);
     mj_deleteModel(model);
