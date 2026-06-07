@@ -979,7 +979,7 @@ private:
 };
 
 // ============================================================
-// FSM — mirrors Python FSM
+// FSM — registry-based transition shell
 // ============================================================
 
 enum class FSMMode { NORMAL, CHANGE };
@@ -1002,43 +1002,52 @@ public:
           beyond_stub_(FSMStateName::SKILL_BEYOND_MIMIC, "BeyondMimic(stub)", sc, po),
           track_stub_(FSMStateName::SKILL_TRACK_MIMIC, "TrackMimic(stub)", sc, po)
     {
+        register_builtin_policies();
         imu_calib_.set_loco_provider([this]() -> FSMState* {
-            return resolve_policy(FSMStateName::LOCOMODE);
+            return get_registered_policy(FSMStateName::LOCOMODE);
         });
-        cur_ = &passive_;
+        select_state(FSMStateName::PASSIVE);
         printf("[FSM] Initialized. Policy: %s\n", cur_->name_str.c_str());
     }
 
     /** Register an external policy (e.g. ONNX-based). Takes ownership. */
     void register_policy(FSMStateName name, std::unique_ptr<FSMState> policy)
     {
+        if (!policy) {
+            printf("[FSM][WARN] Ignoring null policy for state %d\n", (int)name);
+            return;
+        }
         extra_[name] = std::move(policy);
+
+        PolicyRecord rec;
+        auto old = records_.find(name);
+        if (old != records_.end()) rec = old->second;
+        rec.policy = extra_[name].get();
+        rec.mimic = rec.mimic || is_mimic_state_name(name);
+        records_[name] = rec;
+        aliases_[name] = name;
+
+        printf("[FSM] registered policy %s for state %d\n",
+               records_[name].policy->name_str.c_str(), (int)name);
     }
 
     /**
-     * Directly jump to a state — for shadow / test use only.
-     * Calls exit() on the current state, then schedules enter() on the next
-     * run() call (via CHANGE mode), exactly like a normal FSM transition.
+     * Directly jump to a state for shadow/test use.
+     * exit() runs now; enter() is scheduled for the next run() call.
      */
     void force_state(FSMStateName name)
     {
         set_pause(false);
         if (cur_) cur_->exit();
-        set_policy(name);
-        mode_ = FSMMode::CHANGE;   // enter() will be called on the next run()
-        printf("[FSM] force_state → %s\n", cur_->name_str.c_str());
+        select_state(name);
+        mode_ = FSMMode::CHANGE;
+        sc_.skill_cmd = FSMCommand::INVALID;
+        printf("[FSM] force_state -> %s\n", cur_->name_str.c_str());
     }
 
     void run()
     {
-        // Match Python FSM pause semantics:
-        // - Pause toggle only works in mimic policies
-        // - While paused, keep current policy running but block mode switch
-        if (sc_.skill_cmd == FSMCommand::PAUSE) {
-            sc_.skill_cmd = FSMCommand::INVALID;
-            if (is_mimic_policy()) set_pause(!paused_);
-            else                   set_pause(false);
-        }
+        handle_pause_command();
 
         if (paused_ && !is_mimic_policy()) {
             set_pause(false);
@@ -1051,30 +1060,42 @@ public:
             }
         }
 
-        if (mode_ == FSMMode::NORMAL) {
-            cur_->run();
-            if (!paused_) {
-                FSMStateName next = cur_->check_change();
-                if (next != cur_->name) {
-                    mode_ = FSMMode::CHANGE;
-                    cur_->exit();
-                    set_policy(next);
-                    printf("[FSM] → %s\n", cur_->name_str.c_str());
-                }
-            }
-        } else {  // CHANGE
+        if (mode_ == FSMMode::CHANGE) {
             cur_->enter();
             mode_ = FSMMode::NORMAL;
             cur_->run();
+            return;
         }
 
+        cur_->run();
+        if (paused_) return;
+
+        FSMStateName requested = cur_->check_change();
+        transition_if_needed(requested);
+    }
+
+    FSMState* current_policy() { return cur_; }
+
+    FSMState* get_registered_policy(FSMStateName name)
+    {
+        auto state = normalize_state(name);
+        auto it = records_.find(state);
+        if (it == records_.end()) return nullptr;
+        return it->second.policy;
     }
 
 private:
+    struct PolicyRecord {
+        FSMState* policy { nullptr };
+        bool mimic { false };
+        std::string hint;
+    };
+
     StateAndCmd&  sc_;
     PolicyOutput& po_;
     FSMMode mode_   { FSMMode::NORMAL };
     bool    paused_ { false };
+    FSMStateName current_state_ { FSMStateName::PASSIVE };
 
     PassiveMode         passive_;
     FixedPose           fixed_;
@@ -1091,59 +1112,153 @@ private:
     MimicFallbackMode       track_stub_;
 
     std::map<FSMStateName, std::unique_ptr<FSMState>> extra_;
+    std::map<FSMStateName, PolicyRecord> records_;
+    std::map<FSMStateName, FSMStateName> aliases_;
+    std::map<FSMStateName, bool> warned_missing_;
 
     FSMState* cur_ { nullptr };
 
+    static bool is_mimic_state_name(FSMStateName name)
+    {
+        return name == FSMStateName::SKILL_BEYOND_MIMIC
+            || name == FSMStateName::SKILL_TRACK_MIMIC;
+    }
+
+    void register_builtin(
+        FSMStateName name,
+        FSMState* policy,
+        bool mimic = false,
+        const std::string& hint = "")
+    {
+        records_[name] = PolicyRecord{policy, mimic, hint};
+        aliases_[name] = name;
+    }
+
+    void register_builtin_policies()
+    {
+        register_builtin(
+            FSMStateName::PASSIVE,
+            &passive_,
+            false,
+            "[Hints] PASSIVE/DAMPING, START=POS_RESET, R1+A=LOCO");
+        register_builtin(
+            FSMStateName::FIXEDPOSE,
+            &fixed_,
+            false,
+            "[Hints] R1+A=LOCO, L3=PASSIVE");
+        register_builtin(
+            FSMStateName::LOCOMODE,
+            &loco_,
+            false,
+            "[Hints] R1+X/R1+Y/L1+Y=skill, L3=PASSIVE");
+        register_builtin(
+            FSMStateName::SKILL_COOLDOWN,
+            &cooldown_,
+            false,
+            "[Hints] auto return to LOCO or L3=PASSIVE");
+        register_builtin(FSMStateName::SKILL_CAST, &skill_cast_);
+        register_builtin(FSMStateName::SKILL_KUNGFU, &kungfu_);
+        register_builtin(FSMStateName::SKILL_DANCE, &dance_);
+        register_builtin(FSMStateName::SKILL_KICK, &kick_);
+        register_builtin(FSMStateName::SKILL_KUNGFU2, &kungfu2_);
+        register_builtin(
+            FSMStateName::SKILL_BEYOND_MIMIC,
+            &beyond_stub_,
+            true,
+            "[Hints] R1+A=LOCO, L3=PASSIVE, UP=PAUSE");
+        register_builtin(
+            FSMStateName::SKILL_TRACK_MIMIC,
+            &track_stub_,
+            true,
+            "[Hints] R1+A=LOCO, L3=PASSIVE, UP=PAUSE");
+        register_builtin(
+            FSMStateName::JOINT_ZERO_CHECK,
+            &joint_zero_,
+            false,
+            "[Hints] joint-zero check, R1+A=LOCO, L3=PASSIVE");
+        register_builtin(
+            FSMStateName::IMU_CALIB,
+            &imu_calib_,
+            false,
+            "[Hints] auto return to LOCO or L3=PASSIVE");
+    }
+
+    void handle_pause_command()
+    {
+        if (sc_.skill_cmd != FSMCommand::PAUSE) return;
+        sc_.skill_cmd = FSMCommand::INVALID;
+        if (is_mimic_policy()) set_pause(!paused_);
+        else                   set_pause(false);
+    }
+
+    void transition_if_needed(FSMStateName requested)
+    {
+        if (requested == FSMStateName::INVALID) requested = current_state_;
+
+        FSMStateName target_state = normalize_state(requested);
+        FSMState* target = get_registered_policy(target_state);
+        if (!target) return;
+        if (target == cur_ && target_state == current_state_) return;
+
+        set_pause(false);
+        mode_ = FSMMode::CHANGE;
+        cur_->exit();
+        current_state_ = target_state;
+        cur_ = target;
+        printf("[FSM] -> %s\n", cur_->name_str.c_str());
+        print_mode_hints(target_state);
+    }
+
+    FSMStateName normalize_state(FSMStateName requested)
+    {
+        auto alias = aliases_.find(requested);
+        if (alias != aliases_.end()) return alias->second;
+
+        if (!warned_missing_[requested]) {
+            warned_missing_[requested] = true;
+            printf("[FSM][WARN] Unknown/unregistered state %d, keeping %s\n",
+                   (int)requested, cur_ ? cur_->name_str.c_str() : "null");
+        }
+        return current_state_;
+    }
+
+    bool select_state(FSMStateName requested)
+    {
+        FSMStateName target_state = normalize_state(requested);
+        FSMState* target = get_registered_policy(target_state);
+        if (!target) {
+            if (!cur_) {
+                current_state_ = FSMStateName::PASSIVE;
+                cur_ = &passive_;
+            }
+            return false;
+        }
+        current_state_ = target_state;
+        cur_ = target;
+        return true;
+    }
+
     bool is_mimic_policy() const
     {
-        if (!cur_) return false;
-        return cur_->name == FSMStateName::SKILL_BEYOND_MIMIC
-            || cur_->name == FSMStateName::SKILL_TRACK_MIMIC;
+        auto it = records_.find(current_state_);
+        return it != records_.end() && it->second.mimic;
     }
 
     void set_pause(bool enable)
     {
+        if (paused_ == enable && sc_.pause == enable) return;
         paused_ = enable;
         sc_.pause = enable;
         if (enable) printf("[FSM] Pause ON\n");
         else        printf("[FSM] Pause OFF\n");
     }
 
-    FSMState* resolve_policy(FSMStateName name)
+    void print_mode_hints(FSMStateName state)
     {
-        auto it = extra_.find(name);
-        if (it != extra_.end() && it->second) return it->second.get();
-
-        switch (name) {
-            case FSMStateName::PASSIVE:            return &passive_;
-            case FSMStateName::FIXEDPOSE:          return &fixed_;
-            case FSMStateName::LOCOMODE:           return &loco_;
-            case FSMStateName::SKILL_COOLDOWN:     return &cooldown_;
-            case FSMStateName::SKILL_CAST:         return &skill_cast_;
-            case FSMStateName::SKILL_KUNGFU:       return &kungfu_;
-            case FSMStateName::SKILL_DANCE:        return &dance_;
-            case FSMStateName::SKILL_KICK:         return &kick_;
-            case FSMStateName::SKILL_KUNGFU2:      return &kungfu2_;
-            case FSMStateName::SKILL_BEYOND_MIMIC: return &beyond_stub_;
-            case FSMStateName::JOINT_ZERO_CHECK:   return &joint_zero_;
-            case FSMStateName::IMU_CALIB:          return &imu_calib_;
-            case FSMStateName::SKILL_TRACK_MIMIC:  return &track_stub_;
-            default:                               return nullptr;
+        auto it = records_.find(state);
+        if (it != records_.end() && !it->second.hint.empty()) {
+            printf("%s\n", it->second.hint.c_str());
         }
-    }
-
-    void set_policy(FSMStateName name)
-    {
-        FSMState* target = resolve_policy(name);
-        if (target) {
-            cur_ = target;
-            return;
-        }
-        // Match Python behavior more closely: ignore unknown target
-        // and keep current policy instead of force-fallback.
-        printf("[FSM] Unknown/unregistered state %d, keep current policy %s\n",
-               (int)name, cur_ ? cur_->name_str.c_str() : "null");
-        if (!cur_) cur_ = &passive_;
     }
 };
 

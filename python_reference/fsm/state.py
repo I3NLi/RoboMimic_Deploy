@@ -1,4 +1,6 @@
-from shared.path_config import PROJECT_ROOT
+from shared.path_config import PROJECT_ROOT as _PROJECT_ROOT
+
+_PATH_CONFIG_READY = str(_PROJECT_ROOT)
 
 from shared.utils import FSMStateName
 

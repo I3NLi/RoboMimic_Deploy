@@ -31,6 +31,14 @@ The C++ simulator keeps these responsibilities split across runtime threads:
 - ControlThread: owns MuJoCo stepping, LowState publish, action safety, and PD actuator writes.
 - ViewThread: reads status snapshots only. It never writes commands or touches MuJoCo state.
 
+FSM boundary:
+
+- FSM owns state registration, state aliases, force-state requests, pause routing, and enter/run/exit scheduling.
+- Policy classes own observation construction and action generation only; their `checkChange` result is treated as a requested transition.
+- Python reference keeps legacy skill aliases routed to `SKILL_BEYOND_MIMIC` for comparison parity.
+- C++ runtime prefers exact registered policies first. If ONNX registration replaces a stub, FSM routing does not change.
+- Remote/controller code should set `FSMCommand` or call `force_state`; it should not select policy objects directly.
+
 Example:
 
 ```bash
