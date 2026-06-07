@@ -13,7 +13,7 @@
 
 - **This `/home/hiyio/MaigcLab/RoboMimic_Deploy_magicbot` workspace uses the MagicBot Z1 24-DoF configuration, not the original G1 29-DoF setup.**
 
-- **The MuJoCo XML is `/home/hiyio/HoloMotion/thirdparties/GMR/assets/magicbot_z1/mjcf/MAGICBOTZ1.xml`.**
+- **The MuJoCo XML is `assets/robots/magicbot_z1/scene.xml`.**
   
 - **The current validated target is simulation. For real-robot deployment, re-check the Z1 SDK, motor order, limits, initial pose, and emergency stop path first.**
 
@@ -78,12 +78,12 @@ pip install -e .
 
 ## C++ Deploy Real Documentation
 
-- For `deploy_real_c` build/run/verify instructions, see:
-  - [`deploy_real_c/README.md`](deploy_real_c/README.md)
+- For `controller_cpp` build/run/verify instructions, see:
+  - [`controller_cpp/README.md`](controller_cpp/README.md)
 
 ## 1. Run Mujoco Simulation
 ```bash
-/home/hiyio/anaconda3/envs/robomimic/bin/python -u deploy_mujoco/deploy_mujoco.py
+/home/hiyio/anaconda3/envs/robomimic/bin/python -u python_reference/simulation/mujoco_reference.py
 ```
 
 ## 2. Policy Descriptions
@@ -92,7 +92,7 @@ pip install -e .
 | **PassiveMode**  | Damping protection mode                                                     |
 | **FixedPose**    | Position control reset to default joint values                              |
 | **LocoMode**     | Z1 locomotion entry still needs re-adaptation from the LeggedLab config; current dance testing can bypass it |
-| **BeyondMimic**  | Z1 24-DoF dance / whole-body tracking policy: `policy/beyond_mimic/model/policy.onnx` |
+| **BeyondMimic**  | Z1 24-DoF dance / whole-body tracking policy: `policies/beyond_mimic/model/policy.onnx` |
 | **Dance**        | Legacy entry; current Z1 dance routing is mapped to BeyondMimic             |
 | **KungFu**       | Martial arts movement                                                       |
 | **KungFu2**      | Failed martial arts training                                     |
@@ -106,19 +106,19 @@ pip install -e .
 1. Connect an Xbox controller.
 2. Run the simulation program:
 ```bash
-/home/hiyio/anaconda3/envs/robomimic/bin/python -u deploy_mujoco/deploy_mujoco.py
+/home/hiyio/anaconda3/envs/robomimic/bin/python -u python_reference/simulation/mujoco_reference.py
 ```
 3. The program starts in `PassiveMode`.
 4. Hold `START` to enter `FixedPose`.
 5. Hold `R1 + A` to enter `LocoMode`; walk still needs full re-adaptation from the LeggedLab config, so dance testing does not require this mode.
-6. In `FixedPose` or `LocoMode`, hold `R1 + X` or `L1 + Y` to enter `BeyondMimic` and run the current Z1 dance / whole-body tracking policy.
+6. In `FixedPose` or `LocoMode`, hold `R1 + X` or `L1 + Y` to enter `BeyondMimic` and run the current Z1 dance / whole-body tracking policies.
 7. In `BeyondMimic`, press `UP` to pause/resume the reference frame, hold `R1 + A` to return to locomotion, press `START` for position reset, or press `L3` for damping protection.
 8. Hold `SELECT` to exit the MuJoCo control program.
 
 ### Current Z1 Policy Baseline
 
 - Locomotion: not switched to the latest LeggedLab strategy yet; it needs re-adaptation of observations, normalization, joint order, and action scaling from `/home/hiyio/LeggedLab`
-- Dance / whole-body tracking: `policy/beyond_mimic/model/policy.onnx`
+- Dance / whole-body tracking: `policies/beyond_mimic/model/policy.onnx`
 - BeyondMimic source:
   `/home/hiyio/whole_body_tracking/logs/rsl_rl/magicbot_z1_flat/2026-05-03_13-51-53_magicbot_spike_smooth_head_aligned_to_aiming1_height+Tracking-Flat-MagicBot-Z1-Wo-State-Estimation-v0_resume-model_124000/exported/policy.onnx`
 - ONNX shape: `obs [1,124]` + `time_step [1,1]`, 24-DoF action output with embedded reference trajectory, motion length `3309`.
@@ -129,9 +129,9 @@ For MagicBot Z1 real-robot work, prefer the official MagicBot SDK backend:
 
 ```bash
 cd /home/hiyio/MaigcLab/RoboMimic_Deploy_magicbot
-deploy_real/run_magicbot_loco.sh --dry-run
-deploy_real/run_magicbot_loco.sh --connect-check --local-ip 192.168.54.119
-deploy_real/run_magicbot_loco.sh --read-state --local-ip 192.168.54.119 --duration 3
+python_reference/legacy_robot/run_magicbot_loco_reference.sh --dry-run
+python_reference/legacy_robot/run_magicbot_loco_reference.sh --connect-check --local-ip 192.168.54.119
+python_reference/legacy_robot/run_magicbot_loco_reference.sh --read-state --local-ip 192.168.54.119 --duration 3
 ```
 
 Safe sequence:
@@ -142,12 +142,12 @@ Safe sequence:
 4. `--read-state`: switch `HighLevel -> GAIT_RECOVERY_STAND -> LowLevel`, subscribe low-level states, and publish no `JointCommand`.
 5. Only after the checks pass, explicitly use `--run --stand-only --duration N` or `--run --duration N`.
 
-The legacy `deploy_real/deploy_real.py` path is still Unitree DDS
+The legacy `python_reference/legacy_robot/dds_robot_legacy.py` path is still Unitree DDS
 `rt/lowcmd`/`rt/lowstate`; it is not the current MagicBot Z1 real-robot backend.
 
 ---
 ## Debug Safety (New)
-- `deploy_real/config/safety.yaml` and `deploy_mujoco/config/safety.yaml` control safety limits.
+- `configs/robot/safety.yaml` and `configs/simulation/safety.yaml` control safety limits.
 - Default enables action/gain clamping, hold-to-confirm for mode switches, and damping fallback on faults.
 - Set `dry_run: true` for compute-only (no command output).
 
@@ -156,10 +156,10 @@ The legacy `deploy_real/deploy_real.py` path is still Unitree DDS
 ### 1. Framework Compatibility Notice
 The original framework targeted G1; this workspace is now adapted for MagicBot Z1 simulation. Real-robot deployment must use the MagicBot Z1 SDK and the audited physical motor order.
 
-- `deploy_real/run_magicbot_loco.sh` is the new MagicBot SDK loco backend.
-- `deploy_real/deploy_real.py` and `deploy_real_c` still keep the Unitree DDS / shadow-compare logic and should not be treated as the MagicBot Z1 real-robot backend.
+- `python_reference/legacy_robot/run_magicbot_loco_reference.sh` is the new MagicBot SDK loco backend.
+- `python_reference/legacy_robot/dds_robot_legacy.py` and `controller_cpp` still keep the Unitree DDS / shadow-compare logic and should not be treated as the MagicBot Z1 real-robot backend.
 - The BeyondMimic/dance SDK backend still needs to be ported from the simulation policy; do not run it directly on the real robot yet.
-- Runtime layer split notes: `Docs/runtime_split.md`.
+- Runtime layer split notes: `docs/runtime_split.md`.
 
 ### 2. Mimic Policy Reliability Warning
 The Mimic policy does not guarantee 100% success rate, particularly on slippery/sandy surfaces. In case of robot instability:
@@ -167,10 +167,10 @@ The Mimic policy does not guarantee 100% success rate, particularly on slippery/
 - Press `Select` to immediately terminate the control program
 
 ### 3. Z1 BeyondMimic Dance - Current Baseline
-The current Z1 dance entry is `BeyondMimic`, not the legacy `policy/dance/Dance.py` path:
+The current Z1 dance entry is `BeyondMimic`, not the legacy `policies/dance/Dance.py` path:
 
 ⚠️ **Important Precautions**:
-- **Model Path**: `policy/beyond_mimic/model/policy.onnx`
+- **Model Path**: `policies/beyond_mimic/model/policy.onnx`
 - **Control Entry**: `R1 + X` or `L1 + Y`
 - **Initial/Final Stabilization**: Brief manual stabilization may be required when starting/ending the dance
 - **Post-Dance Transition**: While switching to **Locomotion/PositionControl/PassiveMode** is possible, we recommend:

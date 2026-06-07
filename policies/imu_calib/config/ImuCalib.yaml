@@ -1,0 +1,4 @@
+control_dt: 0.02
+settle_time: 2.0
+sample_time: 3.0
+onnx_path: "/home/hiyio/MaigcLab/RoboMimic_Deploy_magicbot/policies/beyond_mimic/model/policy.onnx"
