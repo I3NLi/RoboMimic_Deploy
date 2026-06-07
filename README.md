@@ -159,6 +159,7 @@ The original framework targeted G1; this workspace is now adapted for MagicBot Z
 - `deploy_real/run_magicbot_loco.sh` is the new MagicBot SDK loco backend.
 - `deploy_real/deploy_real.py` and `deploy_real_c` still keep the Unitree DDS / shadow-compare logic and should not be treated as the MagicBot Z1 real-robot backend.
 - The BeyondMimic/dance SDK backend still needs to be ported from the simulation policy; do not run it directly on the real robot yet.
+- Runtime layer split notes: `Docs/runtime_split.md`.
 
 ### 2. Mimic Policy Reliability Warning
 The Mimic policy does not guarantee 100% success rate, particularly on slippery/sandy surfaces. In case of robot instability:

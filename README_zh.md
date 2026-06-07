@@ -161,6 +161,7 @@ deploy_real/run_magicbot_loco.sh --read-state --local-ip 192.168.54.119 --durati
 - `deploy_real/run_magicbot_loco.sh` 是当前新增的 MagicBot SDK loco 后端。
 - `deploy_real/deploy_real.py` 和 `deploy_real_c` 仍保留 Unitree DDS/shadow compare 逻辑，不能直接视为 MagicBot Z1 真机后端。
 - BeyondMimic/舞蹈真机 SDK 后端仍需继续从仿真策略迁移，当前不要直接上实机。
+- 运行时分层说明见：`Docs/runtime_split.md`。
 
 ### 2. Mimic策略可靠性警告
 Mimic策略不保证100%成功率，特别是在湿滑/沙地等复杂地面上。若出现机器人失控情况：

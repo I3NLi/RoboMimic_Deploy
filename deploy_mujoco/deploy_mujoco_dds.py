@@ -35,11 +35,8 @@ import os
 os.environ.setdefault("__GL_SYNC_TO_VBLANK", "0")
 os.environ.setdefault("vblank_mode", "0")
 import time
-import struct
-import threading
 import argparse
 import json
-from contextlib import nullcontext
 from pathlib import Path
 from enum import IntEnum
 from collections import deque
@@ -51,25 +48,18 @@ from common.path_config import PROJECT_ROOT
 from common.ctrlcomp import StateAndCmd, PolicyOutput
 from common.utils import get_gravity_orientation, FSMCommand
 from common.safety import load_safety_config, SafetyFilter, HoldToConfirm
-from FSM.FSM import FSM, FSMMode
+from runtime.compare import DiffLogger
+from runtime.communication.dds import DDSBridge, WirelessRemoteBuilder, initialize_dds
+from runtime.control import pd_control, sanitize_ctrl
+from runtime.inference import force_fsm_state
+from runtime.input import NullJoyStick
+from runtime.rendering import mujoco_viewer_context
+from FSM.FSM import FSM
 from FSM.FSMState import FSMStateName
 
 import numpy as np
 import mujoco
-import mujoco.viewer
 import yaml
-
-from unitree_sdk2py.core.channel import (
-    ChannelPublisher,
-    ChannelSubscriber,
-    ChannelFactoryInitialize,
-)
-from unitree_sdk2py.idl.default import (
-    unitree_hg_msg_dds__LowCmd_,
-    unitree_hg_msg_dds__LowState_,
-)
-from unitree_sdk2py.idl.unitree_hg.msg.dds_ import LowCmd_   as LowCmdHG
-from unitree_sdk2py.idl.unitree_hg.msg.dds_ import LowState_ as LowStateHG
 
 try:
     from common.joystick import JoyStick, JoystickButton
@@ -94,348 +84,6 @@ except Exception as e:
         DOWN = 12
         LEFT = 13
         RIGHT = 14
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-class NullJoyStick:
-    """Joystick stub for headless/CI runs."""
-
-    def update(self):
-        return None
-
-    def is_button_pressed(self, _button_id):
-        return False
-
-    def is_button_released(self, _button_id):
-        return False
-
-    def get_axis_value(self, _axis_id):
-        return 0.0
-
-
-def force_fsm_state(fsm: FSM, state_name: FSMStateName):
-    """Force Python FSM into a state, mirroring C++ shadow mode behavior."""
-    try:
-        fsm.cur_policy.exit()
-    except Exception:
-        pass
-    fsm.get_next_policy(state_name)
-    fsm.FSMmode = FSMMode.CHANGE
-    print(f"[FSM] force_state -> {state_name.name}")
-
-
-# ---------------------------------------------------------------------------
-# wireless_remote byte builder
-# ---------------------------------------------------------------------------
-
-class WirelessRemoteBuilder:
-    """
-    Encode joystick state into the 40-byte wireless_remote array expected by
-    the unitree LowState message.
-
-    Bit positions match common/remote_controller.py KeyMap:
-        R1=0, L1=1, start=2, select=3, R2=4, L2=5, F1=6, F2=7,
-        A=8,  B=9,  X=10,   Y=11,   up=12, right=13, down=14, left=15
-    """
-    # KeyMap bit positions
-    R1 = 0; L1 = 1; start = 2; select = 3
-    R2 = 4; L2 = 5; F1 = 6;   F2 = 7
-    A  = 8; B  = 9; X  = 10;  Y  = 11
-    up = 12; right = 13; down = 14; left = 15
-
-    # JoystickButton → KeyMap bit
-    _JB_MAP = {
-        JoystickButton.A:      A,
-        JoystickButton.B:      B,
-        JoystickButton.X:      X,
-        JoystickButton.Y:      Y,
-        JoystickButton.L1:     L1,
-        JoystickButton.R1:     R1,
-        JoystickButton.SELECT: select,
-        JoystickButton.START:  start,
-        JoystickButton.UP:     up,
-        JoystickButton.DOWN:   down,
-        JoystickButton.LEFT:   left,
-        JoystickButton.RIGHT:  right,
-    }
-
-    @classmethod
-    def from_joystick(cls, joy: JoyStick) -> list:
-        """Build wireless_remote bytes from live joystick state."""
-        bits = 0
-        for jb, kbit in cls._JB_MAP.items():
-            if joy.is_button_pressed(jb):
-                bits |= (1 << kbit)
-
-        # Axis mapping to match deploy_real.py sign conventions
-        # remote lx  -> vel_cmd[1] = lx*-1   ; joystick axis 0 -> vel_cmd[1] = -axis0
-        # remote ly  -> vel_cmd[0] = ly       ; joystick axis 1 -> vel_cmd[0] = -axis1  => ly = -axis1
-        # remote rx  -> vel_cmd[2] = rx*-1    ; joystick axis 3 -> vel_cmd[2] = -axis3  => rx =  axis3
-        lx = float(joy.get_axis_value(0))
-        ly = float(-joy.get_axis_value(1))
-        rx = float(joy.get_axis_value(3))
-        ry = 0.0
-
-        data = bytearray(40)
-        struct.pack_into("H", data, 2,  bits & 0xFFFF)
-        struct.pack_into("f", data, 4,  lx)
-        struct.pack_into("f", data, 8,  rx)
-        struct.pack_into("f", data, 12, ry)
-        struct.pack_into("f", data, 20, ly)
-        return list(data)
-
-    @classmethod
-    def neutral(cls) -> list:
-        """Return a neutral (all zeros) wireless_remote byte array."""
-        return [0] * 40
-
-
-# ---------------------------------------------------------------------------
-# DDS bridge
-# ---------------------------------------------------------------------------
-
-class DDSBridge:
-    """
-    Publish rt/lowstate (MuJoCo state in lab ordering).
-    Subscribe rt/lowcmd  (C++ policy output in lab ordering).
-    """
-
-    LOWSTATE_TOPIC = "rt/lowstate"
-    LOWCMD_TOPIC   = "rt/lowcmd"
-
-    def __init__(
-        self,
-        num_joints: int,
-        mj2lab: np.ndarray,
-        state_lab_order: bool = False,
-        cmd_lab_order: bool = False,
-    ):
-        """
-        Parameters
-        ----------
-        num_joints : int
-        mj2lab     : 1-D int array of length num_joints
-                     mj2lab[lab_idx] = mujoco_idx
-        state_lab_order : bool
-            True  -> publish rt/lowstate in lab order via mj2lab.
-            False -> publish rt/lowstate in MuJoCo order directly.
-        cmd_lab_order : bool
-            True  -> parse rt/lowcmd as lab order via mj2lab.
-            False -> parse rt/lowcmd as MuJoCo order directly.
-        """
-        self.num_joints = num_joints
-        self.mj2lab = np.asarray(mj2lab, dtype=np.int32)
-        self.state_lab_order = bool(state_lab_order)
-        self.cmd_lab_order = bool(cmd_lab_order)
-
-        self._lock = threading.Lock()
-        self._latest_cmd: LowCmdHG | None = None
-        self._cmd_recv_count: int = 0
-
-        # Publisher
-        self._state_pub = ChannelPublisher(self.LOWSTATE_TOPIC, LowStateHG)
-        self._state_pub.Init()
-
-        # Subscriber
-        self._cmd_sub = ChannelSubscriber(self.LOWCMD_TOPIC, LowCmdHG)
-        self._cmd_sub.Init(self._on_lowcmd, 10)
-
-        self._tick = 1   # keep > 0 so C++ wait_for_low_state() exits immediately
-
-    def _on_lowcmd(self, msg: LowCmdHG):
-        with self._lock:
-            self._latest_cmd = msg
-            self._cmd_recv_count += 1
-
-    def publish_state(
-        self,
-        qpos_mj: np.ndarray,    # joint positions in MuJoCo ordering  (num_joints,)
-        qvel_mj: np.ndarray,    # joint velocities in MuJoCo ordering  (num_joints,)
-        quat_wxyz: np.ndarray,  # base quaternion [w, x, y, z]
-        omega: np.ndarray,      # base angular velocity [wx, wy, wz]
-        wireless_remote: list,
-        mode_machine: int = 0,
-    ):
-        ls = unitree_hg_msg_dds__LowState_()
-        ls.tick = self._tick
-        self._tick += 1
-        ls.mode_machine = mode_machine
-
-        if self.state_lab_order:
-            # Reorder MuJoCo joints → lab ordering for the LowState message
-            for lab_i in range(self.num_joints):
-                mj_i = int(self.mj2lab[lab_i])
-                ls.motor_state[lab_i].q  = float(qpos_mj[mj_i])
-                ls.motor_state[lab_i].dq = float(qvel_mj[mj_i])
-        else:
-            for i in range(self.num_joints):
-                ls.motor_state[i].q  = float(qpos_mj[i])
-                ls.motor_state[i].dq = float(qvel_mj[i])
-
-        ls.imu_state.quaternion[0] = float(quat_wxyz[0])  # w
-        ls.imu_state.quaternion[1] = float(quat_wxyz[1])  # x
-        ls.imu_state.quaternion[2] = float(quat_wxyz[2])  # y
-        ls.imu_state.quaternion[3] = float(quat_wxyz[3])  # z
-
-        ls.imu_state.gyroscope[0] = float(omega[0])
-        ls.imu_state.gyroscope[1] = float(omega[1])
-        ls.imu_state.gyroscope[2] = float(omega[2])
-
-        ls.wireless_remote = wireless_remote
-        self._state_pub.Write(ls)
-
-    def get_latest_cmd(self):
-        """Return (LowCmdHG | None, recv_count)."""
-        with self._lock:
-            return self._latest_cmd, self._cmd_recv_count
-
-    def cmd_to_mj_arrays(self, cmd: LowCmdHG):
-        """
-        Convert C++ LowCmd → MuJoCo ordering arrays.
-
-        Returns (target_q_mj, kp_mj, kd_mj) each of shape (num_joints,).
-        """
-        target_q_mj = np.zeros(self.num_joints, dtype=np.float32)
-        kp_mj       = np.zeros(self.num_joints, dtype=np.float32)
-        kd_mj       = np.zeros(self.num_joints, dtype=np.float32)
-        if self.cmd_lab_order:
-            for lab_i in range(self.num_joints):
-                mj_i = int(self.mj2lab[lab_i])
-                target_q_mj[mj_i] = float(cmd.motor_cmd[lab_i].q)
-                kp_mj[mj_i]       = float(cmd.motor_cmd[lab_i].kp)
-                kd_mj[mj_i]       = float(cmd.motor_cmd[lab_i].kd)
-        else:
-            for i in range(self.num_joints):
-                target_q_mj[i] = float(cmd.motor_cmd[i].q)
-                kp_mj[i]       = float(cmd.motor_cmd[i].kp)
-                kd_mj[i]       = float(cmd.motor_cmd[i].kd)
-        return target_q_mj, kp_mj, kd_mj
-
-
-# ---------------------------------------------------------------------------
-# Diff logger
-# ---------------------------------------------------------------------------
-
-class DiffLogger:
-    """Print and optionally CSV-log per-step diffs between Python and C++."""
-
-    def __init__(self, csv_path: str | None = None, print_every: int = 20):
-        self._f = None
-        self.print_every = max(1, int(print_every))
-        self.cmp_steps = 0
-        self.max_q = 0.0
-        self.max_mean_q = 0.0
-        self.max_kp = 0.0
-        self.max_kd = 0.0
-        self.max_lag = 0
-        self.sum_lag = 0
-        self.last = {
-            "step": -1,
-            "cpp_recv": 0,
-            "max_q": 0.0,
-            "mean_q": 0.0,
-            "max_kp": 0.0,
-            "max_kd": 0.0,
-            "lag_steps": 0,
-        }
-        if csv_path:
-            self._f = open(csv_path, "w", buffering=1)
-            self._f.write("step,cpp_recv,max_q,mean_q,max_kp,max_kd,lag_steps\n")
-
-    def log(
-        self,
-        step: int,
-        cpp_recv: int,
-        py_q:  np.ndarray,
-        cpp_q: np.ndarray,
-        py_kp: np.ndarray,
-        cpp_kp: np.ndarray,
-        py_kd: np.ndarray,
-        cpp_kd: np.ndarray,
-        lag_steps: int = 0,
-    ):
-        dq  = np.abs(py_q  - cpp_q)
-        dkp = np.abs(py_kp - cpp_kp)
-        dkd = np.abs(py_kd - cpp_kd)
-        max_q  = float(np.max(dq))
-        mean_q = float(np.mean(dq))
-        max_kp = float(np.max(dkp))
-        max_kd = float(np.max(dkd))
-        max_q_idx = int(np.argmax(dq))
-        self.cmp_steps += 1
-        self.max_q = max(self.max_q, max_q)
-        self.max_mean_q = max(self.max_mean_q, mean_q)
-        self.max_kp = max(self.max_kp, max_kp)
-        self.max_kd = max(self.max_kd, max_kd)
-        self.max_lag = max(self.max_lag, int(abs(lag_steps)))
-        self.sum_lag += int(lag_steps)
-        self.last = {
-            "step": int(step),
-            "cpp_recv": int(cpp_recv),
-            "max_q": max_q,
-            "mean_q": mean_q,
-            "max_kp": max_kp,
-            "max_kd": max_kd,
-            "lag_steps": int(lag_steps),
-        }
-        if (self.cmp_steps % self.print_every) == 0:
-            print(
-                f"[step {step:6d} | cpp#{cpp_recv:6d}]  "
-                f"q diff  max={max_q:.6f}  mean={mean_q:.6f}  |  "
-                f"kp max={max_kp:.6f}  kd max={max_kd:.6f}  "
-                f"lag={lag_steps:+d}  joint={max_q_idx}"
-            )
-        if self._f:
-            self._f.write(
-                f"{step},{cpp_recv},{max_q:.6f},{mean_q:.6f},{max_kp:.6f},{max_kd:.6f},{lag_steps}\n"
-            )
-
-    def summary(self) -> dict:
-        return {
-            "cmp_steps": int(self.cmp_steps),
-            "max_q": float(self.max_q),
-            "max_mean_q": float(self.max_mean_q),
-            "max_kp": float(self.max_kp),
-            "max_kd": float(self.max_kd),
-            "max_lag_steps": int(self.max_lag),
-            "avg_lag_steps": float(self.sum_lag / self.cmp_steps) if self.cmp_steps > 0 else 0.0,
-            "last": dict(self.last),
-        }
-
-    def close(self):
-        if self._f:
-            self._f.close()
-
-
-# ---------------------------------------------------------------------------
-# PD / safety helpers (same as deploy_mujoco.py)
-# ---------------------------------------------------------------------------
-
-def pd_control(target_q, q, kp, target_dq, dq, kd):
-    return (target_q - q) * kp + (target_dq - dq) * kd
-
-
-def sanitize_ctrl(ctrl, model, fallback=None):
-    out = np.asarray(ctrl, dtype=np.float32).reshape(-1)
-    if fallback is None:
-        fallback = np.zeros_like(out)
-    fallback = np.asarray(fallback, dtype=np.float32).reshape(-1)
-    if fallback.size != out.size:
-        fallback = np.zeros_like(out)
-    finite_mask = np.isfinite(out)
-    if not np.all(finite_mask):
-        out = np.where(finite_mask, out, fallback)
-    out = np.nan_to_num(out, nan=0.0, posinf=0.0, neginf=0.0)
-    ctrl_range = getattr(model, "actuator_ctrlrange", None)
-    if ctrl_range is not None and ctrl_range.shape[0] == out.size:
-        lo = ctrl_range[:, 0]
-        hi = ctrl_range[:, 1]
-        if np.any(hi > lo):
-            return np.clip(out, lo, hi).astype(np.float32)
-    return np.clip(out, -300.0, 300.0).astype(np.float32)
 
 
 # ---------------------------------------------------------------------------
@@ -642,7 +290,7 @@ def main():
     prev_cmd_recv = 0
 
     if not args.no_cpp:
-        ChannelFactoryInitialize(0, args.net)
+        initialize_dds(0, args.net)
         bridge = DDSBridge(
             num_joints,
             mj2lab,
@@ -666,7 +314,7 @@ def main():
 
     # ── Main sim loop ─────────────────────────────────────────────────────────
     Running = True
-    viewer_ctx = nullcontext(None) if args.headless else mujoco.viewer.launch_passive(m, d)
+    viewer_ctx = mujoco_viewer_context(m, d, args.headless)
     with viewer_ctx as viewer:
         while Running and (args.max_steps <= 0 or step < args.max_steps):
             if viewer is not None and not viewer.is_running():

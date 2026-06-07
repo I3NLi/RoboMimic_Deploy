@@ -1,0 +1,18 @@
+"""Inference/FSM helpers that do not know about rendering or transport."""
+
+from __future__ import annotations
+
+from FSM.FSM import FSM, FSMMode
+from FSM.FSMState import FSMStateName
+
+
+def force_fsm_state(fsm: FSM, state_name: FSMStateName):
+    """Force Python FSM into a state, mirroring C++ shadow mode behavior."""
+    try:
+        fsm.cur_policy.exit()
+    except Exception:
+        pass
+    fsm.get_next_policy(state_name)
+    fsm.FSMmode = FSMMode.CHANGE
+    print(f"[FSM] force_state -> {state_name.name}")
+
