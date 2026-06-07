@@ -42,6 +42,22 @@ message(STATUS "Found ONNX Runtime: ${ORT_SO}")
 set(UNITREE_DDS_RPATH "/usr/local/lib")
 add_link_options(-Wl,--disable-new-dtags)
 
+# ── MuJoCo C API ───────────────────────────────────────────────────────────────
+set(MUJOCO_ROOT
+    "/home/hiyio/anaconda3/envs/robomimic/lib/python3.10/site-packages/mujoco"
+    CACHE PATH "Root of the MuJoCo Python package or SDK root")
+find_path(MUJOCO_INCLUDE_DIR
+    NAMES mujoco/mujoco.h
+    HINTS "${MUJOCO_ROOT}/include")
+find_library(MUJOCO_LIB
+    NAMES mujoco libmujoco.so.3.3.4 libmujoco.so
+    HINTS "${MUJOCO_ROOT}")
+if(MUJOCO_INCLUDE_DIR AND MUJOCO_LIB)
+    message(STATUS "Found MuJoCo: ${MUJOCO_LIB}")
+else()
+    message(WARNING "MuJoCo C API not found; mujoco_dds_sim target will be skipped")
+endif()
+
 # ── Executables ────────────────────────────────────────────────────────────────
 
 # base build: no ONNX (pure framework, PassiveMode + FixedPose only)
@@ -84,5 +100,27 @@ set_target_properties(bench_onnx PROPERTIES
     INSTALL_RPATH "${ONNXRUNTIME_DIR}/lib"
 )
 
+if(MUJOCO_INCLUDE_DIR AND MUJOCO_LIB)
+    add_executable(mujoco_dds_sim mujoco_dds_sim.cpp)
+    target_include_directories(mujoco_dds_sim PRIVATE
+        ${unitree_sdk2_INCLUDE_DIRS}
+        "${MUJOCO_INCLUDE_DIR}"
+    )
+    target_link_libraries(mujoco_dds_sim
+        unitree_sdk2
+        pthread
+        yaml-cpp
+        "${MUJOCO_LIB}"
+    )
+    target_compile_options(mujoco_dds_sim PRIVATE -O2 -Wall -Wextra)
+    set_target_properties(mujoco_dds_sim PROPERTIES
+        BUILD_RPATH  "${UNITREE_DDS_RPATH};${MUJOCO_ROOT}"
+        INSTALL_RPATH "${UNITREE_DDS_RPATH};${MUJOCO_ROOT}"
+    )
+endif()
+
 # ── Install ────────────────────────────────────────────────────────────────────
 install(TARGETS deploy_real deploy_real_onnx bench_onnx DESTINATION bin)
+if(TARGET mujoco_dds_sim)
+    install(TARGETS mujoco_dds_sim DESTINATION bin)
+endif()

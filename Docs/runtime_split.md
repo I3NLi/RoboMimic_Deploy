@@ -16,6 +16,26 @@ MuJoCo state -> inference/FSM -> safety/control -> MuJoCo actuator
              -> rendering
 ```
 
+C++ MuJoCo API path:
+
+```text
+mujoco_dds_sim:
+MuJoCo C API state -> DDS LowState -> deploy_real_onnx --shadow inference
+                   -> DDS LowCmd -> PD control -> MuJoCo C API actuator
+```
+
+Example:
+
+```bash
+./deploy_real_c/build_z1/deploy_real_onnx \
+  --shadow --net lo --joints 24 \
+  --yaml policy/beyond_mimic/config/BeyondMimic.yaml \
+  --shadow-state beyond --sync-lowstate
+
+./deploy_real_c/build_z1/mujoco_dds_sim \
+  --net lo --max-steps 120 --print-every 40
+```
+
 Real path:
 
 ```text
@@ -29,4 +49,3 @@ Rules:
 - Inference modules must not publish robot commands.
 - Control modules must not know whether the state came from MuJoCo or the robot.
 - Real deployment starts with non-command modes: dry-run, connect-check, read-state.
-

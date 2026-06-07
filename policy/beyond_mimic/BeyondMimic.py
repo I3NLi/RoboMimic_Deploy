@@ -1,11 +1,9 @@
-from common.path_config import PROJECT_ROOT
-
 from FSM.FSMState import FSMStateName, FSMState
 from common.ctrlcomp import StateAndCmd, PolicyOutput
 from collections import Counter
 import numpy as np
 import yaml
-from common.utils import FSMCommand, progress_bar
+from common.utils import FSMCommand
 import onnxruntime
 import os
 

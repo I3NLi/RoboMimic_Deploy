@@ -78,7 +78,7 @@ def main() -> int:
         samples.append((time.perf_counter() - t0) * 1000.0)
     total_ms = (time.perf_counter() - t_total0) * 1000.0
 
-    print(f"runtime=python")
+    print("runtime=python")
     print(f"model={args.model}")
     print(f"inputs={[(i.name, i.shape) for i in session.get_inputs()]}")
     print(f"outputs={[(o.name, o.shape) for o in session.get_outputs()]}")
@@ -95,4 +95,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
