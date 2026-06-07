@@ -74,5 +74,15 @@ set_target_properties(deploy_real_onnx PROPERTIES
     INSTALL_RPATH "${UNITREE_DDS_RPATH};${ONNXRUNTIME_DIR}/lib"
 )
 
+# pure ONNXRuntime benchmark: no DDS, no robot communication
+add_executable(bench_onnx bench_onnx.cpp)
+target_include_directories(bench_onnx PRIVATE "${ONNXRUNTIME_DIR}/include")
+target_link_libraries(bench_onnx pthread "${ORT_SO}")
+target_compile_options(bench_onnx PRIVATE -O2 -Wall -Wextra)
+set_target_properties(bench_onnx PROPERTIES
+    BUILD_RPATH  "${ONNXRUNTIME_DIR}/lib"
+    INSTALL_RPATH "${ONNXRUNTIME_DIR}/lib"
+)
+
 # ── Install ────────────────────────────────────────────────────────────────────
-install(TARGETS deploy_real deploy_real_onnx DESTINATION bin)
+install(TARGETS deploy_real deploy_real_onnx bench_onnx DESTINATION bin)
