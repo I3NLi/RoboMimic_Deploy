@@ -81,6 +81,16 @@ def make_sdk_args(args: argparse.Namespace) -> argparse.Namespace:
         dry_run=args.dry_run,
         connect_check=args.connect_check,
         run=args.run,
+        debug_entry=args.debug_entry,
+        debug_entry_only=args.debug_entry_only,
+        debug_entry_tts=args.debug_entry_tts,
+        debug_entry_wait_s=args.debug_entry_wait_s,
+        debug_entry_passive_s=args.debug_entry_passive_s,
+        tts_required=args.tts_required,
+        try_gait_passive=args.try_gait_passive,
+        skip_gait_passive=args.skip_gait_passive,
+        skip_lowlevel_disconnect=args.skip_lowlevel_disconnect,
+        hard_exit_after_final_damping=args.hard_exit_after_final_damping,
         local_ip=args.local_ip,
         skip_network_check=args.skip_network_check,
         vx=args.vx,
@@ -97,6 +107,10 @@ def make_sdk_args(args: argparse.Namespace) -> argparse.Namespace:
         max_target_rate=args.max_target_rate,
         joint_limit_margin=args.joint_limit_margin,
         damping_kd=args.damping_kd,
+        disable_rate_watchdog=args.disable_rate_watchdog,
+        rate_watchdog_min_hz=args.rate_watchdog_min_hz,
+        rate_watchdog_window=args.rate_watchdog_window,
+        rate_watchdog_max_gap_ms=args.rate_watchdog_max_gap_ms,
         log_interval=args.log_interval,
     )
 
@@ -182,6 +196,31 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--connect-check", action="store_true", help="connect/disconnect only; no LowLevel switch")
     parser.add_argument("--read-state", action="store_true", help="LowLevel state subscription test; no command publishing")
     parser.add_argument("--run", action="store_true", help="publish low-level commands. Requires explicit --stand-only or ONNX duration.")
+    parser.add_argument("--debug-entry", action="store_true", help="voice prompt, wait, then enter passive test staging before --run")
+    parser.add_argument("--debug-entry-only", action="store_true", help="run only the debug-entry passive damping sequence")
+    parser.add_argument(
+        "--debug-entry-tts",
+        default=(
+            "Entering real robot debug mode. Switching to passive test mode in three seconds. "
+            "Please keep clear."
+        ),
+        help="TTS text broadcast before switching into debug/test mode",
+    )
+    parser.add_argument("--debug-entry-wait-s", type=float, default=3.0, help="seconds to wait after TTS before mode switch")
+    parser.add_argument("--debug-entry-passive-s", type=float, default=2.0, help="seconds to hold LowLevel passive damping")
+    parser.add_argument("--tts-required", action="store_true", help="abort if the debug-entry TTS prompt cannot be queued")
+    parser.add_argument("--try-gait-passive", action="store_true", help="also attempt HighLevel GAIT_PASSIVE during debug entry")
+    parser.add_argument("--skip-gait-passive", action="store_true", help="do not attempt HighLevel GAIT_PASSIVE during debug entry")
+    parser.add_argument(
+        "--skip-lowlevel-disconnect",
+        action="store_true",
+        help="skip SDK disconnect/shutdown after LowLevel to avoid native teardown crashes",
+    )
+    parser.add_argument(
+        "--hard-exit-after-final-damping",
+        action="store_true",
+        help="after final damping, os._exit instead of running SDK LowLevel teardown",
+    )
     parser.add_argument("--local-ip", default=os.environ.get("MAGICBOT_LOCAL_IP", "192.168.54.119"))
     parser.add_argument("--skip-network-check", action="store_true")
     parser.add_argument("--vx", type=float, default=0.0)
@@ -203,6 +242,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-target-rate", type=float, default=4.0)
     parser.add_argument("--joint-limit-margin", type=float, default=0.01)
     parser.add_argument("--damping-kd", type=float, default=3.0)
+    parser.add_argument("--disable-rate-watchdog", action="store_true", help="disable control-rate safety wall")
+    parser.add_argument("--rate-watchdog-min-hz", type=float, default=250.0)
+    parser.add_argument("--rate-watchdog-window", type=float, default=0.5)
+    parser.add_argument("--rate-watchdog-max-gap-ms", type=float, default=50.0)
     parser.add_argument("--log-interval", type=float, default=1.0)
     return parser.parse_args()
 
@@ -214,11 +257,17 @@ def main() -> int:
         datefmt="%Y-%m-%d %H:%M:%S",
     )
     args = parse_args()
-    selected = int(args.dry_run) + int(args.connect_check) + int(args.read_state) + int(args.run)
+    selected = (
+        int(args.dry_run)
+        + int(args.connect_check)
+        + int(args.read_state)
+        + int(args.run)
+        + int(args.debug_entry_only)
+    )
     if selected == 0:
         args.dry_run = True
     elif selected > 1:
-        raise SystemExit("Use only one of --dry-run, --connect-check, --read-state or --run")
+        raise SystemExit("Use only one of --dry-run, --connect-check, --read-state, --run or --debug-entry-only")
     if args.run and args.duration <= 0:
         raise SystemExit("--run requires a positive --duration for this RoboMimic wrapper")
 

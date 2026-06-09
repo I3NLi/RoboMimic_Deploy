@@ -181,12 +181,23 @@ public:
         tau_limit_scale_ = cfg["tau_limit_scale"] ? cfg["tau_limit_scale"].as<float>() : 1.0f;
         num_actions_ = cfg["num_actions"].as<int>();
         num_obs_ = cfg["num_obs"].as<int>();
+        command_dim_ = cfg["command_dim"] ? cfg["command_dim"].as<int>() : 3;
+        if (command_dim_ != 3 && command_dim_ != 4) {
+            throw std::runtime_error("LocoMode supports command_dim 3 or 4 only");
+        }
+        root_height_command_ = cfg["root_height_command"] ? cfg["root_height_command"].as<float>() : 0.0f;
         ang_vel_scale_ = cfg["ang_vel_scale"].as<float>();
         dof_pos_scale_ = cfg["dof_pos_scale"].as<float>();
         dof_vel_scale_ = cfg["dof_vel_scale"].as<float>();
         action_scale_ = cfg["action_scale"].as<float>();
         cmd_scale_ = read_fvec(cfg, "cmd_scale");
+        if ((int)cmd_scale_.size() != command_dim_) {
+            throw std::runtime_error("LocoMode cmd_scale length must match command_dim");
+        }
         cmd_init_ = read_fvec(cfg, "cmd_init");
+        if ((int)cmd_init_.size() != command_dim_) {
+            throw std::runtime_error("LocoMode cmd_init length must match command_dim");
+        }
         cmd_deadzone_.assign(3, 0.f);
         if (cfg["cmd_deadzone"]) {
             if (cfg["cmd_deadzone"].IsSequence()) {
@@ -207,6 +218,10 @@ public:
         obs_.assign(num_obs_, 0.f);
         qj_obs_.assign(num_actions_, 0.f);
         dqj_obs_.assign(num_actions_, 0.f);
+        const int expected_obs = 6 + command_dim_ + 3 * num_actions_;
+        if (num_obs_ != expected_obs) {
+            throw std::runtime_error("LocoMode num_obs does not match command_dim/action layout");
+        }
 
         // warmup
         std::vector<float> warm(num_obs_, 0.f);
@@ -256,11 +271,11 @@ public:
         obs_[3] = sc_.gravity_ori[0];
         obs_[4] = sc_.gravity_ori[1];
         obs_[5] = sc_.gravity_ori[2];
-        for (int i = 0; i < 3 && (6 + i) < num_obs_; i++) {
+        for (int i = 0; i < command_dim_ && (6 + i) < num_obs_; i++) {
             float s = i < (int)cmd_scale_.size() ? cmd_scale_[i] : 1.f;
             obs_[6 + i] = cmd[i] * s;
         }
-        int off = 9;
+        int off = 6 + command_dim_;
         for (int i = 0; i < num_actions_ && (off + i) < num_obs_; i++) obs_[off + i] = qj_obs_[i];
         off += num_actions_;
         for (int i = 0; i < num_actions_ && (off + i) < num_obs_; i++) obs_[off + i] = dqj_obs_[i];
@@ -325,20 +340,23 @@ private:
         }
     }
 
-    std::array<float, 3> scale_cmd(const std::array<float, 3>& cmd) const
+    std::vector<float> scale_cmd(const std::array<float, 3>& cmd) const
     {
-        std::array<float, 3> out{0, 0, 0};
+        std::vector<float> out(command_dim_, 0.0f);
         const std::array<std::array<float, 2>, 3> ranges{range_vx_, range_vy_, range_vz_};
         for (int i = 0; i < 3; i++) {
             float lo = ranges[i][0], hi = ranges[i][1], v = cmd[i];
             if (lo < 0.f && hi > 0.f) out[i] = v * (v >= 0.f ? hi : std::fabs(lo));
             else out[i] = (v + 1.f) * (hi - lo) * 0.5f + lo;
         }
+        if (command_dim_ >= 4) out[3] = root_height_command_;
         return out;
     }
 
     int num_actions_{24};
     int num_obs_{96};
+    int command_dim_{3};
+    float root_height_command_{0.f};
     float ang_vel_scale_{1.f};
     float dof_pos_scale_{1.f};
     float dof_vel_scale_{1.f};

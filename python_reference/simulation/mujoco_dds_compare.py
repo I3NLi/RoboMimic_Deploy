@@ -54,6 +54,14 @@ from runtime.control import pd_control, sanitize_ctrl
 from runtime.inference import force_fsm_state
 from runtime.input import NullJoyStick
 from runtime.rendering import mujoco_viewer_context
+from simulation.mujoco_reference import (
+    actuator_joint_indices,
+    correct_ground_penetration,
+    load_initial_joint_targets,
+    parse_initial_command,
+    resolve_project_path,
+    resolve_contact_geom_ids,
+)
 from fsm.machine import FSM
 from fsm.state import FSMStateName
 
@@ -210,6 +218,10 @@ def main():
     xml_path         = os.path.join(PROJECT_ROOT, mj_cfg["xml_path"])
     simulation_dt    = mj_cfg["simulation_dt"]
     control_decimation = mj_cfg["control_decimation"]
+    initial_pose_yaml = resolve_project_path(mj_cfg.get("initial_pose_yaml", None))
+    initial_base_height = mj_cfg.get("initial_base_height", None)
+    initial_command = parse_initial_command(mj_cfg.get("initial_command", ""))
+    ground_correction_cfg = mj_cfg.get("ground_penetration_correction", {}) or {}
 
     # ── Safety config ─────────────────────────────────────────────────────────
     safety_yaml_path = os.path.join(PROJECT_ROOT, "configs", "simulation", "safety.yaml")
@@ -232,6 +244,18 @@ def main():
     d = mujoco.MjData(m)
     m.opt.timestep = simulation_dt
     num_joints = m.nu
+    qpos_actuator_idx, _qvel_actuator_idx = actuator_joint_indices(m)
+    ground_correction_enable = bool(ground_correction_cfg.get("enable", False))
+    ground_correction_floor_id = mujoco.mj_name2id(
+        m,
+        mujoco.mjtObj.mjOBJ_GEOM,
+        str(ground_correction_cfg.get("floor_geom", "floor")),
+    )
+    ground_correction_geom_ids = resolve_contact_geom_ids(
+        m,
+        ground_correction_cfg.get("body_keywords", []),
+    )
+    ground_correction_max_penetration = float(ground_correction_cfg.get("max_penetration", 0.0))
 
     # Default: identity mapping (MuJoCo index == lab index)
     mj2lab = (
@@ -250,12 +274,30 @@ def main():
     step = 0
     py_history = deque(maxlen=max(1, int(args.lag_search) + 1))
 
+    init_q, init_kp, init_kd, ctrl_limit = load_initial_joint_targets(initial_pose_yaml, num_joints)
+    if initial_base_height is not None:
+        d.qpos[2] = float(initial_base_height)
+    if init_q is not None:
+        d.qpos[7 + qpos_actuator_idx] = init_q
+    if initial_base_height is not None or init_q is not None:
+        d.qvel[:] = 0.0
+        mujoco.mj_forward(m, d)
+    if init_q is not None:
+        policy_output_action = init_q.copy()
+        if init_kp is not None:
+            kps = init_kp.copy()
+        if init_kd is not None:
+            kds = init_kd.copy()
+        base_msg = f" base_height={float(initial_base_height):.3f}" if initial_base_height is not None else ""
+        print(f"[MuJoCo] initialized joint pose from {initial_pose_yaml}{base_msg}")
+
     # ── Python FSM ────────────────────────────────────────────────────────────
     state_cmd     = StateAndCmd(num_joints)
     policy_output = PolicyOutput(num_joints)
     fsm_ctrl      = FSM(state_cmd, policy_output)
     safety        = SafetyFilter(num_joints, safety_cfg)
     cmd_gate      = HoldToConfirm(safety_cfg.command_hold_frames)
+    state_cmd.skill_cmd = initial_command
     if args.shadow_sync:
         target_state = (
             FSMStateName.SKILL_TRACK_MIMIC
@@ -395,7 +437,7 @@ def main():
                     -safety_cfg.damping_kd
                     * np.asarray(d.qvel[6:], dtype=np.float32)
                 )
-                tau = sanitize_ctrl(raw_tau, m, fallback=fallback_tau)
+                tau = sanitize_ctrl(raw_tau, m, fallback=fallback_tau, ctrl_limit=ctrl_limit)
                 if (not np.isfinite(raw_tau).all()) or np.max(np.abs(raw_tau)) > 1e4:
                     print("[Safety] abnormal torque detected; sanitized.")
                 if safety_cfg.dry_run:
@@ -409,6 +451,14 @@ def main():
 
                 mujoco.mj_step(m, d)
                 sim_counter += 1
+                if ground_correction_enable:
+                    correct_ground_penetration(
+                        m,
+                        d,
+                        ground_correction_floor_id,
+                        ground_correction_geom_ids,
+                        ground_correction_max_penetration,
+                    )
 
                 if sim_counter % control_decimation == 0:
                     qj    = d.qpos[7:]

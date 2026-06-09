@@ -4,7 +4,8 @@ control_decimation: 10
 render_fps: 15
 perf_log_interval_s: 2.0
 initial_pose_yaml: "configs/simulation/magicbot_z1_stand.yaml"
-initial_command: "PASSIVE"
+initial_base_height: 0.69
+initial_command: "LOCO"
 abnormal_torque_log_interval_steps: 100
 
 ghost:

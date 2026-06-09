@@ -8,6 +8,7 @@ import os
 os.environ.setdefault("__GL_SYNC_TO_VBLANK", "0")
 os.environ.setdefault("vblank_mode", "0")
 import time
+from enum import IntEnum
 import mujoco.viewer
 import mujoco
 import numpy as np
@@ -15,8 +16,32 @@ import yaml
 from shared.ctrlcomp import *
 from fsm.machine import *
 from shared.utils import get_gravity_orientation
-from shared.joystick import JoyStick, JoystickButton
 from shared.safety import load_safety_config, SafetyFilter, HoldToConfirm
+from runtime.input import VirtualJoyStick
+
+try:
+    from shared.joystick import JoyStick, JoystickButton
+    JOYSTICK_IMPORT_ERROR = None
+except Exception as e:
+    JoyStick = None
+    JOYSTICK_IMPORT_ERROR = e
+
+    class JoystickButton(IntEnum):
+        A = 0
+        B = 1
+        X = 2
+        Y = 3
+        L1 = 4
+        R1 = 5
+        SELECT = 6
+        START = 7
+        L3 = 8
+        R3 = 9
+        HOME = 10
+        UP = 11
+        DOWN = 12
+        LEFT = 13
+        RIGHT = 14
 
 try:
     from simulation.head_camera_stream import HeadCameraStreamServer
@@ -397,6 +422,7 @@ if __name__ == "__main__":
         render_fps = float(config.get("render_fps", 60))
         perf_log_interval_s = float(config.get("perf_log_interval_s", 0.0))
         initial_pose_yaml = resolve_project_path(config.get("initial_pose_yaml", None))
+        initial_base_height = config.get("initial_base_height", None)
         initial_command = parse_initial_command(config.get("initial_command", ""))
         abnormal_log_interval = max(1, int(config.get("abnormal_torque_log_interval_steps", 100)))
         ground_correction_cfg = config.get("ground_penetration_correction", {}) or {}
@@ -465,16 +491,21 @@ if __name__ == "__main__":
         )
 
     init_q, init_kp, init_kd, ctrl_limit = load_initial_joint_targets(initial_pose_yaml, num_joints)
+    if initial_base_height is not None:
+        d.qpos[2] = float(initial_base_height)
     if init_q is not None:
         d.qpos[7 + qpos_actuator_idx] = init_q
+    if initial_base_height is not None or init_q is not None:
         d.qvel[:] = 0.0
         mujoco.mj_forward(m, d)
+    if init_q is not None:
         policy_output_action = init_q.copy()
         if init_kp is not None:
             kps = init_kp.copy()
         if init_kd is not None:
             kds = init_kd.copy()
-        print(f"[MuJoCo] initialized joint pose from {initial_pose_yaml}")
+        base_msg = f" base_height={float(initial_base_height):.3f}" if initial_base_height is not None else ""
+        print(f"[MuJoCo] initialized joint pose from {initial_pose_yaml}{base_msg}")
 
     state_cmd = StateAndCmd(num_joints)
     policy_output = PolicyOutput(num_joints)
@@ -526,11 +557,23 @@ if __name__ == "__main__":
                 head_cam_ros2 = None
                 print(f"[CameraROS2] failed to start: {e}")
 
-    try:
-        joystick = JoyStick()
-    except RuntimeError as e:
-        print(f"[Joystick][WARN] {e} Falling back to neutral NullJoyStick.")
-        joystick = NullJoyStick()
+    virtual_remote_requested = parse_bool(os.environ.get("MAGICBOT_VIRTUAL_REMOTE", ""), False)
+    virtual_remote_host = os.environ.get("MAGICBOT_VIRTUAL_REMOTE_HOST", "127.0.0.1")
+    virtual_remote_port = int(os.environ.get("MAGICBOT_VIRTUAL_REMOTE_PORT", "8765"))
+    if virtual_remote_requested:
+        joystick = VirtualJoyStick(host=virtual_remote_host, port=virtual_remote_port)
+    else:
+        try:
+            if JoyStick is None:
+                raise RuntimeError(f"shared.joystick import failed: {JOYSTICK_IMPORT_ERROR}")
+            joystick = JoyStick()
+        except RuntimeError as e:
+            print(f"[Joystick][WARN] {e} Falling back to VirtualJoyStick.")
+            try:
+                joystick = VirtualJoyStick(host=virtual_remote_host, port=virtual_remote_port)
+            except OSError as bind_error:
+                print(f"[VirtualJoyStick][WARN] {bind_error} Falling back to neutral NullJoyStick.")
+                joystick = NullJoyStick()
     Running = True
     command_input_armed = False
     command_buttons = (

@@ -1,11 +1,11 @@
-policy_path: "z1_flat_8192_rootheight_model_2700.onnx"
+policy_path: "z1_flat_8192_rebuild_model_latest.onnx"
 
 # LocoMode.py observation layout:
 # ang_vel(3) + projected_gravity(3) + command(command_dim)
 # + joint_pos(num_actions) + joint_vel(num_actions) + last_action(num_actions)
-command_dim: 4
+command_dim: 3
 num_actions: 24
-num_obs: 82
+num_obs: 81
 
 # LeggedLab/IsaacLab joint index -> MuJoCo actuator index.
 joint2motor_idx: [0, 6, 12, 1, 7, 13,
@@ -34,10 +34,10 @@ default_angles: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
                  0.35, 0.35, 0.0, 0.0, -0.18, -0.18,
                  0.5, 0.5, 0.0, 0.0, 0.0, 0.0]
 
-cmd_scale: [0.6, 0.3, 0.4, 1.0]
+cmd_scale: [0.6, 0.3, 0.4]
 root_height_command: 0.69
 cmd_deadzone: 0.0
-cmd_init: [0, 0, 0, 0.69]
+cmd_init: [0, 0, 0]
 cmd_range: {lin_vel_x: [-1.0, 1.0], lin_vel_y: [-1.0, 1.0], ang_vel_z: [-1.0, 1.0]}
 
 ang_vel_scale: 1.0

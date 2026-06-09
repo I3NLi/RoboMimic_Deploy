@@ -1,6 +1,7 @@
 from shared.path_config import PROJECT_ROOT
 
 import pygame
+import os
 from pygame.locals import *
 from enum import IntEnum, unique
 
@@ -32,8 +33,21 @@ class JoyStick:
         if joystick_count == 0:
             raise RuntimeError("No joystick connected!")
         
-        self.joystick = pygame.joystick.Joystick(0)
+        preferred_name = os.environ.get("MAGICBOT_JOYSTICK_NAME", "MagicBot Virtual Gamepad")
+        joystick_index = 0
+        if preferred_name:
+            preferred_name_lower = preferred_name.lower()
+            for i in range(joystick_count):
+                candidate = pygame.joystick.Joystick(i)
+                candidate.init()
+                if preferred_name_lower in candidate.get_name().lower():
+                    joystick_index = i
+                    break
+                candidate.quit()
+
+        self.joystick = pygame.joystick.Joystick(joystick_index)
         self.joystick.init()
+        print(f"[Joystick] using #{joystick_index}: {self.joystick.get_name()}")
         
         self.button_count = self.joystick.get_numbuttons()
         self.button_states = [False] * self.button_count  
