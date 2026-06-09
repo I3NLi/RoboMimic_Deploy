@@ -1,131 +1,224 @@
-<div align="center">
-  <h1 align="center">RoboMimic Deploy</h1>
-  <p align="center">
-    <span> 🌎English </span> | <a href="README_zh.md"> 🇨🇳中文 </a>
-  </p>
-</div>
+# RoboMimic Deploy for MagicBot Z1
 
 <p align="center">
-  <strong>​RoboMimic Deploy​​ is a multi-policy robot deployment framework based on a state-switching mechanism. This workspace is currently adapted for MagicBot Z1 24-DoF MuJoCo deployment.</strong> 
+  <strong>English</strong> | <a href="README_zh.md">中文</a>
 </p>
 
-## Preface
+This repository is the MagicBot Z1 deployment workspace derived from RoboMimic Deploy. The current code path is no longer the original G1/29-DoF setup; it is centered on MagicBot Z1 24-DoF simulation, policy playback, and verification.
 
-- **This `/home/hiyio/MaigcLab/RoboMimic_Deploy_magicbot` workspace uses the MagicBot Z1 24-DoF configuration, not the original G1 29-DoF setup.**
+The validated main path is Python MuJoCo simulation. Real-robot work is currently limited to staged MagicBot SDK loco checks. Do not treat every policy in this tree as ready for direct physical deployment.
 
-- **The MuJoCo XML is `assets/robots/magicbot_z1/scene.xml`.**
-  
-- **The current validated target is simulation. For real-robot deployment, re-check the Z1 SDK, motor order, limits, initial pose, and emergency stop path first.**
+## Current Status
 
-- **[video instruction](https://www.bilibili.com/video/BV1VTKHzSE6C/?vd_source=713b35f59bdf42930757aea07a44e7cb#reply114743994027967)**
+| Module | Status | Entry/config |
+| --- | --- | --- |
+| Python MuJoCo simulation | Main validated path | `python_reference/simulation/mujoco_reference.py` |
+| Z1 MuJoCo model | 24 DoF | `assets/robots/magicbot_z1/scene.xml` |
+| BeyondMimic | Current Z1 dance / whole-body tracking entry | `policies/beyond_mimic/config/BeyondMimic.yaml` |
+| LocoMode | Z1 24-DoF ONNX locomotion entry; still validate in sim before robot use | `policies/loco_mode/config/LocoMode_lowKp.yaml` |
+| Python/C++ compare | Available | `scripts/compare_python_cpp.sh --verify --net lo` |
+| MagicBot SDK real loco | Conservative staged-check path | `python_reference/legacy_robot/run_magicbot_loco_reference.sh` |
+| Unitree DDS legacy path | Kept for history/compare; not the current Z1 SDK robot path | `python_reference/legacy_robot/dds_robot_legacy.py` |
 
-## Installation and Configuration
+## Layout
 
-## 1. Create a Virtual Environment
-
-It is recommended to run training or deployment programs in a virtual environment. We suggest using Conda to create one.
-
-### 1.1 Create a New Environment
-
-Use the following command to create a virtual environment:
-```bash
-conda create -n robomimic python=3.8
+```text
+RoboMimic_Deploy_magicbot/
+├── assets/robots/magicbot_z1/      # Z1 MuJoCo XML and meshes
+├── configs/
+│   ├── simulation/                 # MuJoCo, initial pose, safety config
+│   └── robot/                      # legacy DDS / robot-side config
+├── policies/
+│   ├── passive/                    # damping protection
+│   ├── fixedpose/                  # stand-pose interpolation
+│   ├── loco_mode/                  # Z1 loco ONNX
+│   ├── beyond_mimic/               # Z1 BeyondMimic ONNX
+│   └── skill_cooldown/             # post-mimic stand recovery
+├── python_reference/
+│   ├── simulation/                 # MuJoCo sim and DDS compare bridge
+│   ├── fsm/                        # state machine
+│   ├── runtime/                    # control, DDS, rendering, compare modules
+│   └── legacy_robot/               # MagicBot SDK loco wrapper and old DDS path
+├── controller_cpp/                 # C++ DDS/ONNX controller
+├── scripts/compare_python_cpp.sh   # Python vs C++ shadow compare
+└── docs/                           # runtime split, benchmarks, debug notes
 ```
 
-### 1.2 Activate the Virtual Environment
+## Environment
+
+Use Python 3.10. The codebase now uses Python 3.10 syntax, so the old Python 3.8 setup is no longer the baseline.
 
 ```bash
+conda create -n robomimic python=3.10
 conda activate robomimic
+pip install -r requirements.txt
 ```
 
----
-
-## 2. Install Dependencies
-
-### 2.1 Install PyTorch
-PyTorch is a neural network computation framework used for model training and inference. Install it with the following command:
-```bash
-conda install pytorch==2.3.1 torchvision==0.18.1 torchaudio==2.3.1 pytorch-cuda=12.1 -c pytorch -c nvidia
-```
-
-### 2.2 Install RoboMimic_Deploy
-
-#### 2.2.1 Download
-Clone the repository via git:
+Optional dependencies:
 
 ```bash
-git clone https://github.com/ccrpRepo/RoboMimic_Deploy.git
-```
-
-#### 2.2.2 Install Components
-
-Navigate to the directory and install:
-```bash
-cd RoboMimic_Deploy
-pip install numpy==1.20.0
-pip install onnx onnxruntime
-```
-
-#### 2.2.3 Install unitree_sdk2_python
-
-```bash
+# Required for Unitree DDS shadow compare or legacy DDS entry.
 git clone https://github.com/unitreerobotics/unitree_sdk2_python.git
 cd unitree_sdk2_python
 pip install -e .
 ```
----
-## Running the Code
 
-## C++ Deploy Real Documentation
+The MagicBot real loco wrapper also needs `magicbot-z1_sdk-main`. Set `MAGICBOT_SDK_ROOT` if it is not in one of the default searched locations.
 
-- For `controller_cpp` build/run/verify instructions, see:
-  - [`controller_cpp/README.md`](controller_cpp/README.md)
+## Run Simulation
 
-## 1. Run Mujoco Simulation
 ```bash
-/home/hiyio/anaconda3/envs/robomimic/bin/python -u python_reference/simulation/mujoco_reference.py
+cd /home/hiyio/MaigcLab/RoboMimic_Deploy_magicbot
+conda activate robomimic
+python -u python_reference/simulation/mujoco_reference.py
 ```
 
-## 2. Policy Descriptions
-| Mode Name        | Description                                                                 |
-|------------------|-----------------------------------------------------------------------------|
-| **PassiveMode**  | Damping protection mode                                                     |
-| **FixedPose**    | Position control reset to default joint values                              |
-| **LocoMode**     | Z1 locomotion entry still needs re-adaptation from the LeggedLab config; current dance testing can bypass it |
-| **BeyondMimic**  | Z1 24-DoF dance / whole-body tracking policy: `policies/beyond_mimic/model/policy.onnx` |
-| **Dance**        | Legacy entry; current Z1 dance routing is mapped to BeyondMimic             |
-| **KungFu**       | Martial arts movement                                                       |
-| **KungFu2**      | Failed martial arts training                                     |
-| **Kick**         | Bad mimic policy                                     |
-| **SkillCast**    | Lower body + waist stabilization with upper limbs positioned to specific joint angles (typically executed before Mimic strategy) |
-| **SkillCooldown**| Lower body + waist continuous balancing with upper limbs reset to default angles (typically executed after Mimic strategy) |
+Default config files:
 
+- `configs/simulation/mujoco.yaml`
+- `configs/simulation/magicbot_z1_stand.yaml`
+- `configs/simulation/safety.yaml`
 
----
-## 3. Operation Instructions in Simulation
-1. Connect an Xbox controller.
-2. Run the simulation program:
+Key runtime settings:
+
+- MuJoCo XML: `assets/robots/magicbot_z1/scene.xml`
+- simulation step: `simulation_dt: 0.002`
+- control decimation: `control_decimation: 10`
+- control period: `0.02s` / 50 Hz
+- initial command: `PASSIVE`
+- reference ghost display: enabled by default with `ghost.mode: mesh`
+
+If no controller is connected, the simulator falls back to neutral `NullJoyStick`. You can observe the default state, but you cannot switch modes from the controller.
+
+## Controller Map
+
+Recommended Z1 path:
+
+| Input | Effect |
+| --- | --- |
+| Program start | Enter `PassiveMode` damping protection |
+| Hold `START` | Enter `FixedPose`, interpolating to stand pose over 2 seconds |
+| Hold `R1 + A` | Enter `LocoMode` |
+| Hold `R1 + X` in `FixedPose` or `LocoMode` | Enter `BeyondMimic` |
+| Hold `L1 + Y` in `FixedPose` or `LocoMode` | Enter `BeyondMimic` |
+| Release `UP` in mimic | Pause/resume the reference frame |
+| Hold `R1 + A` in mimic | Return to `LocoMode` through `SkillCooldown` |
+| Hold `START` in mimic | Return to `FixedPose` |
+| Release `L3` | Return to `PassiveMode` |
+| Press `SELECT` | Exit the simulation |
+
+Legacy skill commands such as `SKILL_2`, `SKILL_6`, and `SKILL_7` still exist in the code, but they are not the recommended Python Z1 main path. Old Dance/KungFu/Kick/TrackMimic states are mostly kept as compatibility aliases.
+
+## Policy Baseline
+
+### BeyondMimic
+
+Current Z1 dance / whole-body tracking entry:
+
+- model: `policies/beyond_mimic/model/policy.onnx`
+- config: `policies/beyond_mimic/config/BeyondMimic.yaml`
+- inputs: `obs [1,124]` and `time_step [1,1]`
+- outputs: 24-DoF action plus embedded reference trajectory data
+- `motion_length: 3309`
+- `switch_to_loco_delay_s: -1.0`, so the policy holds in mimic instead of auto-returning to loco
+- `command_joint_indices` excludes ankle commands and must match the exported training observation
+- `mj2lab` maps LeggedLab/IsaacLab joint index to MuJoCo actuator index
+
+To temporarily use another BeyondMimic YAML:
+
 ```bash
-/home/hiyio/anaconda3/envs/robomimic/bin/python -u python_reference/simulation/mujoco_reference.py
+BEYOND_MIMIC_CONFIG_PATH=/abs/path/to/BeyondMimic.yaml \
+python -u python_reference/simulation/mujoco_reference.py
 ```
-3. The program starts in `PassiveMode`.
-4. Hold `START` to enter `FixedPose`.
-5. Hold `R1 + A` to enter `LocoMode`; walk still needs full re-adaptation from the LeggedLab config, so dance testing does not require this mode.
-6. In `FixedPose` or `LocoMode`, hold `R1 + X` or `L1 + Y` to enter `BeyondMimic` and run the current Z1 dance / whole-body tracking policies.
-7. In `BeyondMimic`, press `UP` to pause/resume the reference frame, hold `R1 + A` to return to locomotion, press `START` for position reset, or press `L3` for damping protection.
-8. Hold `SELECT` to exit the MuJoCo control program.
 
-### Current Z1 Policy Baseline
+### LocoMode
 
-- Locomotion: not switched to the latest LeggedLab strategy yet; it needs re-adaptation of observations, normalization, joint order, and action scaling from `/home/hiyio/LeggedLab`
-- Dance / whole-body tracking: `policies/beyond_mimic/model/policy.onnx`
-- BeyondMimic source:
-  `/home/hiyio/whole_body_tracking/logs/rsl_rl/magicbot_z1_flat/2026-05-03_13-51-53_magicbot_spike_smooth_head_aligned_to_aiming1_height+Tracking-Flat-MagicBot-Z1-Wo-State-Estimation-v0_resume-model_124000/exported/policy.onnx`
-- ONNX shape: `obs [1,124]` + `time_step [1,1]`, 24-DoF action output with embedded reference trajectory, motion length `3309`.
----
-## 4. Real Robot Operation Instructions
+Current loco config:
 
-For MagicBot Z1 real-robot work, prefer the official MagicBot SDK backend:
+- model: `policies/loco_mode/model/z1_flat_reset_reasons_model_25800.onnx`
+- config: `policies/loco_mode/config/LocoMode_lowKp.yaml`
+- input dimension: `82`
+- action dimension: `24`
+- command dimension: `4`
+- `root_height_command: 0.69`
+
+LocoMode is configured for Z1 24 DoF, but real-robot use still requires a fresh audit of observations, normalization, joint order, action scaling, limits, and initial pose.
+
+### FixedPose / Passive / SkillCooldown
+
+- `PassiveMode`: zero `kp`, damping only.
+- `FixedPose`: interpolate from current joints to the default stand pose, currently 2 seconds.
+- `SkillCooldown`: blend-only recovery from mimic pose back to the Z1 fixed-pose target, then return to loco.
+
+## Safety Config
+
+The safety filter supports action clamps, action-delta clamps, gain clamps, gain-delta clamps, damping fallback, and dry-run.
+
+The current YAML has `enable: false`, so it does not clamp policy outputs by default. `dry_run` is still handled directly by the simulation loop.
+
+```yaml
+# configs/simulation/safety.yaml
+enable: false
+dry_run: false
+command_hold_frames: 2
+max_action_abs: 3.5
+max_action_delta: 0.3
+damping_kd: 8.0
+```
+
+Debug tips:
+
+- Use `dry_run: true` to compute policy output without applying actuator control.
+- Use `enable: true` and `log_clamps: true` to inspect safety clamp behavior.
+- Re-tune and re-verify `configs/robot/safety.yaml` before any physical robot command publishing.
+
+## Python/C++ Shadow Compare
+
+Recommended one-command verification:
+
+```bash
+cd /home/hiyio/MaigcLab/RoboMimic_Deploy_magicbot
+bash scripts/compare_python_cpp.sh --verify --net lo
+```
+
+This starts:
+
+- C++ `robot_controller_onnx --shadow`
+- Python `mujoco_dds_compare.py --headless --no-joystick --shadow-sync`
+- DDS `rt/lowstate` / `rt/lowcmd` bridge
+- diff CSV and summary JSON output
+
+If the C++ binary does not exist, build it first:
+
+```bash
+cmake -S controller_cpp -B controller_cpp/build_z1
+cmake --build controller_cpp/build_z1 -j
+```
+
+See [`controller_cpp/README.md`](controller_cpp/README.md) for more C++ details.
+
+## C++ Build Notes
+
+`controller_cpp` depends on:
+
+- `unitree_sdk2`
+- `yaml-cpp`
+- `zlib`
+- ONNX Runtime C/C++ package
+- optional MuJoCo C API for `mujoco_dds_simulator`
+
+`controller_cpp/CMakeLists.txt` contains local default paths for ONNX Runtime and MuJoCo. Override them if needed:
+
+```bash
+cmake -S controller_cpp -B controller_cpp/build_z1 \
+  -DONNXRUNTIME_DIR=/path/to/onnxruntime-linux-x64 \
+  -DMUJOCO_ROOT=/path/to/mujoco
+cmake --build controller_cpp/build_z1 -j
+```
+
+## MagicBot Z1 Real Loco Checks
+
+For physical robot loco work, prefer the MagicBot SDK backend:
 
 ```bash
 cd /home/hiyio/MaigcLab/RoboMimic_Deploy_magicbot
@@ -136,49 +229,68 @@ python_reference/legacy_robot/run_magicbot_loco_reference.sh --read-state --loca
 
 Safe sequence:
 
-1. Suspend the robot and verify the emergency stop / power-off path.
-2. `--dry-run`: load the RoboMimic loco YAML/ONNX only; no robot connection.
-3. `--connect-check`: connect/disconnect through the SDK only; no LowLevel switch.
+1. Suspend the robot and verify emergency stop, power-off, network isolation, and manual takeover.
+2. `--dry-run`: load YAML/ONNX and run one inference, with no robot connection.
+3. `--connect-check`: connect/disconnect through the SDK only, without LowLevel switch.
 4. `--read-state`: switch `HighLevel -> GAIT_RECOVERY_STAND -> LowLevel`, subscribe low-level states, and publish no `JointCommand`.
-5. Only after the checks pass, explicitly use `--run --stand-only --duration N` or `--run --duration N`.
+5. Only after those pass, explicitly run `--run --stand-only --duration N`.
+6. After stand-only passes, consider very short `--run --duration N --vx 0 --vy 0 --wz 0`.
 
-The legacy `python_reference/legacy_robot/dds_robot_legacy.py` path is still Unitree DDS
-`rt/lowcmd`/`rt/lowstate`; it is not the current MagicBot Z1 real-robot backend.
+Example:
 
----
-## Debug Safety (New)
-- `configs/robot/safety.yaml` and `configs/simulation/safety.yaml` control safety limits.
-- Default enables action/gain clamping, hold-to-confirm for mode switches, and damping fallback on faults.
-- Set `dry_run: true` for compute-only (no command output).
+```bash
+python_reference/legacy_robot/run_magicbot_loco_reference.sh \
+  --run --stand-only --local-ip 192.168.54.119 --duration 2
+```
 
----
-## Important Notes
-### 1. Framework Compatibility Notice
-The original framework targeted G1; this workspace is now adapted for MagicBot Z1 simulation. Real-robot deployment must use the MagicBot Z1 SDK and the audited physical motor order.
+Do not run BeyondMimic/dance directly on the physical robot. The BeyondMimic MagicBot SDK backend still needs migration and audit from the simulation policy.
 
-- `python_reference/legacy_robot/run_magicbot_loco_reference.sh` is the new MagicBot SDK loco backend.
-- `python_reference/legacy_robot/dds_robot_legacy.py` and `controller_cpp` still keep the Unitree DDS / shadow-compare logic and should not be treated as the MagicBot Z1 real-robot backend.
-- The BeyondMimic/dance SDK backend still needs to be ported from the simulation policy; do not run it directly on the real robot yet.
-- Runtime layer split notes: `docs/runtime_split.md`.
+## Legacy DDS And C++ Robot Paths
 
-### 2. Mimic Policy Reliability Warning
-The Mimic policy does not guarantee 100% success rate, particularly on slippery/sandy surfaces. In case of robot instability:
-- Press `F1` to activate **PassiveMode** (damping protection)
-- Press `Select` to immediately terminate the control program
+`python_reference/legacy_robot/dds_robot_legacy.py` and `controller_cpp` keep a Unitree DDS-style `rt/lowcmd` / `rt/lowstate` path. These files are useful for compatibility, C++ shadow compare, and DDS controller development, but they are not the current MagicBot Z1 SDK robot entry.
 
-### 3. Z1 BeyondMimic Dance - Current Baseline
-The current Z1 dance entry is `BeyondMimic`, not the legacy `policies/dance/Dance.py` path:
+Before any DDS robot run, re-check:
 
-⚠️ **Important Precautions**:
-- **Model Path**: `policies/beyond_mimic/model/policy.onnx`
-- **Control Entry**: `R1 + X` or `L1 + Y`
-- **Initial/Final Stabilization**: Brief manual stabilization may be required when starting/ending the dance
-- **Post-Dance Transition**: While switching to **Locomotion/PositionControl/PassiveMode** is possible, we recommend:
-  - First transition to **PositionControl** or **PassiveMode**
-  - Provide manual stabilization during transition
+- network interface and DDS domain;
+- actual low-level robot topics;
+- physical order of all 24 motors;
+- LowLevel switching path;
+- emergency stop and damping command behavior.
 
-### 4. Other Movement Advisories
-All other movements are currently **not recommended** for physical robot deployment.
+## Troubleshooting
 
-### 5. Strong Recommendation
-**Always** master operations in simulation before attempting physical robot deployment.
+### `No joystick connected`
+
+`mujoco_reference.py` falls back to `NullJoyStick`. Connect a controller to switch modes, or use `mujoco_dds_compare.py --no-joystick` for automated compare runs.
+
+### C++ compare waits for DDS forever
+
+Check:
+
+- `--net` matches on both sides; local shadow compare should use `lo`;
+- `controller_cpp/build_z1/robot_controller_onnx` exists;
+- `unitree_sdk2` and CycloneDDS runtime libraries are resolvable;
+- the Python side is running and publishing `rt/lowstate`.
+
+### ONNX loading fails
+
+Check the YAML `onnx_path`. Relative paths are resolved under the policy's `model/` directory, for example BeyondMimic resolves to `policies/beyond_mimic/model/policy.onnx`.
+
+### MuJoCo NaN/Inf or instability
+
+Return to `PassiveMode` or stop the program. Then check:
+
+- initial pose comes from `configs/simulation/magicbot_z1_stand.yaml`;
+- policy and `mj2lab` mapping match;
+- `safety.yaml` should be set to `enable: true` or `dry_run: true` during diagnosis;
+- no unsupported legacy skill entry was triggered.
+
+## More Docs
+
+- [`docs/runtime_split.md`](docs/runtime_split.md): runtime layering
+- [`docs/inference_benchmark_2026-06-07.md`](docs/inference_benchmark_2026-06-07.md): ONNX inference benchmark
+- [`controller_cpp/README.md`](controller_cpp/README.md): C++ controller and shadow compare details
+
+## Rule Of Thumb
+
+Sim first, then shadow compare, then dry-run, then connect-check, then read-state. Publish real robot commands only when every previous step is explainable, repeatable, and recoverable.

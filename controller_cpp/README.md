@@ -1,128 +1,89 @@
 # controller_cpp 文档
 
-## 1. 目标与范围
+`controller_cpp` 是当前仓库里的 C++ DDS/ONNX 控制器与 shadow compare 工具集。它主要用于：
 
-`controller_cpp` 是 `python_reference/legacy_robot/dds_robot_legacy.py` 的 C++ 版控制入口，当前按 MagicBot Z1（24 DoF）配置。
+- 对齐 Python `BeyondMimic` 与 C++ ONNX 推理输出；
+- 通过 DDS `rt/lowstate` / `rt/lowcmd` 做 MuJoCo shadow compare；
+- 验证 C++ 侧 LocoMode、BeyondMimic、TrackMimic 等当前实际存在的 Z1 策略配置。
 
-当前重点对齐路径：
+注意：当前 MagicBot Z1 真机优先使用主 README 中的 MagicBot 官方 SDK loco 后端。`controller_cpp` 仍是 DDS 风格链路，不应被当成当前 Z1 真机主入口，更不要直接用它跑 BeyondMimic 真机。
 
-- `SKILL_4 / BeyondMimic` 真机部署链路
-- MuJoCo shadow 对比验证链路（`scripts/compare_python_cpp.sh --verify`）
-- 主要技能策略（Loco/Dance/KungFu/Kick/KungFu2/SkillCooldown/SkillCast）ONNX 化部署链路
+## 当前覆盖范围
 
-## 2. 构建
+当前工作区实际存在并可被文档化的策略目录如下：
 
-在仓库根目录执行：
+| 状态/策略 | 当前 C++ 侧说明 |
+| --- | --- |
+| `PASSIVE` | 已实现，阻尼/保护类状态 |
+| `FIXEDPOSE` | 已实现，固定站姿/插值类状态 |
+| `LOCOMODE` | ONNX 实现，配置来自 `policies/loco_mode/config/LocoMode_lowKp.yaml` |
+| `SKILL_BEYOND_MIMIC` | ONNX 实现，通过 `--yaml policies/beyond_mimic/config/BeyondMimic.yaml` 注册 |
+| `SKILL_TRACK_MIMIC` | 可选 ONNX 实现，通过 `--track-yaml policies/track_mimic/config/BeyondMimic.yaml` 注册 |
+| `SKILL_COOLDOWN` | 已实现当前 Z1 24DoF 回归/过渡配置 |
+| `JOINT_ZERO_CHECK` | 已实现 |
+| `IMU_CALIB` | 已实现，运行时复用 LocoMode 相关输出 |
 
-```bash
-cd controller_cpp
-cmake -B build
-cmake --build build -j
-```
+以下 legacy 技能在 C++ 代码里仍有注册钩子或 stub，但当前仓库没有对应 policy 目录，不作为当前能力宣传：
 
-生成可执行文件：
+- `policies/dance/`
+- `policies/kungfu/`
+- `policies/kick/`
+- `policies/kungfu2/`
+- `policies/skill_cast/`
 
-- `build/robot_controller`
-- `build/robot_controller_onnx`
-
-说明：
-
-- `robot_controller_onnx` 支持全策略 ONNX 注册（含 Loco/Dance/KungFu/Kick/KungFu2/SkillCooldown/SkillCast/BeyondMimic/TrackMimic）。
-- `robot_controller` 为无 ONNX 依赖的基础版本。
-
-## 3. 启动
-
-### 3.1 真机启动（BeyondMimic）
-
-```bash
-cd /home/hiyio/MaigcLab/RoboMimic_Deploy_magicbot
-./controller_cpp/build/robot_controller_onnx \
-  --net enp4s0 \
-  --yaml policies/beyond_mimic/config/BeyondMimic.yaml
-```
-
-### 3.2 可选注册 TrackMimic
-
-```bash
-./controller_cpp/build/robot_controller_onnx \
-  --net enp4s0 \
-  --yaml policies/beyond_mimic/config/BeyondMimic.yaml \
-  --track-yaml policies/track_mimic/config/BeyondMimic.yaml
-```
-
-### 3.3 MuJoCo shadow 对比模式
-
-```bash
-./controller_cpp/build/robot_controller_onnx \
-  --shadow \
-  --sync-lowstate \
-  --net lo \
-  --yaml policies/beyond_mimic/config/BeyondMimic.yaml \
-  --shadow-state beyond
-```
-
-TrackMimic 对比模式：
-
-```bash
-./controller_cpp/build/robot_controller_onnx \
-  --shadow \
-  --sync-lowstate \
-  --net lo \
-  --yaml policies/beyond_mimic/config/BeyondMimic.yaml \
-  --track-yaml policies/track_mimic/config/BeyondMimic.yaml \
-  --shadow-state track
-```
-
-## 4. 命令行参数
-
-- `--net IFACE`：DDS 网卡（例如 `enp4s0`、`lo`）
-- `--joints N`：关节数（默认 24）
-- `--yaml PATH`：BeyondMimic YAML 配置路径
-- `--track-yaml PATH`：TrackMimic YAML 配置路径（可选）
-- `--shadow-state {beyond|track}`：`--shadow` 启动后自动 force 的 FSM 状态（默认 `beyond`）
-- `--shadow`：跳过 `zero_torque_state()` 启动等待，并启用 LowState 非阻塞预热（用于仿真对比）
-- `--sync-lowstate`：按 LowState tick 驱动控制循环（推荐用于 shadow compare）
-- `--safety`：启用安全过滤器
-- `--dry-run`：只算不发
-
-## 5. 手柄映射（与 Python 版一致）
-
-- `F1` -> `PASSIVE`
-- `UP` 释放 -> `PAUSE`（仅 mimic 类策略生效）
-- `START`（长按）-> `POS_RESET`
-- `R1 + A`（长按）-> `LOCO`
-- `R1 + X`（长按）-> `SKILL_1`
-- `R1 + Y`（长按）-> `SKILL_2`
-- `L1 + Y`（长按）-> `SKILL_4`（BeyondMimic）
-- `L1 + X`（长按）-> `SKILL_6`（ImuCalib）
-- `L1 + A`（长按）-> `SKILL_7`（TrackMimic）
-- `SELECT` -> 退出程序
-
-## 6. 状态实现覆盖
-
-- `PASSIVE`：已实现
-- `FIXEDPOSE`：已实现
-- `LOCOMODE`：ONNX 实现（对应 `policies/loco_mode/config/LocoMode_lowKp.yaml`）
-- `SKILL_DANCE`：ONNX 实现
-- `SKILL_KUNGFU`：ONNX 实现
-- `SKILL_KICK`：ONNX 实现
-- `SKILL_KUNGFU2`：ONNX 实现
-- `SKILL_CAST`：ONNX 实现（按配置关节集合插值）
-- `SKILL_COOLDOWN`：ONNX/占位实现（按 Z1 24DoF 固定姿态回归）
-- `SKILL_BEYOND_MIMIC`：ONNX 实现，已用于严格对比验证
-- `SKILL_TRACK_MIMIC`：ONNX + `motion_file(npz)` 实现；需通过 `--track-yaml` 注册，未注册时回退占位模式
-- `JOINT_ZERO_CHECK`：已实现（配置镜像）
-- `IMU_CALIB`：已实现（运行时复用 LocoMode 输出）
-
-## 7. 一键验证（推荐）
+## 构建
 
 在仓库根目录执行：
+
+```bash
+cmake -S controller_cpp -B controller_cpp/build_z1
+cmake --build controller_cpp/build_z1 -j
+```
+
+生成的主要可执行文件：
+
+- `controller_cpp/build_z1/robot_controller`
+- `controller_cpp/build_z1/robot_controller_onnx`
+- `controller_cpp/build_z1/onnx_benchmark`
+- `controller_cpp/build_z1/mujoco_dds_simulator`，仅在找到 MuJoCo C API 时生成
+
+如果 ONNX Runtime 或 MuJoCo 不在默认路径，配置时显式覆盖：
+
+```bash
+cmake -S controller_cpp -B controller_cpp/build_z1 \
+  -DONNXRUNTIME_DIR=/path/to/onnxruntime-linux-x64 \
+  -DMUJOCO_ROOT=/path/to/mujoco
+cmake --build controller_cpp/build_z1 -j
+```
+
+## Shadow Compare
+
+推荐从仓库根目录使用脚本：
 
 ```bash
 bash scripts/compare_python_cpp.sh --verify --net lo
 ```
 
-TrackMimic 验证：
+该脚本会自动启动：
+
+- C++ `robot_controller_onnx --shadow --sync-lowstate`
+- Python `python_reference/simulation/mujoco_dds_compare.py`
+- DDS LowState/LowCmd 桥
+- diff CSV 与 summary JSON
+
+默认验证对象是 BeyondMimic：
+
+```bash
+./controller_cpp/build_z1/robot_controller_onnx \
+  --shadow \
+  --sync-lowstate \
+  --net lo \
+  --joints 24 \
+  --yaml policies/beyond_mimic/config/BeyondMimic.yaml \
+  --shadow-state beyond
+```
+
+TrackMimic 对比：
 
 ```bash
 bash scripts/compare_python_cpp.sh --verify --net lo \
@@ -130,53 +91,87 @@ bash scripts/compare_python_cpp.sh --verify --net lo \
   --track-yaml policies/track_mimic/config/BeyondMimic.yaml
 ```
 
-该命令会：
+## 命令行参数
 
-- 启动 C++ shadow
-- 启动 Python MuJoCo DDS bridge
-- 生成差异 CSV/JSON
-- 给出 `PASS/FAIL` 退出码
+- `--net IFACE`：DDS 网卡，例如 `lo`、`enp4s0`。
+- `--joints N`：关节数，当前 Z1 默认 `24`。
+- `--yaml PATH`：BeyondMimic YAML 配置路径。
+- `--track-yaml PATH`：TrackMimic YAML 配置路径。
+- `--shadow-state {beyond|track}`：`--shadow` 启动后 force 到的 FSM 状态。
+- `--shadow`：跳过真机式启动等待，用于仿真/shadow compare。
+- `--sync-lowstate`：按 LowState tick 驱动控制循环，推荐用于 compare。
+- `--safety`：启用 C++ 安全过滤器。
+- `--dry-run`：只计算，不发布命令。
 
-默认严格配置：
+## 手柄/遥控映射
 
-- `warmup_steps=80`
-- `min_cmp_steps=200`
-- `q_tol=1e-5`
-- `mean_q_tol=1e-6`
+与 Python 参考控制器保持一致的核心映射：
 
-## 8. 常见问题
+| 输入 | 命令 |
+| --- | --- |
+| `F1` | `PASSIVE` |
+| `UP` 释放 | `PAUSE`，仅 mimic 类策略生效 |
+| `START` 长按 | `POS_RESET` |
+| `R1 + A` 长按 | `LOCO` |
+| `R1 + X` 长按 | `SKILL_1`，当前 Z1 Python 主线映射到 BeyondMimic |
+| `L1 + Y` 长按 | `SKILL_4` / BeyondMimic |
+| `L1 + A` 长按 | `SKILL_7` / TrackMimic，需注册 `--track-yaml` |
+| `SELECT` | 退出程序 |
 
-### 8.1 一直等待连接
+`R1 + Y`、`B` 组合等 legacy 技能命令仍可能存在于代码路径中，但当前仓库没有对应策略目录，调试时不建议使用。
+
+## ONNX Benchmark
+
+纯 ONNXRuntime benchmark：
+
+```bash
+./controller_cpp/build_z1/onnx_benchmark \
+  --model policies/beyond_mimic/model/policy.onnx \
+  --obs-dim 124 \
+  --iters 5000 \
+  --warmup 500 \
+  --threads 1
+```
+
+Python benchmark 入口：
+
+```bash
+python python_reference/tools/onnx_benchmark.py \
+  --model policies/beyond_mimic/model/policy.onnx \
+  --obs-dim 124 \
+  --iters 5000 \
+  --warmup 500 \
+  --threads 1
+```
+
+已有记录见：`docs/inference_benchmark_2026-06-07.md`。
+
+## 常见问题
+
+### 一直等待 LowState
 
 现象：`[Controller] Waiting for robot connection...`
 
 排查：
 
-- 网卡是否正确（`--net`）
-- DDS 话题是否存在（`rt/lowstate`）
-- 真机/仿真端是否已启动并发布 LowState
+- shadow compare 是否使用了 `--shadow`；
+- `--net` 是否和 Python/DDS 侧一致；
+- Python 侧是否已经发布 `rt/lowstate`；
+- 本机 compare 建议统一使用 `--net lo`。
 
-### 8.2 ONNX 加载失败
-
-现象：`[Main][WARN] BeyondMimic load failed ...`
+### ONNX 加载失败
 
 排查：
 
-- `--yaml` 路径是否正确
-- YAML 内 `onnx_path` 是否可解析
-- ONNXRuntime 版本与模型是否兼容
+- `--yaml` 或 `--track-yaml` 路径是否存在；
+- YAML 内 `onnx_path` 是否能解析到真实模型；
+- `ONNXRUNTIME_DIR` 是否指向包含 `include/` 与 `lib/` 的 ONNX Runtime 包；
+- 模型输入输出维度是否和 YAML 中的 `num_obs`、`num_actions` 一致。
 
-### 8.3 verify 偶发首段误差偏大
+### `skill_cast` 相关路径不存在
 
-建议保持默认 `warmup_steps=80`，避免初始两帧姿态对齐阶段影响统计。
+这是当前工作区的正常状态。C++ 代码保留了 legacy `SkillCast` 注册钩子，但仓库没有 `policies/skill_cast/`，因此文档不再把它列为当前支持策略。
 
-在 `--shadow --sync-lowstate` 下，控制器会先完成策略加载再等待 LowState tick 驱动，从而避免 TrackMimic 因启动相位错位导致的早期大误差。
+### 是否可以用 C++ 跑真机 BeyondMimic
 
-### 8.4 SkillCast/SkillCooldown 模型格式
-
-这两个策略在 Python 侧原始模型是 `.pt`。C++ ONNX 版本默认加载对应的同名 `.onnx`：
-
-- `policies/skill_cast/model/policy_stand_15dof.onnx`
-- `policies/skill_cooldown/model/policy_15dof.onnx`
-
-如果只存在 `.pt` 而没有 `.onnx`，C++ 会报加载失败。
+当前不建议。请先使用 Python MuJoCo 仿真与 `scripts/compare_python_cpp.sh --verify --net lo` 完成验证。MagicBot Z1 真机 loco 检查走 `python_reference/legacy_robot/run_magicbot_loco_reference.sh` 的 SDK 分阶段流程。

@@ -40,6 +40,8 @@ htmlcov/
 !.vscode/tasks.json
 !.vscode/launch.json
 !.vscode/extensions.json
+.codex
+.codex/
 
 # PyCharm
 .idea/
@@ -52,6 +54,9 @@ htmlcov/
 # ==============================
 # 项目特定忽略
 # ==============================
+# 本地 CMake 构建目录
+controller_cpp/build*/
+
 # 忽略所有临时 USD 文件
 *.tmp.usd
 

@@ -1,0 +1,18 @@
+# Core Python runtime for MagicBot Z1 simulation and policy inference.
+# Python 3.10 is the current baseline for this workspace.
+numpy>=1.24,<3
+PyYAML>=6.0
+scipy>=1.10
+pygame>=2.5
+mujoco>=3.3
+onnx>=1.16
+onnxruntime>=1.18
+torch>=2.3
+
+# Optional: required only when enabling python_reference/simulation/head_camera_stream.py.
+opencv-python>=4.8
+
+# External dependencies not installed from PyPI by default:
+# - unitree_sdk2py: install from https://github.com/unitreerobotics/unitree_sdk2_python
+# - MagicBot SDK: point MAGICBOT_SDK_ROOT to magicbot-z1_sdk-main for real loco checks
+# - ROS 2 Python packages: install from the system ROS 2 distribution when enabling head_camera_ros2
