@@ -1,0 +1,1044 @@
+#include "magicbot_loco_core.h"
+#include "magicbot_loco_sdk_adapter.h"
+
+#include <algorithm>
+#include <array>
+#include <atomic>
+#include <cerrno>
+#include <chrono>
+#include <csignal>
+#include <cstring>
+#include <cstdlib>
+#include <filesystem>
+#include <fcntl.h>
+#include <iomanip>
+#include <iostream>
+#include <linux/joystick.h>
+#include <memory>
+#include <sstream>
+#include <string>
+#include <thread>
+#include <termios.h>
+#include <unistd.h>
+#include <vector>
+
+namespace ml = magicbot_loco;
+
+namespace {
+
+std::atomic<bool> g_running{true};
+
+void signal_handler(int signum)
+{
+    std::cout << "[Signal] Received " << signum << ", stopping" << std::endl;
+    g_running.store(false);
+}
+
+struct Args {
+    std::filesystem::path config{"policies/loco_mode/config/LocoMode_lowKp.yaml"};
+    bool dry_run{false};
+    bool connect_check{false};
+    bool read_state{false};
+    bool run{false};
+    bool input_check{false};
+    bool debug_entry{false};
+    bool debug_entry_only{false};
+    std::string debug_entry_tts{
+        "Entering real robot debug mode. Switching to passive test mode in three seconds. Please keep clear."};
+    double debug_entry_wait_s{3.0};
+    double debug_entry_passive_s{2.0};
+    bool tts_required{false};
+    bool try_gait_passive{false};
+    bool skip_gait_passive{false};
+    bool skip_lowlevel_disconnect{false};
+    bool hard_exit_after_final_damping{false};
+
+    std::string local_ip;
+    bool skip_network_check{false};
+    float vx{0.0f};
+    float vy{0.0f};
+    float wz{0.0f};
+    bool allow_loco{false};
+    bool keyboard_control{false};
+    bool gamepad_control{false};
+    std::string gamepad_device{"/dev/input/js0"};
+    float input_step{0.05f};
+    float input_deadzone{0.08f};
+    int gamepad_axis_vx{1};
+    int gamepad_axis_vy{0};
+    int gamepad_axis_wz{3};
+    float gamepad_axis_vx_sign{-1.0f};
+    float gamepad_axis_vy_sign{-1.0f};
+    float gamepad_axis_wz_sign{-1.0f};
+    int gamepad_deadman_button{4};
+    int gamepad_stop_button{1};
+    double state_timeout{10.0};
+    std::string prepare_gait{"recovery_stand"};
+    double stand_time{2.0};
+    double pre_stand_hold_s{1.0};
+    double final_stand_time{1.0};
+    double final_stand_hold_s{0.5};
+    bool hold_final_stand{false};
+    bool pd_stand_only{false};
+    double duration{3.0};
+    float stand_kp_scale{0.5f};
+    float kp_scale{1.0f};
+    float kd_scale{1.0f};
+    float max_target_rate{4.0f};
+    float joint_limit_margin{0.01f};
+    float damping_kd{3.0f};
+    ml::RateWatchdogConfig rate;
+    ml::SafetyConfig safety;
+    double log_interval{1.0};
+};
+
+void print_usage(const char* argv0)
+{
+    std::cout
+        << "Usage: " << argv0 << " [--dry-run|--connect-check|--read-state|--run|--debug-entry-only] [options]\n"
+        << "\n"
+        << "Native MagicBot Z1 loco runner. ONNX policy and 500Hz command publish run in C++.\n"
+        << "\n"
+        << "Common:\n"
+        << "  --config PATH                    Loco YAML config\n"
+        << "  --local-ip IP                    SDK local IP, default MAGICBOT_LOCAL_IP or 192.168.54.119\n"
+        << "  --skip-network-check             Do not verify local-ip exists on this host\n"
+        << "  --dry-run                        Load YAML/ONNX and run one inference\n"
+        << "  --connect-check                  Connect/disconnect only, no LowLevel switch\n"
+        << "  --read-state                     LowLevel state subscription only, no command publish\n"
+        << "  --run                            Publish low-level commands\n"
+        << "  --input-check                    Read keyboard/gamepad input only, no robot connection\n"
+        << "  --pd-stand-only                  With --run, hold default PD stand and never run ONNX\n"
+        << "  --allow-loco                     Required before ONNX loco is allowed\n"
+        << "\n"
+        << "Motion:\n"
+        << "  --vx V --vy V --wz V             Normalized command inputs; YAML cmd_range maps physical speed\n"
+        << "  --duration S                     Run duration; <=0 means until stopped\n"
+        << "  --stand-time S                   Interpolate to default stand before mode\n"
+        << "  --pre-stand-hold-s S             Hold stand before loco starts\n"
+        << "  --final-stand-time S             Return-to-stand time on normal exit\n"
+        << "  --final-stand-hold-s S           Stand hold before final damping\n"
+        << "  --hold-final-stand               Hold final stand until signal\n"
+        << "\n"
+        << "Operator input:\n"
+        << "  --keyboard-control               Live terminal keyboard input in loco loop\n"
+        << "                                   W/S vx, Q/E vy, A/D wz, X zero, Space/P pause-zero, Esc stop\n"
+        << "  --gamepad-control                Live Linux joystick input in loco loop\n"
+        << "  --gamepad-device PATH            Joystick device, default /dev/input/js0\n"
+        << "  --input-step V                   Keyboard normalized command step, default 0.05\n"
+        << "  --input-deadzone V               Gamepad axis deadzone, default 0.08\n"
+        << "  --gamepad-axis-vx N              Axis index for vx, default 1\n"
+        << "  --gamepad-axis-vy N              Axis index for vy, default 0\n"
+        << "  --gamepad-axis-wz N              Axis index for wz, default 3\n"
+        << "  --gamepad-axis-vx-sign S         Axis sign for vx, default -1\n"
+        << "  --gamepad-axis-vy-sign S         Axis sign for vy, default -1\n"
+        << "  --gamepad-axis-wz-sign S         Axis sign for wz, default -1\n"
+        << "  --gamepad-deadman-button N       Button that must be held for nonzero command, default 4\n"
+        << "  --gamepad-stop-button N          Button that stops loco loop, default 1\n"
+        << "\n"
+        << "Debug entry:\n"
+        << "  --debug-entry                    TTS, wait, then LowLevel passive damping before run\n"
+        << "  --debug-entry-only               Only run debug-entry passive damping sequence\n"
+        << "  --debug-entry-tts TEXT           TTS prompt\n"
+        << "  --debug-entry-wait-s S           Wait after TTS\n"
+        << "  --debug-entry-passive-s S        LowLevel damping duration\n";
+}
+
+std::string take_value(int& i, int argc, char** argv)
+{
+    if (i + 1 >= argc) throw std::runtime_error(std::string("missing value for ") + argv[i]);
+    return argv[++i];
+}
+
+Args parse_args(int argc, char** argv)
+{
+    Args args;
+    const char* env_ip = std::getenv("MAGICBOT_LOCAL_IP");
+    args.local_ip = env_ip && *env_ip ? env_ip : "192.168.54.119";
+
+    for (int i = 1; i < argc; ++i) {
+        std::string a = argv[i];
+        if (a == "--help" || a == "-h") {
+            print_usage(argv[0]);
+            std::exit(0);
+        } else if (a == "--config") {
+            args.config = take_value(i, argc, argv);
+        } else if (a == "--dry-run") {
+            args.dry_run = true;
+        } else if (a == "--connect-check") {
+            args.connect_check = true;
+        } else if (a == "--read-state") {
+            args.read_state = true;
+        } else if (a == "--run") {
+            args.run = true;
+        } else if (a == "--input-check") {
+            args.input_check = true;
+        } else if (a == "--debug-entry") {
+            args.debug_entry = true;
+        } else if (a == "--debug-entry-only") {
+            args.debug_entry_only = true;
+        } else if (a == "--debug-entry-tts") {
+            args.debug_entry_tts = take_value(i, argc, argv);
+        } else if (a == "--debug-entry-wait-s") {
+            args.debug_entry_wait_s = std::stod(take_value(i, argc, argv));
+        } else if (a == "--debug-entry-passive-s") {
+            args.debug_entry_passive_s = std::stod(take_value(i, argc, argv));
+        } else if (a == "--tts-required") {
+            args.tts_required = true;
+        } else if (a == "--try-gait-passive") {
+            args.try_gait_passive = true;
+        } else if (a == "--skip-gait-passive") {
+            args.skip_gait_passive = true;
+        } else if (a == "--skip-lowlevel-disconnect") {
+            args.skip_lowlevel_disconnect = true;
+        } else if (a == "--hard-exit-after-final-damping") {
+            args.hard_exit_after_final_damping = true;
+        } else if (a == "--local-ip") {
+            args.local_ip = take_value(i, argc, argv);
+        } else if (a == "--skip-network-check") {
+            args.skip_network_check = true;
+        } else if (a == "--vx") {
+            args.vx = std::stof(take_value(i, argc, argv));
+        } else if (a == "--vy") {
+            args.vy = std::stof(take_value(i, argc, argv));
+        } else if (a == "--wz") {
+            args.wz = std::stof(take_value(i, argc, argv));
+        } else if (a == "--allow-loco") {
+            args.allow_loco = true;
+        } else if (a == "--keyboard-control") {
+            args.keyboard_control = true;
+        } else if (a == "--gamepad-control") {
+            args.gamepad_control = true;
+        } else if (a == "--gamepad-device") {
+            args.gamepad_device = take_value(i, argc, argv);
+        } else if (a == "--input-step") {
+            args.input_step = std::stof(take_value(i, argc, argv));
+        } else if (a == "--input-deadzone") {
+            args.input_deadzone = std::stof(take_value(i, argc, argv));
+        } else if (a == "--gamepad-axis-vx") {
+            args.gamepad_axis_vx = std::stoi(take_value(i, argc, argv));
+        } else if (a == "--gamepad-axis-vy") {
+            args.gamepad_axis_vy = std::stoi(take_value(i, argc, argv));
+        } else if (a == "--gamepad-axis-wz") {
+            args.gamepad_axis_wz = std::stoi(take_value(i, argc, argv));
+        } else if (a == "--gamepad-axis-vx-sign") {
+            args.gamepad_axis_vx_sign = std::stof(take_value(i, argc, argv));
+        } else if (a == "--gamepad-axis-vy-sign") {
+            args.gamepad_axis_vy_sign = std::stof(take_value(i, argc, argv));
+        } else if (a == "--gamepad-axis-wz-sign") {
+            args.gamepad_axis_wz_sign = std::stof(take_value(i, argc, argv));
+        } else if (a == "--gamepad-deadman-button") {
+            args.gamepad_deadman_button = std::stoi(take_value(i, argc, argv));
+        } else if (a == "--gamepad-stop-button") {
+            args.gamepad_stop_button = std::stoi(take_value(i, argc, argv));
+        } else if (a == "--state-timeout") {
+            args.state_timeout = std::stod(take_value(i, argc, argv));
+        } else if (a == "--prepare-gait") {
+            args.prepare_gait = take_value(i, argc, argv);
+        } else if (a == "--stand-time") {
+            args.stand_time = std::stod(take_value(i, argc, argv));
+        } else if (a == "--pre-stand-hold-s") {
+            args.pre_stand_hold_s = std::stod(take_value(i, argc, argv));
+        } else if (a == "--final-stand-time") {
+            args.final_stand_time = std::stod(take_value(i, argc, argv));
+        } else if (a == "--final-stand-hold-s") {
+            args.final_stand_hold_s = std::stod(take_value(i, argc, argv));
+        } else if (a == "--hold-final-stand") {
+            args.hold_final_stand = true;
+        } else if (a == "--stand-only" || a == "--pd-stand-only") {
+            args.pd_stand_only = true;
+        } else if (a == "--duration") {
+            args.duration = std::stod(take_value(i, argc, argv));
+        } else if (a == "--stand-kp-scale") {
+            args.stand_kp_scale = std::stof(take_value(i, argc, argv));
+        } else if (a == "--kp-scale") {
+            args.kp_scale = std::stof(take_value(i, argc, argv));
+        } else if (a == "--kd-scale") {
+            args.kd_scale = std::stof(take_value(i, argc, argv));
+        } else if (a == "--max-target-rate") {
+            args.max_target_rate = std::stof(take_value(i, argc, argv));
+        } else if (a == "--joint-limit-margin") {
+            args.joint_limit_margin = std::stof(take_value(i, argc, argv));
+        } else if (a == "--damping-kd") {
+            args.damping_kd = std::stof(take_value(i, argc, argv));
+        } else if (a == "--disable-rate-watchdog") {
+            args.rate.enabled = false;
+        } else if (a == "--rate-watchdog-min-hz") {
+            args.rate.min_hz = std::stod(take_value(i, argc, argv));
+        } else if (a == "--rate-watchdog-window") {
+            args.rate.window_s = std::stod(take_value(i, argc, argv));
+        } else if (a == "--rate-watchdog-max-gap-ms") {
+            args.rate.max_gap_s = std::stod(take_value(i, argc, argv)) / 1000.0;
+        } else if (a == "--disable-motion-safety") {
+            args.safety.enabled = false;
+        } else if (a == "--motion-safety-joint-scope") {
+            args.safety.joint_scope = take_value(i, argc, argv);
+        } else if (a == "--motion-max-joint-vel") {
+            args.safety.max_joint_vel = std::stof(take_value(i, argc, argv));
+        } else if (a == "--motion-max-ang-vel") {
+            args.safety.max_ang_vel = std::stof(take_value(i, argc, argv));
+        } else if (a == "--motion-max-gravity-xy") {
+            args.safety.max_gravity_xy = std::stof(take_value(i, argc, argv));
+        } else if (a == "--motion-max-default-dev") {
+            args.safety.max_default_dev = std::stof(take_value(i, argc, argv));
+        } else if (a == "--motion-max-target-error") {
+            args.safety.max_target_error = std::stof(take_value(i, argc, argv));
+        } else if (a == "--motion-max-policy-target-dev") {
+            args.safety.max_policy_target_dev = std::stof(take_value(i, argc, argv));
+        } else if (a == "--motion-max-policy-target-jump") {
+            args.safety.max_policy_target_jump = std::stof(take_value(i, argc, argv));
+        } else if (a == "--log-interval") {
+            args.log_interval = std::stod(take_value(i, argc, argv));
+        } else {
+            throw std::runtime_error("unknown argument: " + a);
+        }
+    }
+
+    const int selected = static_cast<int>(args.dry_run) + static_cast<int>(args.connect_check) +
+                         static_cast<int>(args.read_state) + static_cast<int>(args.run) +
+                         static_cast<int>(args.input_check) +
+                         static_cast<int>(args.debug_entry_only);
+    if (selected == 0) args.dry_run = true;
+    if (selected > 1) {
+        throw std::runtime_error(
+            "use only one of --dry-run, --connect-check, --read-state, --run, --input-check, --debug-entry-only");
+    }
+    if (args.run && !args.pd_stand_only && !args.allow_loco) {
+        throw std::runtime_error("refusing ONNX loco without --allow-loco; use --pd-stand-only for PD standing");
+    }
+    if (args.safety.joint_scope != "body" && args.safety.joint_scope != "legs" && args.safety.joint_scope != "all") {
+        throw std::runtime_error("--motion-safety-joint-scope must be body, legs or all");
+    }
+    if (args.keyboard_control && args.gamepad_control) {
+        throw std::runtime_error("use only one of --keyboard-control or --gamepad-control");
+    }
+    args.input_step = std::clamp(args.input_step, 0.001f, 1.0f);
+    args.input_deadzone = std::clamp(args.input_deadzone, 0.0f, 0.95f);
+    return args;
+}
+
+void check_network_preflight(const Args& args)
+{
+    if (args.skip_network_check) {
+        std::cerr << "[WARN] Skipping local IP preflight check" << std::endl;
+        return;
+    }
+    if (!ml::local_ip_exists(args.local_ip)) {
+        throw std::runtime_error("local IP " + args.local_ip + " is not assigned to this machine");
+    }
+}
+
+std::string range_string(const ml::JointArray& a)
+{
+    auto [min_it, max_it] = std::minmax_element(a.begin(), a.end());
+    std::ostringstream oss;
+    oss << std::fixed << std::setprecision(3) << "[" << *min_it << ".." << *max_it << "]";
+    return oss.str();
+}
+
+float clamp_command(float v)
+{
+    return std::clamp(v, -1.0f, 1.0f);
+}
+
+float normalized_axis_value(int value)
+{
+    const float denom = value < 0 ? 32768.0f : 32767.0f;
+    return clamp_command(static_cast<float>(value) / denom);
+}
+
+float apply_axis_deadzone(float value, float deadzone)
+{
+    const float dz = std::clamp(deadzone, 0.0f, 0.95f);
+    const float av = std::fabs(value);
+    if (av <= dz) return 0.0f;
+    return std::copysign((av - dz) / std::max(1e-6f, 1.0f - dz), value);
+}
+
+struct LiveInputState {
+    std::array<float, 3> command{0.0f, 0.0f, 0.0f};
+    bool stop_requested{false};
+    bool changed{false};
+    bool zeroed_by_deadman{false};
+    std::string status;
+};
+
+class TerminalKeyboardInput {
+public:
+    TerminalKeyboardInput(std::array<float, 3> initial_command, float step)
+        : command_(initial_command), step_(step)
+    {
+        if (!isatty(STDIN_FILENO)) {
+            throw std::runtime_error("--keyboard-control requires a TTY stdin");
+        }
+        if (tcgetattr(STDIN_FILENO, &old_term_) != 0) {
+            throw std::runtime_error(std::string("tcgetattr failed: ") + std::strerror(errno));
+        }
+        old_flags_ = fcntl(STDIN_FILENO, F_GETFL, 0);
+        if (old_flags_ < 0) {
+            throw std::runtime_error(std::string("fcntl(F_GETFL) failed: ") + std::strerror(errno));
+        }
+
+        termios raw = old_term_;
+        raw.c_lflag &= static_cast<unsigned int>(~(ICANON | ECHO));
+        raw.c_cc[VMIN] = 0;
+        raw.c_cc[VTIME] = 0;
+        if (tcsetattr(STDIN_FILENO, TCSANOW, &raw) != 0) {
+            throw std::runtime_error(std::string("tcsetattr failed: ") + std::strerror(errno));
+        }
+        if (fcntl(STDIN_FILENO, F_SETFL, old_flags_ | O_NONBLOCK) != 0) {
+            tcsetattr(STDIN_FILENO, TCSANOW, &old_term_);
+            throw std::runtime_error(std::string("fcntl(F_SETFL) failed: ") + std::strerror(errno));
+        }
+        active_ = true;
+    }
+
+    ~TerminalKeyboardInput()
+    {
+        if (!active_) return;
+        tcsetattr(STDIN_FILENO, TCSANOW, &old_term_);
+        fcntl(STDIN_FILENO, F_SETFL, old_flags_);
+    }
+
+    LiveInputState poll()
+    {
+        LiveInputState out;
+        char ch = 0;
+        while (true) {
+            const ssize_t n = read(STDIN_FILENO, &ch, 1);
+            if (n == 1) {
+                handle_char(ch, out);
+                continue;
+            }
+            if (n < 0 && errno != EAGAIN && errno != EWOULDBLOCK) {
+                throw std::runtime_error(std::string("keyboard read failed: ") + std::strerror(errno));
+            }
+            break;
+        }
+        out.command = paused_ ? std::array<float, 3>{0.0f, 0.0f, 0.0f} : command_;
+        out.status = paused_ ? "keyboard paused" : "keyboard";
+        return out;
+    }
+
+private:
+    void handle_char(char ch, LiveInputState& out)
+    {
+        switch (ch) {
+        case 3:
+        case 27:
+            out.stop_requested = true;
+            out.changed = true;
+            return;
+        case 'w':
+        case 'W':
+            command_[0] = clamp_command(command_[0] + step_);
+            break;
+        case 's':
+        case 'S':
+            command_[0] = clamp_command(command_[0] - step_);
+            break;
+        case 'q':
+        case 'Q':
+            command_[1] = clamp_command(command_[1] + step_);
+            break;
+        case 'e':
+        case 'E':
+            command_[1] = clamp_command(command_[1] - step_);
+            break;
+        case 'a':
+        case 'A':
+            command_[2] = clamp_command(command_[2] + step_);
+            break;
+        case 'd':
+        case 'D':
+            command_[2] = clamp_command(command_[2] - step_);
+            break;
+        case 'x':
+        case 'X':
+        case '0':
+            command_ = {0.0f, 0.0f, 0.0f};
+            break;
+        case ' ':
+        case 'p':
+        case 'P':
+            paused_ = !paused_;
+            break;
+        default:
+            return;
+        }
+        out.changed = true;
+    }
+
+    std::array<float, 3> command_{0.0f, 0.0f, 0.0f};
+    float step_{0.05f};
+    termios old_term_{};
+    int old_flags_{0};
+    bool active_{false};
+    bool paused_{false};
+};
+
+class GamepadInput {
+public:
+    explicit GamepadInput(const Args& args)
+        : args_(args), axes_(16, 0.0f), buttons_(16, 0)
+    {
+        fd_ = open(args_.gamepad_device.c_str(), O_RDONLY | O_NONBLOCK);
+        if (fd_ < 0) {
+            throw std::runtime_error("failed to open " + args_.gamepad_device + ": " + std::strerror(errno));
+        }
+    }
+
+    ~GamepadInput()
+    {
+        if (fd_ >= 0) close(fd_);
+    }
+
+    LiveInputState poll()
+    {
+        LiveInputState out;
+        js_event event{};
+        while (true) {
+            const ssize_t n = read(fd_, &event, sizeof(event));
+            if (n == static_cast<ssize_t>(sizeof(event))) {
+                handle_event(event, out);
+                continue;
+            }
+            if (n < 0 && errno != EAGAIN && errno != EWOULDBLOCK) {
+                throw std::runtime_error(std::string("gamepad read failed: ") + std::strerror(errno));
+            }
+            break;
+        }
+
+        const bool deadman_required = args_.gamepad_deadman_button >= 0;
+        const bool deadman_pressed = !deadman_required || button_pressed(args_.gamepad_deadman_button);
+        out.command = {
+            axis_command(args_.gamepad_axis_vx, args_.gamepad_axis_vx_sign),
+            axis_command(args_.gamepad_axis_vy, args_.gamepad_axis_vy_sign),
+            axis_command(args_.gamepad_axis_wz, args_.gamepad_axis_wz_sign),
+        };
+        if (!deadman_pressed) {
+            out.command = {0.0f, 0.0f, 0.0f};
+            out.zeroed_by_deadman = true;
+        }
+        out.status = deadman_pressed ? "gamepad" : "gamepad deadman-open";
+        return out;
+    }
+
+private:
+    void handle_event(const js_event& event, LiveInputState& out)
+    {
+        const uint8_t type = event.type & static_cast<uint8_t>(~JS_EVENT_INIT);
+        if (type == JS_EVENT_AXIS) {
+            if (event.number >= axes_.size()) axes_.resize(static_cast<size_t>(event.number) + 1, 0.0f);
+            axes_[event.number] = normalized_axis_value(event.value);
+            out.changed = true;
+        } else if (type == JS_EVENT_BUTTON) {
+            if (event.number >= buttons_.size()) buttons_.resize(static_cast<size_t>(event.number) + 1, 0);
+            buttons_[event.number] = event.value ? 1 : 0;
+            out.changed = true;
+            if (args_.gamepad_stop_button >= 0 && event.number == args_.gamepad_stop_button && event.value) {
+                out.stop_requested = true;
+            }
+        }
+    }
+
+    bool button_pressed(int index) const
+    {
+        return index >= 0 && index < static_cast<int>(buttons_.size()) && buttons_[static_cast<size_t>(index)] != 0;
+    }
+
+    float axis_command(int index, float sign) const
+    {
+        if (index < 0 || index >= static_cast<int>(axes_.size())) return 0.0f;
+        return clamp_command(apply_axis_deadzone(axes_[static_cast<size_t>(index)], args_.input_deadzone) * sign);
+    }
+
+    const Args& args_;
+    int fd_{-1};
+    std::vector<float> axes_;
+    std::vector<int> buttons_;
+};
+
+class OperatorInput {
+public:
+    OperatorInput(const Args& args, std::array<float, 3> initial_command)
+    {
+        if (args.keyboard_control) {
+            keyboard_ = std::make_unique<TerminalKeyboardInput>(initial_command, args.input_step);
+            std::cout << "[Input] Keyboard control enabled: W/S vx, Q/E vy, A/D wz, X zero, Space/P pause-zero, Esc stop"
+                      << std::endl;
+        }
+        if (args.gamepad_control) {
+            gamepad_ = std::make_unique<GamepadInput>(args);
+            std::cout << "[Input] Gamepad control enabled: device=" << args.gamepad_device
+                      << " axes(vx,vy,wz)=[" << args.gamepad_axis_vx << " " << args.gamepad_axis_vy << " "
+                      << args.gamepad_axis_wz << "] deadman_button=" << args.gamepad_deadman_button
+                      << " stop_button=" << args.gamepad_stop_button << std::endl;
+        }
+    }
+
+    bool enabled() const { return keyboard_ != nullptr || gamepad_ != nullptr; }
+
+    LiveInputState poll()
+    {
+        if (keyboard_) return keyboard_->poll();
+        if (gamepad_) return gamepad_->poll();
+        return {};
+    }
+
+private:
+    std::unique_ptr<TerminalKeyboardInput> keyboard_;
+    std::unique_ptr<GamepadInput> gamepad_;
+};
+
+void dry_run(const ml::LocoConfig& cfg, ml::OnnxLocoPolicy& policy)
+{
+    ml::JointArray q = cfg.default_motor();
+    ml::JointArray dq{};
+    std::array<float, 3> zero3{0.0f, 0.0f, 0.0f};
+    std::array<float, 3> gravity{0.0f, 0.0f, -1.0f};
+    auto result = policy.infer(q, dq, zero3, gravity, zero3);
+    auto [min_a, max_a] = std::minmax_element(result.action_lab.begin(), result.action_lab.end());
+    std::cout << "Config: " << cfg.config_path << "\n"
+              << "ONNX: " << cfg.policy_path << "\n"
+              << "ONNX input/output: " << cfg.num_obs << " -> " << cfg.num_actions << "\n"
+              << "Action sample range: " << *min_a << " .. " << *max_a << "\n"
+              << "Target sample range: " << range_string(result.target_motor) << std::endl;
+}
+
+ml::JointArray stand_interpolation(
+    ml::MagicbotSdkAdapter& robot,
+    ml::SdkRobotState& state,
+    const ml::LocoConfig& cfg,
+    const Args& args,
+    ml::RateWatchdog& rate_watchdog)
+{
+    ml::RobotSnapshot snap = state.snapshot();
+    ml::JointArray command_target = snap.q;
+    const ml::JointArray target_default = cfg.default_motor();
+    const ml::JointArray kp_motor_base = cfg.kps_motor();
+    const ml::JointArray kd_motor = cfg.kds_motor();
+    const ml::JointArray tau_limit = cfg.tau_limit_motor();
+    ml::JointArray kp_motor{};
+    for (int i = 0; i < ml::kNumJoints; ++i) kp_motor[i] = kp_motor_base[i] * args.stand_kp_scale;
+
+    const int steps = std::max(1, static_cast<int>(args.stand_time * ml::kControlHz));
+    std::cout << "[Stage] Standing interpolation: " << args.stand_time << "s, " << steps << " steps" << std::endl;
+    auto next_t = std::chrono::steady_clock::now();
+    const auto period = std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+        std::chrono::duration<double>(ml::kControlDt));
+    for (int step = 0; step < steps && g_running.load(); ++step) {
+        rate_watchdog.check();
+        snap = state.snapshot();
+        const float alpha = static_cast<float>(step + 1) / static_cast<float>(steps);
+        ml::JointArray raw_target{};
+        for (int i = 0; i < ml::kNumJoints; ++i) {
+            raw_target[i] = (1.0f - alpha) * snap.q[i] + alpha * target_default[i];
+        }
+        const auto limited = ml::torque_limited_target(
+            raw_target, snap.q, snap.dq, kp_motor, kd_motor, tau_limit, cfg.tau_limit_scale);
+        command_target = ml::clamp_and_rate_limit(
+            limited, command_target, args.max_target_rate, static_cast<float>(ml::kControlDt), 0.01f);
+        robot.publish_sdk24_command(snap.counts, command_target, kp_motor, kd_motor, false, args.damping_kd);
+        next_t += period;
+        std::this_thread::sleep_until(next_t);
+    }
+    return command_target;
+}
+
+ml::JointArray hold_default_stand(
+    ml::MagicbotSdkAdapter& robot,
+    ml::SdkRobotState& state,
+    const ml::LocoConfig& cfg,
+    const Args& args,
+    ml::RateWatchdog& rate_watchdog,
+    ml::MotionSafety& safety,
+    ml::JointArray command_target,
+    double duration_s,
+    const std::string& label,
+    bool hold_until_stopped)
+{
+    const ml::JointArray target_default = cfg.default_motor();
+    const ml::JointArray kp_base = cfg.kps_motor();
+    const ml::JointArray kd_base = cfg.kds_motor();
+    const ml::JointArray tau_limit = cfg.tau_limit_motor();
+    ml::JointArray kp_motor{};
+    ml::JointArray kd_motor{};
+    for (int i = 0; i < ml::kNumJoints; ++i) {
+        kp_motor[i] = kp_base[i] * args.kp_scale;
+        kd_motor[i] = kd_base[i] * args.kd_scale;
+    }
+
+    std::cout << "[Stage] Holding default stand (" << label << "): "
+              << (hold_until_stopped ? "until stopped" : std::to_string(duration_s) + "s") << std::endl;
+    auto start = std::chrono::steady_clock::now();
+    auto next_t = start;
+    auto last_log = start - std::chrono::seconds(60);
+    const auto period = std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+        std::chrono::duration<double>(ml::kControlDt));
+    while (g_running.load()) {
+        const auto now = std::chrono::steady_clock::now();
+        if (!hold_until_stopped && std::chrono::duration<double>(now - start).count() >= duration_s) break;
+        rate_watchdog.check();
+        const auto snap = state.snapshot();
+        const auto limited =
+            ml::torque_limited_target(target_default, snap.q, snap.dq, kp_motor, kd_motor, tau_limit, cfg.tau_limit_scale);
+        command_target = ml::clamp_and_rate_limit(
+            limited,
+            command_target,
+            args.max_target_rate,
+            static_cast<float>(ml::kControlDt),
+            args.joint_limit_margin);
+        safety.check(snap, &command_target, &target_default, nullptr);
+        robot.publish_sdk24_command(snap.counts, command_target, kp_motor, kd_motor, false, args.damping_kd);
+        if (std::chrono::duration<double>(now - last_log).count() >= args.log_interval) {
+            std::cout << "[" << label << "] q=" << range_string(snap.q) << " target=" << range_string(command_target)
+                      << " counts=" << ml::counts_string(snap.counts) << std::endl;
+            last_log = now;
+        }
+        next_t += period;
+        std::this_thread::sleep_until(next_t);
+    }
+    return command_target;
+}
+
+void publish_damping_for_duration(
+    ml::MagicbotSdkAdapter& robot,
+    ml::SdkRobotState& state,
+    const Args& args,
+    ml::RateWatchdog& rate_watchdog,
+    double duration_s)
+{
+    const int steps = std::max(1, static_cast<int>(duration_s * ml::kControlHz));
+    std::cout << "[Stage] Holding LowLevel passive damping for " << duration_s << "s (" << steps << " steps)"
+              << std::endl;
+    auto next_t = std::chrono::steady_clock::now();
+    const auto period = std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+        std::chrono::duration<double>(ml::kControlDt));
+    for (int i = 0; i < steps && g_running.load(); ++i) {
+        rate_watchdog.check();
+        robot.publish_damping(state.snapshot().counts, args.damping_kd);
+        next_t += period;
+        std::this_thread::sleep_until(next_t);
+    }
+}
+
+int connect_check(const Args& args)
+{
+    check_network_preflight(args);
+    ml::MagicbotSdkAdapter robot;
+    robot.initialize_and_connect(args.local_ip);
+    std::cout << "[ConnectCheck] Passed" << std::endl;
+    robot.disconnect(false);
+    return 0;
+}
+
+int read_state_only(const Args& args)
+{
+    check_network_preflight(args);
+    ml::SdkRobotState state;
+    ml::MagicbotSdkAdapter robot;
+    robot.initialize_and_connect(args.local_ip);
+    robot.prepare_gait(args.prepare_gait);
+    robot.enter_lowlevel(state);
+    state.wait_ready(args.state_timeout);
+    std::cout << "[ReadState] Robot state ready. No JointCommand will be published." << std::endl;
+
+    auto start = std::chrono::steady_clock::now();
+    auto last_log = start - std::chrono::seconds(60);
+    while (g_running.load()) {
+        const auto now = std::chrono::steady_clock::now();
+        if (args.duration > 0.0 && std::chrono::duration<double>(now - start).count() >= args.duration) break;
+        if (std::chrono::duration<double>(now - last_log).count() >= args.log_interval) {
+            const auto snap = state.snapshot();
+            std::cout << "[ReadState] counts=" << ml::counts_string(snap.counts) << " q=" << range_string(snap.q)
+                      << " dq=" << range_string(snap.dq) << " quat=[" << snap.quat[0] << " " << snap.quat[1]
+                      << " " << snap.quat[2] << " " << snap.quat[3] << "]" << std::endl;
+            last_log = now;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    robot.disconnect(args.skip_lowlevel_disconnect);
+    return 0;
+}
+
+int input_check_only(const Args& args)
+{
+    if (!args.keyboard_control && !args.gamepad_control) {
+        throw std::runtime_error("--input-check requires --keyboard-control or --gamepad-control");
+    }
+    std::array<float, 3> initial_cmd{args.vx, args.vy, args.wz};
+    OperatorInput input(args, initial_cmd);
+    std::cout << "[InputCheck] No robot connection. Press Esc/stop button or wait for duration." << std::endl;
+
+    const auto start = std::chrono::steady_clock::now();
+    auto last_log = start - std::chrono::seconds(60);
+    while (g_running.load()) {
+        const auto now = std::chrono::steady_clock::now();
+        if (args.duration > 0.0 && std::chrono::duration<double>(now - start).count() >= args.duration) break;
+        const auto state = input.poll();
+        if (state.stop_requested) {
+            std::cout << "[InputCheck] Stop requested" << std::endl;
+            break;
+        }
+        if (state.changed || std::chrono::duration<double>(now - last_log).count() >= args.log_interval) {
+            std::cout << "[InputCheck] " << state.status << " cmd=[" << state.command[0] << " " << state.command[1]
+                      << " " << state.command[2] << "]"
+                      << (state.zeroed_by_deadman ? " deadman=open" : "") << std::endl;
+            last_log = now;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+    return 0;
+}
+
+int run_robot_with_finally(const Args& args, const ml::LocoConfig& cfg, ml::OnnxLocoPolicy& policy)
+{
+    check_network_preflight(args);
+    ml::SdkRobotState state;
+    ml::MagicbotSdkAdapter robot;
+    bool entered_lowlevel = false;
+    int rc = 0;
+    int hard_exit_code = -1;
+
+    auto final_damping = [&]() {
+        if (!entered_lowlevel) return;
+        try {
+            std::cout << "[Final] Publishing final damping command" << std::endl;
+            robot.publish_damping(state.snapshot().counts, args.damping_kd);
+            std::cout << "[Final] Final damping command published" << std::endl;
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        } catch (const std::exception& exc) {
+            std::cerr << "[Final][WARN] Damping publish failed: " << exc.what() << std::endl;
+        }
+    };
+
+    try {
+        if (!args.pd_stand_only && !args.debug_entry_only) {
+            const auto start = std::chrono::steady_clock::now();
+            policy.warmup(3);
+            const auto elapsed_ms =
+                std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+            std::cout << "[Policy] Warm-up complete: 3 runs in " << elapsed_ms << "ms" << std::endl;
+        }
+
+        robot.initialize_and_connect(args.local_ip);
+        const bool debug_entry = args.debug_entry || args.debug_entry_only;
+        if (debug_entry) {
+            robot.play_tts(args.debug_entry_tts, args.tts_required, "100000000001");
+            if (args.debug_entry_wait_s > 0.0) {
+                std::cout << "[Stage] Waiting " << args.debug_entry_wait_s << "s before debug/test mode" << std::endl;
+                std::this_thread::sleep_for(std::chrono::duration<double>(args.debug_entry_wait_s));
+            }
+            if (args.try_gait_passive && !args.skip_gait_passive) {
+                robot.try_highlevel_passive(false);
+            } else {
+                std::cout << "[Stage] Skipping HighLevel GAIT_PASSIVE; LowLevel damping fallback will be used" << std::endl;
+            }
+        } else {
+            robot.prepare_gait(args.prepare_gait);
+        }
+
+        robot.enter_lowlevel(state);
+        entered_lowlevel = true;
+        state.wait_ready(args.state_timeout);
+        std::cout << "[State] Robot state ready" << std::endl;
+
+        ml::RateWatchdog rate_watchdog(args.rate);
+        ml::MotionSafety safety(args.safety, cfg);
+
+        if (args.rate.enabled) {
+            std::cout << "[Safety] Rate watchdog: min_hz=" << args.rate.min_hz
+                      << " window=" << args.rate.window_s
+                      << " max_gap_ms=" << args.rate.max_gap_s * 1000.0 << std::endl;
+        }
+        if (args.safety.enabled) {
+            std::cout << "[Safety] Motion safety: scope=" << args.safety.joint_scope
+                      << " max_dq=" << args.safety.max_joint_vel
+                      << " max_body_w=" << args.safety.max_ang_vel
+                      << " max_gxy=" << args.safety.max_gravity_xy << std::endl;
+        }
+
+        if (debug_entry) {
+            publish_damping_for_duration(robot, state, args, rate_watchdog, args.debug_entry_passive_s);
+            if (args.debug_entry_only) {
+                std::cout << "[Stage] Debug-entry passive stage complete" << std::endl;
+                hard_exit_code = args.hard_exit_after_final_damping ? 0 : -1;
+                rc = 0;
+                final_damping();
+                robot.disconnect(args.skip_lowlevel_disconnect);
+                if (hard_exit_code >= 0) std::_Exit(hard_exit_code);
+                return rc;
+            }
+        }
+
+        ml::JointArray command_target = stand_interpolation(robot, state, cfg, args, rate_watchdog);
+        command_target = hold_default_stand(
+            robot,
+            state,
+            cfg,
+            args,
+            rate_watchdog,
+            safety,
+            command_target,
+            args.pre_stand_hold_s,
+            "pre-stand",
+            false);
+
+        ml::JointArray kp_motor = cfg.kps_motor();
+        ml::JointArray kd_motor = cfg.kds_motor();
+        ml::JointArray tau_limit = cfg.tau_limit_motor();
+        for (int i = 0; i < ml::kNumJoints; ++i) {
+            kp_motor[i] *= args.kp_scale;
+            kd_motor[i] *= args.kd_scale;
+        }
+
+        if (args.pd_stand_only) {
+            command_target = hold_default_stand(
+                robot,
+                state,
+                cfg,
+                args,
+                rate_watchdog,
+                safety,
+                command_target,
+                args.duration > 0.0 ? args.duration : 0.0,
+                "pd-stand",
+                args.duration <= 0.0);
+        } else {
+            std::array<float, 3> raw_cmd{args.vx, args.vy, args.wz};
+            OperatorInput operator_input(args, raw_cmd);
+            std::cout << "[Mode] Starting ONNX loco loop: command=[" << args.vx << " " << args.vy << " " << args.wz
+                      << "]" << std::endl;
+            const auto loop_start = std::chrono::steady_clock::now();
+            auto next_control_t = std::chrono::steady_clock::now();
+            auto next_policy_t = next_control_t;
+            auto last_log = next_control_t - std::chrono::seconds(60);
+            const auto control_period = std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+                std::chrono::duration<double>(ml::kControlDt));
+            const auto policy_period = std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+                std::chrono::duration<double>(cfg.policy_dt));
+            int policy_counter = 0;
+            ml::JointArray previous_raw_target{};
+            bool have_previous_raw_target = false;
+
+            while (g_running.load()) {
+                const auto now = std::chrono::steady_clock::now();
+                if (args.duration > 0.0 && std::chrono::duration<double>(now - loop_start).count() >= args.duration) {
+                    std::cout << "[Mode] ONNX loco duration reached" << std::endl;
+                    break;
+                }
+                rate_watchdog.check();
+                const auto snap = state.snapshot();
+                safety.check(snap, &command_target, nullptr, nullptr);
+                if (operator_input.enabled()) {
+                    const auto input = operator_input.poll();
+                    if (input.stop_requested) {
+                        std::cout << "[Input] Stop requested; leaving loco loop" << std::endl;
+                        break;
+                    }
+                    raw_cmd = input.command;
+                    if (input.changed && std::chrono::duration<double>(now - last_log).count() < args.log_interval) {
+                        std::cout << "[Input] " << input.status << " cmd=[" << raw_cmd[0] << " " << raw_cmd[1]
+                                  << " " << raw_cmd[2] << "]" << std::endl;
+                    }
+                }
+                if (now >= next_policy_t) {
+                    const auto projected_gravity = ml::gravity_orientation(snap.quat);
+                    const auto result = policy.infer(snap.q, snap.dq, snap.ang_vel, projected_gravity, raw_cmd);
+                    safety.check(
+                        snap,
+                        nullptr,
+                        &result.target_motor,
+                        have_previous_raw_target ? &previous_raw_target : nullptr);
+                    const auto limited = ml::torque_limited_target(
+                        result.target_motor, snap.q, snap.dq, kp_motor, kd_motor, tau_limit, cfg.tau_limit_scale);
+                    command_target = ml::clamp_and_rate_limit(
+                        limited,
+                        command_target,
+                        args.max_target_rate,
+                        cfg.policy_dt,
+                        args.joint_limit_margin);
+                    safety.check(
+                        snap,
+                        &command_target,
+                        &result.target_motor,
+                        have_previous_raw_target ? &previous_raw_target : nullptr);
+                    previous_raw_target = result.target_motor;
+                    have_previous_raw_target = true;
+                    ++policy_counter;
+                    next_policy_t += policy_period;
+                }
+                robot.publish_sdk24_command(snap.counts, command_target, kp_motor, kd_motor, false, args.damping_kd);
+                if (std::chrono::duration<double>(now - last_log).count() >= args.log_interval) {
+                    std::cout << "[Loco] policy=" << policy_counter << " q=" << range_string(snap.q)
+                              << " target=" << range_string(command_target)
+                              << " cmd=[" << raw_cmd[0] << " " << raw_cmd[1] << " " << raw_cmd[2] << "]"
+                              << " counts=" << ml::counts_string(snap.counts) << std::endl;
+                    last_log = now;
+                }
+                next_control_t += control_period;
+                std::this_thread::sleep_until(next_control_t);
+            }
+        }
+
+        if (args.final_stand_time > 0.0 && g_running.load()) {
+            Args final_args = args;
+            final_args.stand_time = args.final_stand_time;
+            std::cout << "[Stage] Returning to default stand before final damping" << std::endl;
+            ml::JointArray command_target = state.snapshot().q;
+            command_target = stand_interpolation(robot, state, cfg, final_args, rate_watchdog);
+            (void)hold_default_stand(
+                robot,
+                state,
+                cfg,
+                args,
+                rate_watchdog,
+                safety,
+                command_target,
+                args.final_stand_hold_s,
+                "final-stand",
+                args.hold_final_stand);
+        }
+        rc = 0;
+        hard_exit_code = args.hard_exit_after_final_damping ? 0 : -1;
+    } catch (const std::exception& exc) {
+        std::cerr << "[SafetyWall] " << exc.what() << "; switching to damping mode and exiting." << std::endl;
+        rc = 3;
+        hard_exit_code = args.hard_exit_after_final_damping ? 3 : -1;
+    }
+
+    final_damping();
+    robot.disconnect(args.skip_lowlevel_disconnect);
+    if (hard_exit_code >= 0) std::_Exit(hard_exit_code);
+    return rc;
+}
+
+}  // namespace
+
+int main(int argc, char** argv)
+{
+    std::signal(SIGINT, signal_handler);
+    std::signal(SIGTERM, signal_handler);
+
+    try {
+        Args args = parse_args(argc, argv);
+        if (!std::filesystem::exists(args.config)) {
+            throw std::runtime_error("config not found: " + args.config.string());
+        }
+        ml::LocoConfig cfg = ml::load_loco_config(args.config);
+        ml::OnnxLocoPolicy policy(cfg);
+
+        if (args.dry_run) {
+            dry_run(cfg, policy);
+            return 0;
+        }
+        if (args.connect_check) return connect_check(args);
+        if (args.read_state) return read_state_only(args);
+        if (args.input_check) return input_check_only(args);
+        return run_robot_with_finally(args, cfg, policy);
+    } catch (const std::exception& exc) {
+        std::cerr << "[Error] " << exc.what() << std::endl;
+        return 1;
+    }
+}

@@ -1,177 +1,147 @@
-# controller_cpp 文档
+# Native Controller
 
-`controller_cpp` 是当前仓库里的 C++ DDS/ONNX 控制器与 shadow compare 工具集。它主要用于：
+This directory contains the C++ runtime for MagicBot Z1 policy deployment.
 
-- 对齐 Python `BeyondMimic` 与 C++ ONNX 推理输出；
-- 通过 DDS `rt/lowstate` / `rt/lowcmd` 做 MuJoCo shadow compare；
-- 验证 C++ 侧 LocoMode、BeyondMimic、TrackMimic 等当前实际存在的 Z1 策略配置。
+## Main Target
 
-注意：当前 MagicBot Z1 真机优先使用主 README 中的 MagicBot 官方 SDK loco 后端。`controller_cpp` 仍是 DDS 风格链路，不应被当成当前 Z1 真机主入口，更不要直接用它跑 BeyondMimic 真机。
-
-## 当前覆盖范围
-
-当前工作区实际存在并可被文档化的策略目录如下：
-
-| 状态/策略 | 当前 C++ 侧说明 |
-| --- | --- |
-| `PASSIVE` | 已实现，阻尼/保护类状态 |
-| `FIXEDPOSE` | 已实现，固定站姿/插值类状态 |
-| `LOCOMODE` | ONNX 实现，配置来自 `policies/loco_mode/config/LocoMode_lowKp.yaml` |
-| `SKILL_BEYOND_MIMIC` | ONNX 实现，通过 `--yaml policies/beyond_mimic/config/BeyondMimic.yaml` 注册 |
-| `SKILL_TRACK_MIMIC` | 可选 ONNX 实现，通过 `--track-yaml policies/track_mimic/config/BeyondMimic.yaml` 注册 |
-| `SKILL_COOLDOWN` | 已实现当前 Z1 24DoF 回归/过渡配置 |
-| `JOINT_ZERO_CHECK` | 已实现 |
-| `IMU_CALIB` | 已实现，运行时复用 LocoMode 相关输出 |
-
-以下 legacy 技能在 C++ 代码里仍有注册钩子或 stub，但当前仓库没有对应 policy 目录，不作为当前能力宣传：
-
-- `policies/dance/`
-- `policies/kungfu/`
-- `policies/kick/`
-- `policies/kungfu2/`
-- `policies/skill_cast/`
-
-## 构建
-
-在仓库根目录执行：
-
-```bash
-cmake -S controller_cpp -B controller_cpp/build_z1
-cmake --build controller_cpp/build_z1 -j
+```text
+magicbot_z1_loco_onnx
 ```
 
-生成的主要可执行文件：
+The target is split into three layers:
 
-- `controller_cpp/build_z1/robot_controller`
-- `controller_cpp/build_z1/robot_controller_onnx`
-- `controller_cpp/build_z1/onnx_benchmark`
-- `controller_cpp/build_z1/mujoco_dds_simulator`，仅在找到 MuJoCo C API 时生成
+```text
+include/magicbot_loco_core.h
+src/magicbot_loco_core.cpp
+  YAML config loading, ONNX Runtime session, observation construction,
+  target limiting, rate watchdog, and motion safety checks.
 
-如果 ONNX Runtime 或 MuJoCo 不在默认路径，配置时显式覆盖：
+include/magicbot_loco_sdk_adapter.h
+src/magicbot_loco_sdk_adapter.cpp
+  MagicBot Z1 SDK connection, state subscriptions, TTS, and grouped
+  JointCommand publishing.
 
-```bash
-cmake -S controller_cpp -B controller_cpp/build_z1 \
-  -DONNXRUNTIME_DIR=/path/to/onnxruntime-linux-x64 \
-  -DMUJOCO_ROOT=/path/to/mujoco
-cmake --build controller_cpp/build_z1 -j
+src/magicbot_z1_loco_onnx.cpp
+  CLI, staged robot flow, PD stand, loco loop, final stand, and final damping.
 ```
 
-## Shadow Compare
+## Build
 
-推荐从仓库根目录使用脚本：
-
-```bash
-bash scripts/compare_python_cpp.sh --verify --net lo
-```
-
-该脚本会自动启动：
-
-- C++ `robot_controller_onnx --shadow --sync-lowstate`
-- Python `python_reference/simulation/mujoco_dds_compare.py`
-- DDS LowState/LowCmd 桥
-- diff CSV 与 summary JSON
-
-默认验证对象是 BeyondMimic：
+Use the repository launcher:
 
 ```bash
-./controller_cpp/build_z1/robot_controller_onnx \
-  --shadow \
-  --sync-lowstate \
-  --net lo \
-  --joints 24 \
-  --yaml policies/beyond_mimic/config/BeyondMimic.yaml \
-  --shadow-state beyond
+../scripts/run_magicbot_loco_native.sh --dry-run
 ```
 
-TrackMimic 对比：
+Or build directly:
 
 ```bash
-bash scripts/compare_python_cpp.sh --verify --net lo \
-  --shadow-state track \
-  --track-yaml policies/track_mimic/config/BeyondMimic.yaml
+cmake -S . -B build_native \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DMAGICBOT_Z1_SDK_ROOT=/home/eame/magicbot-z1_sdk-main \
+  -DONNXRUNTIME_INCLUDE_DIR=/home/eame/onnxruntime/include \
+  -DONNXRUNTIME_LIB=/path/to/libonnxruntime.so.1
+
+cmake --build build_native --target magicbot_z1_loco_onnx -j"$(nproc)"
 ```
 
-## 命令行参数
-
-- `--net IFACE`：DDS 网卡，例如 `lo`、`enp4s0`。
-- `--joints N`：关节数，当前 Z1 默认 `24`。
-- `--yaml PATH`：BeyondMimic YAML 配置路径。
-- `--track-yaml PATH`：TrackMimic YAML 配置路径。
-- `--shadow-state {beyond|track}`：`--shadow` 启动后 force 到的 FSM 状态。
-- `--shadow`：跳过真机式启动等待，用于仿真/shadow compare。
-- `--sync-lowstate`：按 LowState tick 驱动控制循环，推荐用于 compare。
-- `--safety`：启用 C++ 安全过滤器。
-- `--dry-run`：只计算，不发布命令。
-
-## 手柄/遥控映射
-
-与 Python 参考控制器保持一致的核心映射：
-
-| 输入 | 命令 |
-| --- | --- |
-| `F1` | `PASSIVE` |
-| `UP` 释放 | `PAUSE`，仅 mimic 类策略生效 |
-| `START` 长按 | `POS_RESET` |
-| `R1 + A` 长按 | `LOCO` |
-| `R1 + X` 长按 | `SKILL_1`，当前 Z1 Python 主线映射到 BeyondMimic |
-| `L1 + Y` 长按 | `SKILL_4` / BeyondMimic |
-| `L1 + A` 长按 | `SKILL_7` / TrackMimic，需注册 `--track-yaml` |
-| `SELECT` | 退出程序 |
-
-`R1 + Y`、`B` 组合等 legacy 技能命令仍可能存在于代码路径中，但当前仓库没有对应策略目录，调试时不建议使用。
-
-## ONNX Benchmark
-
-纯 ONNXRuntime benchmark：
+## Runtime
 
 ```bash
-./controller_cpp/build_z1/onnx_benchmark \
-  --model policies/beyond_mimic/model/policy.onnx \
-  --obs-dim 124 \
-  --iters 5000 \
-  --warmup 500 \
-  --threads 1
+build_native/magicbot_z1_loco_onnx --dry-run \
+  --config ../policies/loco_mode/config/LocoMode_lowKp.yaml
 ```
 
-Python benchmark 入口：
+Real-robot execution should be started through:
 
 ```bash
-python python_reference/tools/onnx_benchmark.py \
-  --model policies/beyond_mimic/model/policy.onnx \
-  --obs-dim 124 \
-  --iters 5000 \
-  --warmup 500 \
-  --threads 1
+../scripts/run_magicbot_loco_native.sh
 ```
 
-已有记录见：`docs/inference_benchmark_2026-06-07.md`。
+That launcher handles common SDK and ONNX Runtime locations and keeps the runtime library path stable.
 
-## 常见问题
+Live input for the real-robot loco loop is explicit:
 
-### 一直等待 LowState
+```bash
+../scripts/run_magicbot_loco_native.sh --input-check --gamepad-control --gamepad-device /dev/input/js0 --duration 10
+../scripts/run_magicbot_loco_native.sh --run --allow-loco --keyboard-control --duration 5
+../scripts/run_magicbot_loco_native.sh --run --allow-loco --gamepad-control --gamepad-device /dev/input/js0 --duration 5
+```
 
-现象：`[Controller] Waiting for robot connection...`
+`--input-check` does not connect to the robot. Keyboard uses `W/S`, `Q/E`, `A/D`, `X`, `Space/P`, and `Esc`. Gamepad defaults to left-stick Y/X for `vx/vy`, right-stick X for `wz`, button 4 as deadman, and button 1 as stop.
 
-排查：
+## Native Simulation And Tools
 
-- shadow compare 是否使用了 `--shadow`；
-- `--net` 是否和 Python/DDS 侧一致；
-- Python 侧是否已经发布 `rt/lowstate`；
-- 本机 compare 建议统一使用 `--net lo`。
+```bash
+../scripts/run_mujoco_loco_viewer_native.sh
+```
 
-### ONNX 加载失败
+Builds and runs `mujoco_loco_viewer`, an X11/GLX MuJoCo window with native loco inference. Keys:
 
-排查：
+```text
+L      toggle STAND / LOCO
+Space  pause
+R      reset
+F      camera follow
+X      zero command
+W/S    vx
+Q/E    vy
+A/D    wz
+Esc    close
+```
 
-- `--yaml` 或 `--track-yaml` 路径是否存在；
-- YAML 内 `onnx_path` 是否能解析到真实模型；
-- `ONNXRUNTIME_DIR` 是否指向包含 `include/` 与 `lib/` 的 ONNX Runtime 包；
-- 模型输入输出维度是否和 YAML 中的 `num_obs`、`num_actions` 一致。
+The viewer starts paused by default. Use Space to run, or pass `--unpaused`.
 
-### `skill_cast` 相关路径不存在
+The same target can publish the configured head-camera stream:
 
-这是当前工作区的正常状态。C++ 代码保留了 legacy `SkillCast` 注册钩子，但仓库没有 `policies/skill_cast/`，因此文档不再把它列为当前支持策略。
+```bash
+../scripts/run_mujoco_loco_viewer_native.sh --camera-stream --camera-port 18080
+```
 
-### 是否可以用 C++ 跑真机 BeyondMimic
+It serves `/health`, `/frame.jpg`, `/frame.png`, and `/stream.mjpg`.
 
-当前不建议。请先使用 Python MuJoCo 仿真与 `scripts/compare_python_cpp.sh --verify --net lo` 完成验证。MagicBot Z1 真机 loco 检查走 `python_reference/legacy_robot/run_magicbot_loco_reference.sh` 的 SDK 分阶段流程。
+If ROS2 Humble is installed, the same viewer can publish RGB/RGBA image topics:
+
+```bash
+../scripts/run_mujoco_loco_viewer_native.sh --camera-ros2
+```
+
+```bash
+../scripts/run_mujoco_dds_sim_native.sh --net lo --dry-run --max-steps 100
+```
+
+Builds and runs `mujoco_dds_simulator`, the native MuJoCo DDS bridge.
+
+```bash
+../scripts/run_onnx_benchmark_native.sh --iters 5000 --warmup 200 --threads 1 --obs-dim 82
+```
+
+Builds and runs `onnx_benchmark`.
+
+```bash
+../scripts/run_dual_inference_rate_native.sh --mode pure-sim --duration 10
+../scripts/run_dual_inference_rate_native.sh --mode real-state-sim --real-forward-only --duration 10
+```
+
+Builds and runs `dual_inference_rate`. The real-state mode subscribes LowLevel state only; it does not publish joint commands.
+
+```bash
+../scripts/run_dual_inference_rate_native.sh \
+  --mode pure-sim \
+  --duration 2 \
+  --no-realtime \
+  --closed-loop-check \
+  --summary-json ../logs/closed_loop_smoke.json
+```
+
+Runs a closed-loop acceptance smoke test. Failed thresholds return exit code `2`.
+
+`--vx/--vy/--wz` are normalized command inputs; the loco YAML maps `lin_vel_x/lin_vel_y` to `[-2.5, 2.5]`.
+
+```bash
+../scripts/run_closed_loop_sweep_native.sh --axis vx --values "0 0.1 0.2 0.3 0.5 1" --duration 2 --keep-going
+```
+
+Runs a speed-envelope sweep and stores per-point summaries in `logs/closed_loop_sweep/`.
+
+`robot_controller`, `robot_controller_onnx`, `onnx_benchmark`, `mujoco_dds_simulator`, `mujoco_loco_viewer`, and `dual_inference_rate` are built when their native dependencies are available. The MagicBot SDK loco path does not require Unitree DDS.

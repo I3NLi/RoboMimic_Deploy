@@ -1,296 +1,279 @@
-# RoboMimic Deploy for MagicBot Z1
+# RoboMimic Deploy MagicBot
 
-<p align="center">
-  <strong>English</strong> | <a href="README_zh.md">中文</a>
-</p>
+Native C++ deployment workspace for MagicBot Z1 ONNX policies.
 
-This repository is the MagicBot Z1 deployment workspace derived from RoboMimic Deploy. The current code path is no longer the original G1/29-DoF setup; it is centered on MagicBot Z1 24-DoF simulation, policy playback, and verification.
-
-The validated main path is Python MuJoCo simulation. Real-robot work is currently limited to staged MagicBot SDK loco checks. Do not treat every policy in this tree as ready for direct physical deployment.
-
-## Current Status
-
-| Module | Status | Entry/config |
-| --- | --- | --- |
-| Python MuJoCo simulation | Main validated path | `python_reference/simulation/mujoco_reference.py` |
-| Z1 MuJoCo model | 24 DoF | `assets/robots/magicbot_z1/scene.xml` |
-| BeyondMimic | Current Z1 dance / whole-body tracking entry | `policies/beyond_mimic/config/BeyondMimic.yaml` |
-| LocoMode | Z1 24-DoF ONNX locomotion entry; still validate in sim before robot use | `policies/loco_mode/config/LocoMode_lowKp.yaml` |
-| Python/C++ compare | Available | `scripts/compare_python_cpp.sh --verify --net lo` |
-| MagicBot SDK real loco | Conservative staged-check path | `python_reference/legacy_robot/run_magicbot_loco_reference.sh` |
-| Unitree DDS legacy path | Kept for history/compare; not the current Z1 SDK robot path | `python_reference/legacy_robot/dds_robot_legacy.py` |
+The active runtime is `controller_cpp/build_native/magicbot_z1_loco_onnx`. The old interpreted reference stack has been removed from this branch. Real-robot execution must go through the staged safety flow below.
 
 ## Layout
 
 ```text
-RoboMimic_Deploy_magicbot/
-├── assets/robots/magicbot_z1/      # Z1 MuJoCo XML and meshes
-├── configs/
-│   ├── simulation/                 # MuJoCo, initial pose, safety config
-│   └── robot/                      # legacy DDS / robot-side config
-├── policies/
-│   ├── passive/                    # damping protection
-│   ├── fixedpose/                  # stand-pose interpolation
-│   ├── loco_mode/                  # Z1 loco ONNX
-│   ├── beyond_mimic/               # Z1 BeyondMimic ONNX
-│   └── skill_cooldown/             # post-mimic stand recovery
-├── python_reference/
-│   ├── simulation/                 # MuJoCo sim and DDS compare bridge
-│   ├── fsm/                        # state machine
-│   ├── runtime/                    # control, DDS, rendering, compare modules
-│   └── legacy_robot/               # MagicBot SDK loco wrapper and old DDS path
-├── controller_cpp/                 # C++ DDS/ONNX controller
-├── scripts/compare_python_cpp.sh   # Python vs C++ shadow compare
-└── docs/                           # runtime split, benchmarks, debug notes
+controller_cpp/
+  include/magicbot_loco_core.h          # config, observation, ONNX, limits, safety
+  include/magicbot_loco_sdk_adapter.h   # MagicBot SDK state and command adapter
+  src/magicbot_loco_core.cpp
+  src/magicbot_loco_sdk_adapter.cpp
+  src/magicbot_z1_loco_onnx.cpp         # CLI and staged runtime
+policies/
+  loco_mode/config/LocoMode_lowKp.yaml
+  loco_mode/model/policy.onnx
+scripts/
+  run_magicbot_loco_native.sh           # native launcher
+  run_mujoco_loco_viewer_native.sh      # native MuJoCo interactive viewer
+  run_mujoco_dds_sim_native.sh          # native MuJoCo DDS bridge
+  run_onnx_benchmark_native.sh          # native ONNX Runtime benchmark
+  run_dual_inference_rate_native.sh     # native sim / real-state rate test
 ```
 
-## Environment
+## Dependencies
 
-Use Python 3.10. The codebase now uses Python 3.10 syntax, so the old Python 3.8 setup is no longer the baseline.
-
-```bash
-conda create -n robomimic python=3.10
-conda activate robomimic
-pip install -r requirements.txt
-```
-
-Optional dependencies:
-
-```bash
-# Required for Unitree DDS shadow compare or legacy DDS entry.
-git clone https://github.com/unitreerobotics/unitree_sdk2_python.git
-cd unitree_sdk2_python
-pip install -e .
-```
-
-The MagicBot real loco wrapper also needs `magicbot-z1_sdk-main`. Set `MAGICBOT_SDK_ROOT` if it is not in one of the default searched locations.
-
-## Run Simulation
-
-```bash
-cd /home/hiyio/MaigcLab/RoboMimic_Deploy_magicbot
-conda activate robomimic
-python -u python_reference/simulation/mujoco_reference.py
-```
-
-Default config files:
-
-- `configs/simulation/mujoco.yaml`
-- `configs/simulation/magicbot_z1_stand.yaml`
-- `configs/simulation/safety.yaml`
-
-Key runtime settings:
-
-- MuJoCo XML: `assets/robots/magicbot_z1/scene.xml`
-- simulation step: `simulation_dt: 0.002`
-- control decimation: `control_decimation: 10`
-- control period: `0.02s` / 50 Hz
-- initial command: `PASSIVE`
-- reference ghost display: enabled by default with `ghost.mode: mesh`
-
-If no controller is connected, the simulator falls back to neutral `NullJoyStick`. You can observe the default state, but you cannot switch modes from the controller.
-
-## Controller Map
-
-Recommended Z1 path:
-
-| Input | Effect |
-| --- | --- |
-| Program start | Enter `PassiveMode` damping protection |
-| Hold `START` | Enter `FixedPose`, interpolating to stand pose over 2 seconds |
-| Hold `R1 + A` | Enter `LocoMode` |
-| Hold `R1 + X` in `FixedPose` or `LocoMode` | Enter `BeyondMimic` |
-| Hold `L1 + Y` in `FixedPose` or `LocoMode` | Enter `BeyondMimic` |
-| Release `UP` in mimic | Pause/resume the reference frame |
-| Hold `R1 + A` in mimic | Return to `LocoMode` through `SkillCooldown` |
-| Hold `START` in mimic | Return to `FixedPose` |
-| Release `L3` | Return to `PassiveMode` |
-| Press `SELECT` | Exit the simulation |
-
-Legacy skill commands such as `SKILL_2`, `SKILL_6`, and `SKILL_7` still exist in the code, but they are not the recommended Python Z1 main path. Old Dance/KungFu/Kick/TrackMimic states are mostly kept as compatibility aliases.
-
-## Policy Baseline
-
-### BeyondMimic
-
-Current Z1 dance / whole-body tracking entry:
-
-- model: `policies/beyond_mimic/model/policy.onnx`
-- config: `policies/beyond_mimic/config/BeyondMimic.yaml`
-- inputs: `obs [1,124]` and `time_step [1,1]`
-- outputs: 24-DoF action plus embedded reference trajectory data
-- `motion_length: 3309`
-- `switch_to_loco_delay_s: -1.0`, so the policy holds in mimic instead of auto-returning to loco
-- `command_joint_indices` excludes ankle commands and must match the exported training observation
-- `mj2lab` maps LeggedLab/IsaacLab joint index to MuJoCo actuator index
-
-To temporarily use another BeyondMimic YAML:
-
-```bash
-BEYOND_MIMIC_CONFIG_PATH=/abs/path/to/BeyondMimic.yaml \
-python -u python_reference/simulation/mujoco_reference.py
-```
-
-### LocoMode
-
-Current loco config:
-
-- model: `policies/loco_mode/model/z1_flat_reset_reasons_model_25800.onnx`
-- config: `policies/loco_mode/config/LocoMode_lowKp.yaml`
-- input dimension: `82`
-- action dimension: `24`
-- command dimension: `4`
-- `root_height_command: 0.69`
-
-LocoMode is configured for Z1 24 DoF, but real-robot use still requires a fresh audit of observations, normalization, joint order, action scaling, limits, and initial pose.
-
-### FixedPose / Passive / SkillCooldown
-
-- `PassiveMode`: zero `kp`, damping only.
-- `FixedPose`: interpolate from current joints to the default stand pose, currently 2 seconds.
-- `SkillCooldown`: blend-only recovery from mimic pose back to the Z1 fixed-pose target, then return to loco.
-
-## Safety Config
-
-The safety filter supports action clamps, action-delta clamps, gain clamps, gain-delta clamps, damping fallback, and dry-run.
-
-The current YAML has `enable: false`, so it does not clamp policy outputs by default. `dry_run` is still handled directly by the simulation loop.
-
-```yaml
-# configs/simulation/safety.yaml
-enable: false
-dry_run: false
-command_hold_frames: 2
-max_action_abs: 3.5
-max_action_delta: 0.3
-damping_kd: 8.0
-```
-
-Debug tips:
-
-- Use `dry_run: true` to compute policy output without applying actuator control.
-- Use `enable: true` and `log_clamps: true` to inspect safety clamp behavior.
-- Re-tune and re-verify `configs/robot/safety.yaml` before any physical robot command publishing.
-
-## Python/C++ Shadow Compare
-
-Recommended one-command verification:
-
-```bash
-cd /home/hiyio/MaigcLab/RoboMimic_Deploy_magicbot
-bash scripts/compare_python_cpp.sh --verify --net lo
-```
-
-This starts:
-
-- C++ `robot_controller_onnx --shadow`
-- Python `mujoco_dds_compare.py --headless --no-joystick --shadow-sync`
-- DDS `rt/lowstate` / `rt/lowcmd` bridge
-- diff CSV and summary JSON output
-
-If the C++ binary does not exist, build it first:
-
-```bash
-cmake -S controller_cpp -B controller_cpp/build_z1
-cmake --build controller_cpp/build_z1 -j
-```
-
-See [`controller_cpp/README.md`](controller_cpp/README.md) for more C++ details.
-
-## C++ Build Notes
-
-`controller_cpp` depends on:
-
-- `unitree_sdk2`
+- CMake 3.14+
+- GCC/G++ with C++17 support
 - `yaml-cpp`
-- `zlib`
-- ONNX Runtime C/C++ package
-- optional MuJoCo C API for `mujoco_dds_simulator`
+- ONNX Runtime C/C++ headers and shared library
+- MagicBot Z1 SDK headers and `libmagicbot_z1_sdk.so`
 
-`controller_cpp/CMakeLists.txt` contains local default paths for ONNX Runtime and MuJoCo. Override them if needed:
-
-```bash
-cmake -S controller_cpp -B controller_cpp/build_z1 \
-  -DONNXRUNTIME_DIR=/path/to/onnxruntime-linux-x64 \
-  -DMUJOCO_ROOT=/path/to/mujoco
-cmake --build controller_cpp/build_z1 -j
-```
-
-## MagicBot Z1 Real Loco Checks
-
-For physical robot loco work, prefer the MagicBot SDK backend:
+Useful environment variables:
 
 ```bash
-cd /home/hiyio/MaigcLab/RoboMimic_Deploy_magicbot
-python_reference/legacy_robot/run_magicbot_loco_reference.sh --dry-run
-python_reference/legacy_robot/run_magicbot_loco_reference.sh --connect-check --local-ip 192.168.54.119
-python_reference/legacy_robot/run_magicbot_loco_reference.sh --read-state --local-ip 192.168.54.119 --duration 3
+export MAGICBOT_Z1_SDK_ROOT=/home/eame/magicbot-z1_sdk-main
+export ONNXRUNTIME_INCLUDE_DIR=/home/eame/onnxruntime/include
+export ONNXRUNTIME_LIB=/path/to/libonnxruntime.so.1
 ```
 
-Safe sequence:
+`scripts/run_magicbot_loco_native.sh` also searches common local paths and creates a stable runtime symlink under `controller_cpp/build_native/onnxruntime/`.
 
-1. Suspend the robot and verify emergency stop, power-off, network isolation, and manual takeover.
-2. `--dry-run`: load YAML/ONNX and run one inference, with no robot connection.
-3. `--connect-check`: connect/disconnect through the SDK only, without LowLevel switch.
-4. `--read-state`: switch `HighLevel -> GAIT_RECOVERY_STAND -> LowLevel`, subscribe low-level states, and publish no `JointCommand`.
-5. Only after those pass, explicitly run `--run --stand-only --duration N`.
-6. After stand-only passes, consider very short `--run --duration N --vx 0 --vy 0 --wz 0`.
-
-Example:
+## Build And Dry Run
 
 ```bash
-python_reference/legacy_robot/run_magicbot_loco_reference.sh \
-  --run --stand-only --local-ip 192.168.54.119 --duration 2
+scripts/run_magicbot_loco_native.sh --dry-run
 ```
 
-Do not run BeyondMimic/dance directly on the physical robot. The BeyondMimic MagicBot SDK backend still needs migration and audit from the simulation policy.
+Expected shape for the current loco policy:
 
-## Legacy DDS And C++ Robot Paths
+```text
+ONNX input/output: 82 -> 24
+```
 
-`python_reference/legacy_robot/dds_robot_legacy.py` and `controller_cpp` keep a Unitree DDS-style `rt/lowcmd` / `rt/lowstate` path. These files are useful for compatibility, C++ shadow compare, and DDS controller development, but they are not the current MagicBot Z1 SDK robot entry.
+## MuJoCo Interactive Viewer
 
-Before any DDS robot run, re-check:
+Local simulation only, no real-robot connection:
 
-- network interface and DDS domain;
-- actual low-level robot topics;
-- physical order of all 24 motors;
-- LowLevel switching path;
-- emergency stop and damping command behavior.
+```bash
+scripts/run_mujoco_loco_viewer_native.sh
+```
 
-## Troubleshooting
+Window controls:
 
-### `No joystick connected`
+```text
+L      toggle STAND / LOCO
+Space  pause/resume
+R      reset pose
+F      toggle camera follow
+X      zero vx/vy/wz
+W/S    adjust vx
+Q/E    adjust vy
+A/D    adjust wz
+Esc    close
+```
 
-`mujoco_reference.py` falls back to `NullJoyStick`. Connect a controller to switch modes, or use `mujoco_dds_compare.py --no-joystick` for automated compare runs.
+Short checks:
 
-### C++ compare waits for DDS forever
+```bash
+scripts/run_mujoco_loco_viewer_native.sh --duration 3 --paused
+scripts/run_mujoco_loco_viewer_native.sh --duration 5 --unpaused --loco
+```
 
-Check:
+Camera HTTP stream:
 
-- `--net` matches on both sides; local shadow compare should use `lo`;
-- `controller_cpp/build_z1/robot_controller_onnx` exists;
-- `unitree_sdk2` and CycloneDDS runtime libraries are resolvable;
-- the Python side is running and publishing `rt/lowstate`.
+```bash
+scripts/run_mujoco_loco_viewer_native.sh --camera-stream --camera-port 18080
+```
 
-### ONNX loading fails
+Endpoints:
 
-Check the YAML `onnx_path`. Relative paths are resolved under the policy's `model/` directory, for example BeyondMimic resolves to `policies/beyond_mimic/model/policy.onnx`.
+```text
+/health
+/frame.jpg
+/frame.png
+/stream.mjpg
+```
 
-### MuJoCo NaN/Inf or instability
+ROS2 image publishing:
 
-Return to `PassiveMode` or stop the program. Then check:
+```bash
+scripts/run_mujoco_loco_viewer_native.sh --camera-ros2
+```
 
-- initial pose comes from `configs/simulation/magicbot_z1_stand.yaml`;
-- policy and `mj2lab` mapping match;
-- `safety.yaml` should be set to `enable: true` or `dry_run: true` during diagnosis;
-- no unsupported legacy skill entry was triggered.
+Default topics:
 
-## More Docs
+```text
+/z1/head_camera/rgb
+/z1/head_camera/rgba
+```
 
-- [`docs/runtime_split.md`](docs/runtime_split.md): runtime layering
-- [`docs/inference_benchmark_2026-06-07.md`](docs/inference_benchmark_2026-06-07.md): ONNX inference benchmark
-- [`controller_cpp/README.md`](controller_cpp/README.md): C++ controller and shadow compare details
+## Native Tools
 
-## Rule Of Thumb
+ONNX inference benchmark:
 
-Sim first, then shadow compare, then dry-run, then connect-check, then read-state. Publish real robot commands only when every previous step is explainable, repeatable, and recoverable.
+```bash
+scripts/run_onnx_benchmark_native.sh --iters 5000 --warmup 200 --threads 1 --obs-dim 82
+```
+
+MuJoCo DDS bridge:
+
+```bash
+scripts/run_mujoco_dds_sim_native.sh --net lo --dry-run --max-steps 100
+```
+
+Dual inference rate/load test:
+
+```bash
+scripts/run_dual_inference_rate_native.sh --mode pure-sim --duration 10
+scripts/run_dual_inference_rate_native.sh --mode real-state-sim --real-forward-only --duration 10 --local-ip 192.168.54.119
+```
+
+`real-state-sim` only subscribes LowLevel state and runs local inference/MuJoCo timing. It does not publish joint commands.
+
+Closed-loop acceptance smoke test:
+
+```bash
+scripts/run_dual_inference_rate_native.sh \
+  --mode pure-sim \
+  --duration 2 \
+  --no-realtime \
+  --closed-loop-check \
+  --summary-json logs/closed_loop_smoke.json
+```
+
+`--closed-loop-check` validates control frequency, deadline misses, inference p99, base height, attitude drift, and joint velocity. A failed check exits with code `2`, which makes it usable as a CI or pre-robot gate.
+
+`--vx/--vy/--wz` are normalized command inputs. The physical linear speed cap comes from the loco YAML `cmd_range`; `lin_vel_x/lin_vel_y` are set to `[-2.5, 2.5]`, so `--vx 1` maps to +2.5 m/s.
+
+Speed-envelope sweep:
+
+```bash
+scripts/run_closed_loop_sweep_native.sh --axis vx --values "0 0.1 0.2 0.3 0.5 1" --duration 2 --keep-going
+```
+
+Each point writes a JSON summary under `logs/closed_loop_sweep/`; the script exits `2` if any point fails.
+
+Manual build:
+
+```bash
+cmake -S controller_cpp -B controller_cpp/build_native \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DMAGICBOT_Z1_SDK_ROOT=/home/eame/magicbot-z1_sdk-main \
+  -DONNXRUNTIME_INCLUDE_DIR=/home/eame/onnxruntime/include \
+  -DONNXRUNTIME_LIB=/path/to/libonnxruntime.so.1
+
+cmake --build controller_cpp/build_native --target magicbot_z1_loco_onnx -j"$(nproc)"
+```
+
+## Real-Robot Safety Ladder
+
+Run every step deliberately. Do not skip directly to loco after code, model, or robot-state changes.
+
+```bash
+scripts/run_magicbot_loco_native.sh --dry-run
+
+scripts/run_magicbot_loco_native.sh \
+  --connect-check \
+  --local-ip 192.168.54.119
+
+scripts/run_magicbot_loco_native.sh \
+  --read-state \
+  --duration 3 \
+  --prepare-gait none \
+  --local-ip 192.168.54.119
+
+scripts/run_magicbot_loco_native.sh \
+  --debug-entry-only \
+  --local-ip 192.168.54.119 \
+  --debug-entry-wait-s 1 \
+  --debug-entry-passive-s 2 \
+  --debug-entry-tts "Native passive damping test. Please keep clear."
+```
+
+Only after the above is clean:
+
+```bash
+scripts/run_magicbot_loco_native.sh \
+  --run \
+  --allow-loco \
+  --duration 5 \
+  --vx 0 --vy 0 --wz 0 \
+  --local-ip 192.168.54.119 \
+  --debug-entry \
+  --debug-entry-wait-s 3 \
+  --debug-entry-passive-s 2 \
+  --stand-time 2 \
+  --pre-stand-hold-s 1 \
+  --final-stand-time 1 \
+  --final-stand-hold-s 0.5 \
+  --rate-watchdog-min-hz 180 \
+  --rate-watchdog-max-gap-ms 80 \
+  --motion-safety-joint-scope body \
+  --motion-max-joint-vel 25 \
+  --motion-max-ang-vel 8 \
+  --motion-max-gravity-xy 0.95 \
+  --motion-max-default-dev 1.5 \
+  --motion-max-target-error 1.2 \
+  --motion-max-policy-target-dev 0 \
+  --motion-max-policy-target-jump 0
+```
+
+Interactive input is only applied after the runner reaches the ONNX loco loop. Keyboard control:
+
+```bash
+scripts/run_magicbot_loco_native.sh \
+  --run \
+  --allow-loco \
+  --keyboard-control \
+  --duration 5 \
+  --vx 0 --vy 0 --wz 0 \
+  --local-ip 192.168.54.119
+```
+
+Keyboard map: `W/S` adjusts `vx`, `Q/E` adjusts `vy`, `A/D` adjusts `wz`, `X` zeros command, `Space/P` pause-zeros, and `Esc` exits the loco loop.
+
+Gamepad control:
+
+```bash
+scripts/run_magicbot_loco_native.sh \
+  --input-check \
+  --gamepad-control \
+  --gamepad-device /dev/input/js0 \
+  --duration 10
+
+scripts/run_magicbot_loco_native.sh \
+  --run \
+  --allow-loco \
+  --gamepad-control \
+  --gamepad-device /dev/input/js0 \
+  --gamepad-deadman-button 4 \
+  --gamepad-stop-button 1 \
+  --duration 5 \
+  --local-ip 192.168.54.119
+```
+
+Default gamepad map: left stick Y is `vx`, left stick X is `vy`, right stick X is `wz`. Button 4 must be held for nonzero command by default; button 1 exits the loco loop. Axis and button indices are CLI-configurable.
+
+## Runtime Notes
+
+- `--allow-loco` is required for ONNX loco mode.
+- `--input-check` reads keyboard/gamepad input only and does not connect to the robot.
+- `--pd-stand-only` runs default-pose standing without ONNX loco.
+- `--duration <= 0` holds the selected mode until interrupted.
+- `--keyboard-control` and `--gamepad-control` are mutually exclusive; both only change normalized velocity commands.
+- On exit or safety trip, the runner publishes a final damping command.
+- The policy runs at the configured `policy_dt`; the low-level command loop targets 500 Hz.
+
+## Current Validation
+
+On the MagicBot host:
+
+- native dry-run passes with `82 -> 24`;
+- connect-check passes;
+- read-state reports leg 12, arm 14, waist 1, head 2;
+- passive damping command publishing passes;
+- zero-command loco for 5 seconds exits cleanly with no safety trip.
