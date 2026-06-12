@@ -60,7 +60,7 @@ Real-robot execution should be started through:
 
 That launcher handles common SDK and ONNX Runtime locations and keeps the runtime library path stable.
 
-Live input for the real-robot loco loop is explicit:
+Live input for the real-robot run loop is explicit:
 
 ```bash
 ../scripts/run_magicbot_loco_native.sh --input-check --gamepad-control --gamepad-device /dev/input/js0 --duration 10
@@ -68,7 +68,7 @@ Live input for the real-robot loco loop is explicit:
 ../scripts/run_magicbot_loco_native.sh --run --allow-loco --gamepad-control --gamepad-device /dev/input/js0 --duration 5
 ```
 
-`--input-check` does not connect to the robot. Keyboard uses `W/S`, `Q/E`, `A/D`, `X`, `Space/P`, and `Esc`. Gamepad defaults to left-stick Y/X for `vx/vy`, right-stick X for `wz`, button 4 as deadman, and button 1 as stop.
+`--input-check` does not connect to the robot. With live input enabled, the run loop starts in `STAND`; `L` or gamepad button 0 enters `LOCO`. Keyboard uses `L`, `R`, `W/S`, `Q/E`, `A/D`, `X`, `Space/P`, and `Esc`. Gamepad defaults to left-stick Y/X for `vx/vy`, right-stick X for `wz`, button 0 as LOCO, button 3 as STAND, button 6 as re-stand/reset, button 4 as deadman, and button 1 as stop.
 
 ## Native Simulation And Tools
 

@@ -72,6 +72,11 @@ struct Args {
     float gamepad_axis_wz_sign{-1.0f};
     int gamepad_deadman_button{4};
     int gamepad_stop_button{1};
+    int gamepad_loco_button{0};
+    int gamepad_stand_button{3};
+    int gamepad_zero_button{2};
+    int gamepad_pause_button{7};
+    int gamepad_reset_button{6};
     double state_timeout{10.0};
     std::string prepare_gait{"recovery_stand"};
     double stand_time{2.0};
@@ -121,9 +126,10 @@ void print_usage(const char* argv0)
         << "  --hold-final-stand               Hold final stand until signal\n"
         << "\n"
         << "Operator input:\n"
-        << "  --keyboard-control               Live terminal keyboard input in loco loop\n"
-        << "                                   W/S vx, Q/E vy, A/D wz, X zero, Space/P pause-zero, Esc stop\n"
-        << "  --gamepad-control                Live Linux joystick input in loco loop\n"
+        << "  --keyboard-control               Live terminal keyboard input in run loop\n"
+        << "                                   L stand/loco, R re-stand, W/S vx, Q/E vy, A/D wz,\n"
+        << "                                   X zero, Space/P pause-zero, Esc stop\n"
+        << "  --gamepad-control                Live Linux joystick input in run loop\n"
         << "  --gamepad-device PATH            Joystick device, default /dev/input/js0\n"
         << "  --input-step V                   Keyboard normalized command step, default 0.05\n"
         << "  --input-deadzone V               Gamepad axis deadzone, default 0.08\n"
@@ -134,7 +140,12 @@ void print_usage(const char* argv0)
         << "  --gamepad-axis-vy-sign S         Axis sign for vy, default -1\n"
         << "  --gamepad-axis-wz-sign S         Axis sign for wz, default -1\n"
         << "  --gamepad-deadman-button N       Button that must be held for nonzero command, default 4\n"
-        << "  --gamepad-stop-button N          Button that stops loco loop, default 1\n"
+        << "  --gamepad-stop-button N          Button that stops run loop, default 1\n"
+        << "  --gamepad-loco-button N          Button that enters LOCO, default 0\n"
+        << "  --gamepad-stand-button N         Button that enters STAND, default 3\n"
+        << "  --gamepad-zero-button N          Button that pause-zeros command, default 2\n"
+        << "  --gamepad-pause-button N         Button that toggles pause-zero, default 7\n"
+        << "  --gamepad-reset-button N         Button that re-interpolates to STAND, default 6\n"
         << "\n"
         << "Debug entry:\n"
         << "  --debug-entry                    TTS, wait, then LowLevel passive damping before run\n"
@@ -231,6 +242,16 @@ Args parse_args(int argc, char** argv)
             args.gamepad_deadman_button = std::stoi(take_value(i, argc, argv));
         } else if (a == "--gamepad-stop-button") {
             args.gamepad_stop_button = std::stoi(take_value(i, argc, argv));
+        } else if (a == "--gamepad-loco-button") {
+            args.gamepad_loco_button = std::stoi(take_value(i, argc, argv));
+        } else if (a == "--gamepad-stand-button") {
+            args.gamepad_stand_button = std::stoi(take_value(i, argc, argv));
+        } else if (a == "--gamepad-zero-button") {
+            args.gamepad_zero_button = std::stoi(take_value(i, argc, argv));
+        } else if (a == "--gamepad-pause-button") {
+            args.gamepad_pause_button = std::stoi(take_value(i, argc, argv));
+        } else if (a == "--gamepad-reset-button") {
+            args.gamepad_reset_button = std::stoi(take_value(i, argc, argv));
         } else if (a == "--state-timeout") {
             args.state_timeout = std::stod(take_value(i, argc, argv));
         } else if (a == "--prepare-gait") {
@@ -358,10 +379,25 @@ float apply_axis_deadzone(float value, float deadzone)
 struct LiveInputState {
     std::array<float, 3> command{0.0f, 0.0f, 0.0f};
     bool stop_requested{false};
+    bool loco_requested{false};
+    bool stand_requested{false};
+    bool toggle_loco_requested{false};
+    bool reset_stand_requested{false};
+    bool pause_zero{false};
     bool changed{false};
     bool zeroed_by_deadman{false};
     std::string status;
 };
+
+enum class RunMode {
+    Stand,
+    Loco,
+};
+
+const char* mode_name(RunMode mode)
+{
+    return mode == RunMode::Loco ? "LOCO" : "STAND";
+}
 
 class TerminalKeyboardInput {
 public:
@@ -416,6 +452,7 @@ public:
             break;
         }
         out.command = paused_ ? std::array<float, 3>{0.0f, 0.0f, 0.0f} : command_;
+        out.pause_zero = paused_;
         out.status = paused_ ? "keyboard paused" : "keyboard";
         return out;
     }
@@ -429,6 +466,14 @@ private:
             out.stop_requested = true;
             out.changed = true;
             return;
+        case 'l':
+        case 'L':
+            out.toggle_loco_requested = true;
+            break;
+        case 'r':
+        case 'R':
+            out.reset_stand_requested = true;
+            break;
         case 'w':
         case 'W':
             command_[0] = clamp_command(command_[0] + step_);
@@ -520,7 +565,11 @@ public:
             out.command = {0.0f, 0.0f, 0.0f};
             out.zeroed_by_deadman = true;
         }
-        out.status = deadman_pressed ? "gamepad" : "gamepad deadman-open";
+        if (paused_) {
+            out.command = {0.0f, 0.0f, 0.0f};
+            out.pause_zero = true;
+        }
+        out.status = paused_ ? "gamepad paused" : (deadman_pressed ? "gamepad" : "gamepad deadman-open");
         return out;
     }
 
@@ -538,6 +587,26 @@ private:
             out.changed = true;
             if (args_.gamepad_stop_button >= 0 && event.number == args_.gamepad_stop_button && event.value) {
                 out.stop_requested = true;
+            }
+            if (event.value) {
+                if (args_.gamepad_loco_button >= 0 && event.number == args_.gamepad_loco_button) {
+                    paused_ = false;
+                    out.loco_requested = true;
+                }
+                if (args_.gamepad_stand_button >= 0 && event.number == args_.gamepad_stand_button) {
+                    paused_ = false;
+                    out.stand_requested = true;
+                }
+                if (args_.gamepad_zero_button >= 0 && event.number == args_.gamepad_zero_button) {
+                    paused_ = true;
+                }
+                if (args_.gamepad_pause_button >= 0 && event.number == args_.gamepad_pause_button) {
+                    paused_ = !paused_;
+                }
+                if (args_.gamepad_reset_button >= 0 && event.number == args_.gamepad_reset_button) {
+                    paused_ = false;
+                    out.reset_stand_requested = true;
+                }
             }
         }
     }
@@ -557,6 +626,7 @@ private:
     int fd_{-1};
     std::vector<float> axes_;
     std::vector<int> buttons_;
+    bool paused_{false};
 };
 
 class OperatorInput {
@@ -565,7 +635,8 @@ public:
     {
         if (args.keyboard_control) {
             keyboard_ = std::make_unique<TerminalKeyboardInput>(initial_command, args.input_step);
-            std::cout << "[Input] Keyboard control enabled: W/S vx, Q/E vy, A/D wz, X zero, Space/P pause-zero, Esc stop"
+            std::cout << "[Input] Keyboard control enabled: L stand/loco, R re-stand, W/S vx, Q/E vy, A/D wz, "
+                         "X zero, Space/P pause-zero, Esc stop"
                       << std::endl;
         }
         if (args.gamepad_control) {
@@ -573,7 +644,12 @@ public:
             std::cout << "[Input] Gamepad control enabled: device=" << args.gamepad_device
                       << " axes(vx,vy,wz)=[" << args.gamepad_axis_vx << " " << args.gamepad_axis_vy << " "
                       << args.gamepad_axis_wz << "] deadman_button=" << args.gamepad_deadman_button
-                      << " stop_button=" << args.gamepad_stop_button << std::endl;
+                      << " stop_button=" << args.gamepad_stop_button
+                      << " loco_button=" << args.gamepad_loco_button
+                      << " stand_button=" << args.gamepad_stand_button
+                      << " zero_button=" << args.gamepad_zero_button
+                      << " pause_button=" << args.gamepad_pause_button
+                      << " reset_button=" << args.gamepad_reset_button << std::endl;
         }
     }
 
@@ -771,6 +847,7 @@ int input_check_only(const Args& args)
     OperatorInput input(args, initial_cmd);
     std::cout << "[InputCheck] No robot connection. Press Esc/stop button or wait for duration." << std::endl;
 
+    RunMode mode = RunMode::Stand;
     const auto start = std::chrono::steady_clock::now();
     auto last_log = start - std::chrono::seconds(60);
     while (g_running.load()) {
@@ -781,10 +858,22 @@ int input_check_only(const Args& args)
             std::cout << "[InputCheck] Stop requested" << std::endl;
             break;
         }
+        if (state.toggle_loco_requested) {
+            mode = mode == RunMode::Loco ? RunMode::Stand : RunMode::Loco;
+        }
+        if (state.stand_requested || state.reset_stand_requested) {
+            mode = RunMode::Stand;
+        }
+        if (state.loco_requested) {
+            mode = RunMode::Loco;
+        }
         if (state.changed || std::chrono::duration<double>(now - last_log).count() >= args.log_interval) {
-            std::cout << "[InputCheck] " << state.status << " cmd=[" << state.command[0] << " " << state.command[1]
-                      << " " << state.command[2] << "]"
-                      << (state.zeroed_by_deadman ? " deadman=open" : "") << std::endl;
+            std::cout << "[InputCheck] " << state.status << " mode=" << mode_name(mode)
+                      << " cmd=[" << state.command[0] << " " << state.command[1] << " " << state.command[2] << "]";
+            if (state.zeroed_by_deadman) std::cout << " deadman=open";
+            if (state.pause_zero) std::cout << " pause-zero";
+            if (state.reset_stand_requested) std::cout << " reset-stand";
+            std::cout << std::endl;
             last_log = now;
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(20));
@@ -908,8 +997,13 @@ int run_robot_with_finally(const Args& args, const ml::LocoConfig& cfg, ml::Onnx
         } else {
             std::array<float, 3> raw_cmd{args.vx, args.vy, args.wz};
             OperatorInput operator_input(args, raw_cmd);
-            std::cout << "[Mode] Starting ONNX loco loop: command=[" << args.vx << " " << args.vy << " " << args.wz
-                      << "]" << std::endl;
+            RunMode run_mode = operator_input.enabled() ? RunMode::Stand : RunMode::Loco;
+            std::cout << "[Mode] Starting operator loop: mode=" << mode_name(run_mode)
+                      << " command=[" << args.vx << " " << args.vy << " " << args.wz << "]" << std::endl;
+            if (operator_input.enabled()) {
+                std::cout << "[Mode] Live input starts in STAND; request LOCO explicitly from keyboard/gamepad"
+                          << std::endl;
+            }
             const auto loop_start = std::chrono::steady_clock::now();
             auto next_control_t = std::chrono::steady_clock::now();
             auto next_policy_t = next_control_t;
@@ -921,11 +1015,12 @@ int run_robot_with_finally(const Args& args, const ml::LocoConfig& cfg, ml::Onnx
             int policy_counter = 0;
             ml::JointArray previous_raw_target{};
             bool have_previous_raw_target = false;
+            const ml::JointArray target_default = cfg.default_motor();
 
             while (g_running.load()) {
                 const auto now = std::chrono::steady_clock::now();
                 if (args.duration > 0.0 && std::chrono::duration<double>(now - loop_start).count() >= args.duration) {
-                    std::cout << "[Mode] ONNX loco duration reached" << std::endl;
+                    std::cout << "[Mode] Run duration reached" << std::endl;
                     break;
                 }
                 rate_watchdog.check();
@@ -934,16 +1029,64 @@ int run_robot_with_finally(const Args& args, const ml::LocoConfig& cfg, ml::Onnx
                 if (operator_input.enabled()) {
                     const auto input = operator_input.poll();
                     if (input.stop_requested) {
-                        std::cout << "[Input] Stop requested; leaving loco loop" << std::endl;
+                        std::cout << "[Input] Stop requested; leaving run loop" << std::endl;
                         break;
                     }
                     raw_cmd = input.command;
+                    RunMode requested_mode = run_mode;
+                    bool mode_requested = false;
+                    if (input.toggle_loco_requested) {
+                        requested_mode = run_mode == RunMode::Loco ? RunMode::Stand : RunMode::Loco;
+                        mode_requested = true;
+                    }
+                    if (input.stand_requested) {
+                        requested_mode = RunMode::Stand;
+                        mode_requested = true;
+                    }
+                    if (input.loco_requested) {
+                        requested_mode = RunMode::Loco;
+                        mode_requested = true;
+                    }
+                    if (input.reset_stand_requested) {
+                        std::cout << "[Input] Re-stand requested" << std::endl;
+                        raw_cmd = {0.0f, 0.0f, 0.0f};
+                        run_mode = RunMode::Stand;
+                        policy.reset();
+                        have_previous_raw_target = false;
+                        command_target = stand_interpolation(robot, state, cfg, args, rate_watchdog);
+                        next_control_t = std::chrono::steady_clock::now();
+                        next_policy_t = next_control_t;
+                        last_log = next_control_t - std::chrono::seconds(60);
+                        continue;
+                    }
+                    if (mode_requested && requested_mode != run_mode) {
+                        run_mode = requested_mode;
+                        policy.reset();
+                        have_previous_raw_target = false;
+                        next_policy_t = now;
+                        if (run_mode == RunMode::Stand) raw_cmd = {0.0f, 0.0f, 0.0f};
+                        std::cout << "[Input] Mode -> " << mode_name(run_mode) << std::endl;
+                    }
                     if (input.changed && std::chrono::duration<double>(now - last_log).count() < args.log_interval) {
-                        std::cout << "[Input] " << input.status << " cmd=[" << raw_cmd[0] << " " << raw_cmd[1]
-                                  << " " << raw_cmd[2] << "]" << std::endl;
+                        std::cout << "[Input] " << input.status << " mode=" << mode_name(run_mode)
+                                  << " cmd=[" << raw_cmd[0] << " " << raw_cmd[1] << " " << raw_cmd[2] << "]";
+                        if (input.zeroed_by_deadman) std::cout << " deadman=open";
+                        if (input.pause_zero) std::cout << " pause-zero";
+                        std::cout << std::endl;
                     }
                 }
-                if (now >= next_policy_t) {
+
+                if (run_mode == RunMode::Stand) {
+                    const auto limited = ml::torque_limited_target(
+                        target_default, snap.q, snap.dq, kp_motor, kd_motor, tau_limit, cfg.tau_limit_scale);
+                    command_target = ml::clamp_and_rate_limit(
+                        limited,
+                        command_target,
+                        args.max_target_rate,
+                        static_cast<float>(ml::kControlDt),
+                        args.joint_limit_margin);
+                    safety.check(snap, &command_target, &target_default, nullptr);
+                } else if (now >= next_policy_t) {
                     const auto projected_gravity = ml::gravity_orientation(snap.quat);
                     const auto result = policy.infer(snap.q, snap.dq, snap.ang_vel, projected_gravity, raw_cmd);
                     safety.check(
@@ -971,7 +1114,8 @@ int run_robot_with_finally(const Args& args, const ml::LocoConfig& cfg, ml::Onnx
                 }
                 robot.publish_sdk24_command(snap.counts, command_target, kp_motor, kd_motor, false, args.damping_kd);
                 if (std::chrono::duration<double>(now - last_log).count() >= args.log_interval) {
-                    std::cout << "[Loco] policy=" << policy_counter << " q=" << range_string(snap.q)
+                    std::cout << "[" << mode_name(run_mode) << "] policy=" << policy_counter
+                              << " q=" << range_string(snap.q)
                               << " target=" << range_string(command_target)
                               << " cmd=[" << raw_cmd[0] << " " << raw_cmd[1] << " " << raw_cmd[2] << "]"
                               << " counts=" << ml::counts_string(snap.counts) << std::endl;

@@ -228,7 +228,7 @@ scripts/run_magicbot_loco_native.sh \
   --motion-max-policy-target-jump 0
 ```
 
-交互输入只在进入 ONNX loco loop 后生效，不能跳过前面的站立和安全墙。键盘控制：
+交互输入只在完成前置站立后生效，不能跳过前面的站立和安全墙。启用键盘/手柄时，run loop 默认先保持 `STAND`，需要显式切到 `LOCO`。键盘控制：
 
 ```bash
 scripts/run_magicbot_loco_native.sh \
@@ -240,7 +240,7 @@ scripts/run_magicbot_loco_native.sh \
   --local-ip 192.168.54.119
 ```
 
-键盘映射：`W/S` 调 `vx`，`Q/E` 调 `vy`，`A/D` 调 `wz`，`X` 清零，`Space/P` 暂停清零，`Esc` 退出 loco loop。
+键盘映射：`L` 切换 `STAND/LOCO`，`R` 重新插值回站姿并 reset policy，`W/S` 调 `vx`，`Q/E` 调 `vy`，`A/D` 调 `wz`，`X` 清零，`Space/P` 暂停清零，`Esc` 退出 run loop。
 
 手柄控制：
 
@@ -262,7 +262,7 @@ scripts/run_magicbot_loco_native.sh \
   --local-ip 192.168.54.119
 ```
 
-默认手柄映射：左摇杆 Y 为 `vx`，左摇杆 X 为 `vy`，右摇杆 X 为 `wz`；默认必须按住 button 4 才会输出非零命令，button 1 退出 loco loop。轴和按键编号都可以用命令行参数改。
+默认手柄映射：左摇杆 Y 为 `vx`，左摇杆 X 为 `vy`，右摇杆 X 为 `wz`；button 0 进 `LOCO`，button 3 回 `STAND`，button 6 重新插值回站姿并 reset policy，button 2 暂停清零，button 7 切换暂停清零。默认必须按住 button 4 才会输出非零命令，button 1 退出 run loop。轴和按键编号都可以用命令行参数改。
 
 ## 运行说明
 
@@ -270,7 +270,7 @@ scripts/run_magicbot_loco_native.sh \
 - `--input-check` 只检查键盘/手柄输入，不连接机器人。
 - `--pd-stand-only` 只做默认站立，不进入 loco。
 - `--duration <= 0` 表示一直保持，直到收到停止信号。
-- `--keyboard-control` 和 `--gamepad-control` 不能同时启用；二者都只改变归一化速度命令。
+- `--keyboard-control` 和 `--gamepad-control` 不能同时启用；二者会接管 `STAND/LOCO/reset/zero/stop` 和归一化速度命令。
 - 正常退出或安全墙触发时都会发布最终阻尼命令。
 - ONNX 按配置里的 `policy_dt` 运行，低层命令循环目标为 500 Hz。
 

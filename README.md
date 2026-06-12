@@ -222,7 +222,7 @@ scripts/run_magicbot_loco_native.sh \
   --motion-max-policy-target-jump 0
 ```
 
-Interactive input is only applied after the runner reaches the ONNX loco loop. Keyboard control:
+Interactive input is only applied after the staged stand sequence. With keyboard/gamepad enabled, the run loop starts in `STAND` and requires an explicit `LOCO` request. Keyboard control:
 
 ```bash
 scripts/run_magicbot_loco_native.sh \
@@ -234,7 +234,7 @@ scripts/run_magicbot_loco_native.sh \
   --local-ip 192.168.54.119
 ```
 
-Keyboard map: `W/S` adjusts `vx`, `Q/E` adjusts `vy`, `A/D` adjusts `wz`, `X` zeros command, `Space/P` pause-zeros, and `Esc` exits the loco loop.
+Keyboard map: `L` toggles `STAND/LOCO`, `R` re-interpolates to stand and resets the policy, `W/S` adjusts `vx`, `Q/E` adjusts `vy`, `A/D` adjusts `wz`, `X` zeros command, `Space/P` pause-zeros, and `Esc` exits the run loop.
 
 Gamepad control:
 
@@ -256,7 +256,7 @@ scripts/run_magicbot_loco_native.sh \
   --local-ip 192.168.54.119
 ```
 
-Default gamepad map: left stick Y is `vx`, left stick X is `vy`, right stick X is `wz`. Button 4 must be held for nonzero command by default; button 1 exits the loco loop. Axis and button indices are CLI-configurable.
+Default gamepad map: left stick Y is `vx`, left stick X is `vy`, right stick X is `wz`. Button 0 enters `LOCO`, button 3 enters `STAND`, button 6 re-interpolates to stand and resets the policy, button 2 pause-zeros, and button 7 toggles pause-zero. Button 4 must be held for nonzero command by default; button 1 exits the run loop. Axis and button indices are CLI-configurable.
 
 ## Runtime Notes
 
@@ -264,7 +264,7 @@ Default gamepad map: left stick Y is `vx`, left stick X is `vy`, right stick X i
 - `--input-check` reads keyboard/gamepad input only and does not connect to the robot.
 - `--pd-stand-only` runs default-pose standing without ONNX loco.
 - `--duration <= 0` holds the selected mode until interrupted.
-- `--keyboard-control` and `--gamepad-control` are mutually exclusive; both only change normalized velocity commands.
+- `--keyboard-control` and `--gamepad-control` are mutually exclusive; both drive `STAND/LOCO/reset/zero/stop` and normalized velocity commands.
 - On exit or safety trip, the runner publishes a final damping command.
 - The policy runs at the configured `policy_dt`; the low-level command loop targets 500 Hz.
 
