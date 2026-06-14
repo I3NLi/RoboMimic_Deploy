@@ -1,5 +1,7 @@
 #pragma once
 
+#include "mode_manager.h"
+
 #include <algorithm>
 #include <array>
 #include <cerrno>
@@ -24,6 +26,17 @@ enum class TextControlAction {
     Resume,
     Stop,
     ToggleLoco,
+};
+
+struct TextControlActionEffect {
+    bool mode_requested{false};
+    ControlMode mode{ControlMode::Stand};
+    bool zero_command{false};
+    bool unpause{false};
+    bool pause{false};
+    bool stop{false};
+    bool toggle_loco{false};
+    bool reset_stand{false};
 };
 
 struct TextControlOperation {
@@ -128,6 +141,64 @@ inline bool text_control_action_from_word(const std::string& word, TextControlAc
         return true;
     }
     return false;
+}
+
+inline TextControlActionEffect text_control_action_effect(TextControlAction action)
+{
+    TextControlActionEffect effect;
+    switch (action) {
+    case TextControlAction::Loco:
+        effect.mode_requested = true;
+        effect.mode = ControlMode::Loco;
+        effect.unpause = true;
+        break;
+    case TextControlAction::Stand:
+        effect.mode_requested = true;
+        effect.mode = ControlMode::Stand;
+        effect.zero_command = true;
+        effect.unpause = true;
+        break;
+    case TextControlAction::ResetStand:
+        effect.zero_command = true;
+        effect.unpause = true;
+        effect.reset_stand = true;
+        break;
+    case TextControlAction::Passive:
+        effect.mode_requested = true;
+        effect.mode = ControlMode::Passive;
+        effect.zero_command = true;
+        effect.unpause = true;
+        break;
+    case TextControlAction::Dance:
+        effect.mode_requested = true;
+        effect.mode = ControlMode::Dance;
+        effect.zero_command = true;
+        effect.unpause = true;
+        break;
+    case TextControlAction::FinalDamping:
+        effect.mode_requested = true;
+        effect.mode = ControlMode::FinalDamping;
+        effect.zero_command = true;
+        effect.unpause = true;
+        break;
+    case TextControlAction::Zero:
+        effect.zero_command = true;
+        break;
+    case TextControlAction::Pause:
+        effect.pause = true;
+        break;
+    case TextControlAction::Resume:
+        effect.unpause = true;
+        break;
+    case TextControlAction::Stop:
+        effect.stop = true;
+        break;
+    case TextControlAction::ToggleLoco:
+        effect.toggle_loco = true;
+        effect.unpause = true;
+        break;
+    }
+    return effect;
 }
 
 inline std::vector<TextControlOperation> parse_text_control_operations(std::string message)

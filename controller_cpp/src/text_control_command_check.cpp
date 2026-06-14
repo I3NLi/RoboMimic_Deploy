@@ -90,6 +90,33 @@ void check_invalid_tokens_are_ignored()
     expect_velocity(ops[0], 1, 0.3f);
 }
 
+void check_action_effects()
+{
+    const auto loco = ml::text_control_action_effect(ml::TextControlAction::Loco);
+    require(loco.mode_requested, "loco effect should request a mode");
+    require(loco.mode == ml::ControlMode::Loco, "loco effect mode");
+    require(!loco.zero_command, "loco effect should preserve command");
+    require(loco.unpause, "loco effect should unpause");
+
+    const auto passive = ml::text_control_action_effect(ml::TextControlAction::Passive);
+    require(passive.mode_requested, "passive effect should request a mode");
+    require(passive.mode == ml::ControlMode::Passive, "passive effect mode");
+    require(passive.zero_command, "passive effect should zero command");
+    require(passive.unpause, "passive effect should unpause");
+
+    const auto reset = ml::text_control_action_effect(ml::TextControlAction::ResetStand);
+    require(!reset.mode_requested, "reset effect should leave mode handling to entrypoint");
+    require(reset.zero_command, "reset effect should zero command");
+    require(reset.reset_stand, "reset effect should request re-stand/reset");
+
+    const auto pause = ml::text_control_action_effect(ml::TextControlAction::Pause);
+    require(pause.pause, "pause effect should pause");
+    require(!pause.zero_command, "pause effect should not rewrite stored command");
+
+    const auto stop = ml::text_control_action_effect(ml::TextControlAction::Stop);
+    require(stop.stop, "stop effect should request stop");
+}
+
 }  // namespace
 
 int main()
@@ -100,6 +127,7 @@ int main()
         check_aliases();
         check_order_preserved();
         check_invalid_tokens_are_ignored();
+        check_action_effects();
     } catch (const std::exception& error) {
         std::cerr << "[text_control_command_check][FAIL] " << error.what() << "\n";
         return 1;

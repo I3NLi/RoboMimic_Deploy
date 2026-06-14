@@ -1345,73 +1345,31 @@ void apply_viewer_text_action(
     bool& running,
     bool& reset_requested)
 {
-    switch (action) {
-    case magicbot_loco::TextControlAction::Loco:
-        if (!loco_active || passive_active || dance_active || final_damping_active) reset_requested = true;
-        loco_active = true;
-        passive_active = false;
-        dance_active = false;
-        final_damping_active = false;
-        paused = false;
-        break;
-    case magicbot_loco::TextControlAction::Stand:
+    const magicbot_loco::TextControlActionEffect effect = magicbot_loco::text_control_action_effect(action);
+    if (effect.mode_requested && effect.mode == magicbot_loco::ControlMode::Dance && !dance_enabled) {
+        std::fprintf(stderr, "[Viewer] DANCE ignored; start with --beyond-yaml PATH to enable BeyondMimic\n");
+        return;
+    }
+
+    if (effect.zero_command) {
         cmd = {0.0f, 0.0f, 0.0f};
-        loco_active = false;
-        passive_active = false;
-        dance_active = false;
-        final_damping_active = false;
-        reset_requested = true;
-        paused = false;
-        break;
-    case magicbot_loco::TextControlAction::ResetStand:
-        cmd = {0.0f, 0.0f, 0.0f};
-        passive_active = false;
-        dance_active = false;
-        final_damping_active = false;
-        reset_requested = true;
-        paused = false;
-        break;
-    case magicbot_loco::TextControlAction::Passive:
-        cmd = {0.0f, 0.0f, 0.0f};
-        loco_active = false;
-        passive_active = true;
-        dance_active = false;
-        final_damping_active = false;
-        paused = false;
-        break;
-    case magicbot_loco::TextControlAction::FinalDamping:
-        cmd = {0.0f, 0.0f, 0.0f};
-        loco_active = false;
-        passive_active = false;
-        dance_active = false;
-        final_damping_active = true;
-        paused = false;
-        break;
-    case magicbot_loco::TextControlAction::Dance:
-        if (!dance_enabled) {
-            std::fprintf(stderr, "[Viewer] DANCE ignored; start with --beyond-yaml PATH to enable BeyondMimic\n");
-            return;
-        }
-        cmd = {0.0f, 0.0f, 0.0f};
-        loco_active = false;
-        passive_active = false;
-        dance_active = true;
-        final_damping_active = false;
-        paused = false;
-        break;
-    case magicbot_loco::TextControlAction::Zero:
-        cmd = {0.0f, 0.0f, 0.0f};
-        break;
-    case magicbot_loco::TextControlAction::Pause:
+    }
+    if (effect.pause) {
         paused = true;
-        break;
-    case magicbot_loco::TextControlAction::Resume:
+    }
+    if (effect.unpause) {
         paused = false;
-        break;
-    case magicbot_loco::TextControlAction::Stop:
+    }
+    if (effect.stop) {
         running = false;
-        break;
-    case magicbot_loco::TextControlAction::ToggleLoco:
+    }
+    if (effect.reset_stand) {
+        passive_active = false;
+        dance_active = false;
+        final_damping_active = false;
+        reset_requested = true;
+    }
+    if (effect.toggle_loco) {
         if (loco_active) {
             loco_active = false;
             cmd = {0.0f, 0.0f, 0.0f};
@@ -1422,9 +1380,23 @@ void apply_viewer_text_action(
         passive_active = false;
         dance_active = false;
         final_damping_active = false;
-        paused = false;
-        break;
     }
+    if (!effect.mode_requested) {
+        return;
+    }
+
+    const magicbot_loco::ControlMode mode = effect.mode;
+    if (mode == magicbot_loco::ControlMode::Loco &&
+        (!loco_active || passive_active || dance_active || final_damping_active)) {
+        reset_requested = true;
+    }
+    if (mode == magicbot_loco::ControlMode::Stand) {
+        reset_requested = true;
+    }
+    final_damping_active = mode == magicbot_loco::ControlMode::FinalDamping;
+    passive_active = mode == magicbot_loco::ControlMode::Passive;
+    loco_active = mode == magicbot_loco::ControlMode::Loco;
+    dance_active = mode == magicbot_loco::ControlMode::Dance;
 }
 
 class ViewerUdpCommandInput {

@@ -136,8 +136,11 @@ Viewer UDP and the real runner UDP input now share `text_control_command.h` for
 text command tokenization and mode aliases (`loco`, `stand`, `passive`,
 `final_damping`, `beyond`, `pause`, `resume`, `stop`, and `zero`). The consumers
 still apply those parsed operations to their own input state; the parser does
-not own policy, safety, or adapter behavior. Local viewer keyboard shortcuts
-`M` / `N` request the same shared passive and final-damping modes.
+not own policy, safety, or adapter behavior. It does own the shared action
+effect for parsed text controls: which controls request a mode, clear velocity,
+pause/resume, stop, toggle LOCO, or request a re-stand/reset. Local viewer
+keyboard shortcuts `M` / `N` request the same shared passive and final-damping
+modes.
 The HTTP control endpoint accepts the same mode vocabulary through query
 parameters, for example `POST /control?mode=final_damping` or
 `POST /control?mode=loco&vx=0.2&wz=-0.1`; the main viewer loop consumes those
@@ -220,9 +223,9 @@ scripts/run_viewer_http_control_smoke_native.sh --duration 1.5 --keep-summary
 ```
 
 The script starts the viewer HTTP server, posts reset plus
-`passive -> stand -> loco -> final_damping`, verifies an invalid mode returns
+`passive -> stand -> loco -> pause -> resume -> final_damping`, verifies an invalid mode returns
 HTTP 400, and checks the summary for `mode == FINAL_DAMPING`,
-`http_control_commands >= 4`, `http_reset_requests >= 1`, and advancing
+`http_control_commands >= 6`, `http_reset_requests >= 1`, and advancing
 `sim_steps`.
 
 For an unpaused remote perturb smoke, keep the drag active for a short wall-clock

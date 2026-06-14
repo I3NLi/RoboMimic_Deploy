@@ -161,6 +161,8 @@ post_ok "${reset_url}" "reset"
 post_ok "${control_url}?mode=passive" "passive"
 post_ok "${control_url}?mode=stand" "stand"
 post_ok "${control_url}?mode=loco&vx=0.15&vy=0.05&wz=-0.05" "loco"
+post_ok "${control_url}?pause=1" "pause"
+post_ok "${control_url}?pause=0" "resume"
 post_ok "${control_url}?mode=final_damping" "final_damping"
 
 invalid_status="$(post_status "${control_url}?mode=teleport")"
@@ -193,8 +195,8 @@ if [[ "${mode}" != "FINAL_DAMPING" ]]; then
     cat "${summary_json}" >&2
     exit 1
 fi
-if [[ "${http_control_commands}" -lt 4 ]]; then
-    echo "[Smoke][ERROR] expected at least 4 HTTP control commands, got ${http_control_commands}" >&2
+if [[ "${http_control_commands}" -lt 6 ]]; then
+    echo "[Smoke][ERROR] expected at least 6 HTTP control commands, got ${http_control_commands}" >&2
     cat "${summary_json}" >&2
     exit 1
 fi

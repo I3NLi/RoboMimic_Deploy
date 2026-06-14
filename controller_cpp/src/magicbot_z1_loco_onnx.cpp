@@ -859,50 +859,46 @@ private:
 
     void handle_action(ml::TextControlAction action, LiveInputState& out, std::array<float, 3>& cmd)
     {
-        switch (action) {
-        case ml::TextControlAction::Loco:
-            paused_ = false;
-            out.loco_requested = true;
-            break;
-        case ml::TextControlAction::Passive:
+        const ml::TextControlActionEffect effect = ml::text_control_action_effect(action);
+        if (effect.zero_command) {
             cmd = {0.0f, 0.0f, 0.0f};
+        }
+        if (effect.pause) {
+            paused_ = true;
+        }
+        if (effect.unpause) {
             paused_ = false;
+        }
+        if (effect.stop) {
+            out.stop_requested = true;
+        }
+        if (effect.toggle_loco) {
+            out.toggle_loco_requested = true;
+        }
+        if (effect.reset_stand) {
+            out.reset_stand_requested = true;
+        }
+        if (!effect.mode_requested) {
+            return;
+        }
+
+        switch (effect.mode) {
+        case ml::ControlMode::Passive:
             out.passive_requested = true;
             break;
-        case ml::TextControlAction::Dance:
-            paused_ = false;
-            out.dance_requested = true;
-            break;
-        case ml::TextControlAction::FinalDamping:
-            cmd = {0.0f, 0.0f, 0.0f};
-            paused_ = false;
-            out.final_damping_requested = true;
-            break;
-        case ml::TextControlAction::Stand:
-            cmd = {0.0f, 0.0f, 0.0f};
-            paused_ = false;
+        case ml::ControlMode::Stand:
             out.stand_requested = true;
             break;
-        case ml::TextControlAction::ToggleLoco:
-            paused_ = false;
-            out.toggle_loco_requested = true;
+        case ml::ControlMode::Loco:
+            out.loco_requested = true;
             break;
-        case ml::TextControlAction::ResetStand:
-            cmd = {0.0f, 0.0f, 0.0f};
-            paused_ = false;
-            out.reset_stand_requested = true;
+        case ml::ControlMode::Dance:
+            out.dance_requested = true;
             break;
-        case ml::TextControlAction::Zero:
-            cmd = {0.0f, 0.0f, 0.0f};
+        case ml::ControlMode::FinalDamping:
+            out.final_damping_requested = true;
             break;
-        case ml::TextControlAction::Pause:
-            paused_ = true;
-            break;
-        case ml::TextControlAction::Resume:
-            paused_ = false;
-            break;
-        case ml::TextControlAction::Stop:
-            out.stop_requested = true;
+        case ml::ControlMode::Skill:
             break;
         }
     }
