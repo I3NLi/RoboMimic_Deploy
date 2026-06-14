@@ -328,6 +328,17 @@ The script sends viewer UDP text-control packets for
 summary for `mode == FINAL_DAMPING`, `paused == false`, and advancing
 `sim_steps`.
 
+Viewer UDP external-policy smoke:
+
+```bash
+scripts/run_viewer_udp_external_policy_smoke_native.sh --duration 1.8 --keep-summary
+```
+
+The script starts the viewer with UDP control and HTTP status enabled, sends UDP
+text controls for `mode=beyond` and `mode=track_mimic`, checks live `/status`
+for `DANCE/BeyondMimic` and `SKILL/TrackMimic`, then checks the summary for a
+final `SKILL` state with active `external_policy == TrackMimic`.
+
 Viewer HTTP remote perturb smoke:
 
 ```bash
