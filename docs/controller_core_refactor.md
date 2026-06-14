@@ -60,6 +60,10 @@ not inspect mode requests, run policies, or perform safety checks.
 `mjData::ctrl`. It does not step the simulation, handle viewer input, or run
 policy logic.
 
+`dual_inference_rate.cpp` now routes its pure-sim and real-state-sim LOCO policy
+step through `ControllerCore`. It remains a validation tool only and still never
+publishes commands to the real robot.
+
 The first `ControllerCore` implementation supports `PASSIVE`, `STAND`, `LOCO`,
 and `FINAL_DAMPING`. `DANCE` and `SKILL` are represented in the shared mode enum
 but intentionally reject requests until the skill policy adapter is wired.
@@ -71,7 +75,7 @@ state/command I/O.
 ## Next cuts
 
 1. Route `magicbot_z1_loco_onnx` LOCO loop through `ControllerCore`.
-2. Route MuJoCo closed-loop code through `MujocoSimAdapter` and the same
+2. Route MuJoCo viewer closed-loop code through `MujocoSimAdapter` and the same
    `ControllerCore` API.
 3. Extract the mode manager for `PASSIVE` / `STAND` / `LOCO`.
 4. Add policy adapters for `DANCE` / `SKILL`.

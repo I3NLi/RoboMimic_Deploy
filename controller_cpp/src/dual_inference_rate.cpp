@@ -9,6 +9,7 @@
  * The tool never publishes joint commands.
  */
 
+#include "controller_core.h"
 #include "magicbot_loco_core.h"
 
 #ifdef ENABLE_MAGICBOT_SDK
@@ -695,7 +696,7 @@ void destroy_sim(SimContext& sim)
 Summary run_rate_loop(
     Args& args,
     const ml::LocoConfig& cfg,
-    ml::OnnxLocoPolicy& policy,
+    ml::ControllerCore& core,
     SimContext& sim)
 {
     const bool real = args.mode == "real-state-sim";
@@ -707,11 +708,10 @@ Summary run_rate_loop(
         target_steps = std::max(1, static_cast<int>(std::round(args.duration / sim.model->opt.timestep)));
     }
 
-    const ml::JointArray kp = cfg.kps_motor();
-    const ml::JointArray kd = cfg.kds_motor();
-    const ml::JointArray tau_limit = cfg.tau_limit_motor();
     ml::JointArray policy_target = sim.have_init_q ? sim.init_q : cfg.default_motor();
-    const std::array<float, 3> raw_cmd{args.vx, args.vy, args.wz};
+    core.seed_target(policy_target);
+    core.reset_policy();
+    const ml::Command command{{args.vx, args.vy, args.wz}};
     std::vector<double> infer_ms;
     std::vector<double> state_age_ms;
     int missed_deadline = 0;
@@ -728,6 +728,7 @@ Summary run_rate_loop(
     const double root_y0 = sim.data->qpos[1];
     ml::JointArray previous_policy_target = policy_target;
     bool have_previous_policy_target = false;
+    bool requested_loco = false;
 
 #ifdef ENABLE_MAGICBOT_SDK
     ml::MagicbotSdkAdapter robot;
@@ -758,18 +759,11 @@ Summary run_rate_loop(
                 (real && args.real_forward_only) || (step % args.control_decimation == 0);
 
             if (control_tick) {
-                ml::JointArray q{};
-                ml::JointArray dq{};
-                std::array<float, 4> quat{1.0f, 0.0f, 0.0f, 0.0f};
-                std::array<float, 3> ang_vel{0.0f, 0.0f, 0.0f};
+                ml::RobotSnapshot snap;
 
 #ifdef ENABLE_MAGICBOT_SDK
                 if (real) {
-                    const auto snap = robot_state.snapshot();
-                    q = snap.q;
-                    dq = snap.dq;
-                    quat = snap.quat;
-                    ang_vel = snap.ang_vel;
+                    snap = robot_state.snapshot();
                     set_sim_state(sim.data, sim.qpos_idx, sim.qvel_idx, snap);
                     mj_forward(sim.model, sim.data);
                     const double age = robot_state.state_age_ms();
@@ -777,42 +771,58 @@ Summary run_rate_loop(
                 } else
 #endif
                 {
-                    q = get_q(sim.data, sim.qpos_idx);
-                    dq = get_dq(sim.data, sim.qvel_idx);
-                    quat = get_quat(sim.data);
-                    ang_vel = get_ang_vel(sim.model, sim.data, sim.root_body_id);
+                    snap.q = get_q(sim.data, sim.qpos_idx);
+                    snap.dq = get_dq(sim.data, sim.qvel_idx);
+                    snap.quat = get_quat(sim.data);
+                    snap.ang_vel = get_ang_vel(sim.model, sim.data, sim.root_body_id);
                 }
 
-                const auto gravity = ml::gravity_orientation(quat);
+                const auto gravity = ml::gravity_orientation(snap.quat);
                 max_gravity_xy = std::max(
                     max_gravity_xy,
                     std::sqrt(static_cast<double>(gravity[0]) * gravity[0] +
                               static_cast<double>(gravity[1]) * gravity[1]));
                 const auto t0 = std::chrono::steady_clock::now();
-                const auto result = policy.infer(q, dq, ang_vel, gravity, raw_cmd);
+                const auto mode_request = requested_loco
+                                              ? ml::ModeRequest::none()
+                                              : ml::ModeRequest::enter(ml::ControlMode::Loco);
+                const auto result = core.step(snap, command, mode_request, static_cast<float>(control_dt));
                 const auto t1 = std::chrono::steady_clock::now();
-                if (have_previous_policy_target) {
+                requested_loco = true;
+                if (result.telemetry.policy_evaluated && have_previous_policy_target) {
                     double jump = 0.0;
                     for (int i = 0; i < ml::kNumJoints; ++i) {
                         jump = std::max(
                             jump,
-                            static_cast<double>(std::fabs(result.target_motor[i] - previous_policy_target[i])));
+                            static_cast<double>(
+                                std::fabs(result.telemetry.raw_policy_target[i] - previous_policy_target[i])));
                     }
                     max_policy_target_jump = std::max(max_policy_target_jump, jump);
                 }
-                previous_policy_target = result.target_motor;
-                have_previous_policy_target = true;
-                policy_target = result.target_motor;
-                infer_ms.push_back(std::chrono::duration<double, std::milli>(t1 - t0).count());
+                if (result.telemetry.policy_evaluated) {
+                    previous_policy_target = result.telemetry.raw_policy_target;
+                    have_previous_policy_target = true;
+                    infer_ms.push_back(std::chrono::duration<double, std::milli>(t1 - t0).count());
+                }
+                policy_target = result.target.q;
                 ++control_steps;
-                max_abs_q = std::max(max_abs_q, max_abs(q));
-                max_abs_dq = std::max(max_abs_dq, max_abs(dq));
+                max_abs_q = std::max(max_abs_q, max_abs(snap.q));
+                max_abs_dq = std::max(max_abs_dq, max_abs(snap.dq));
             }
 
             if (!(real && args.real_forward_only)) {
                 max_abs_tau = std::max(
                     max_abs_tau,
-                    apply_pd(args, sim.model, sim.data, sim.qpos_idx, sim.qvel_idx, policy_target, kp, kd, tau_limit));
+                    apply_pd(
+                        args,
+                        sim.model,
+                        sim.data,
+                        sim.qpos_idx,
+                        sim.qvel_idx,
+                        policy_target,
+                        core.gains().kp,
+                        core.gains().kd,
+                        core.gains().tau_limit));
                 mj_step(sim.model, sim.data);
                 if (args.ground_correction) {
                     (void)correct_ground_penetration(
@@ -912,8 +922,10 @@ int main(int argc, char** argv)
 
         const fs::path config_path = resolve_path(root, args.config);
         ml::LocoConfig cfg = ml::load_loco_config(config_path);
-        ml::OnnxLocoPolicy policy(cfg);
-        policy.warmup(3);
+        ml::ControllerCoreOptions core_options;
+        core_options.safety.enabled = false;
+        ml::ControllerCore core(cfg, core_options);
+        core.warmup(3);
 
         SimContext sim = make_sim(args, root, args.sim_dt, base_height);
         std::cout << "=== MagicBot Z1 Native Dual Inference Rate ===\n"
@@ -922,7 +934,7 @@ int main(int argc, char** argv)
                   << " control_decimation=" << args.control_decimation
                   << " config=" << config_path << "\n";
 
-        Summary summary = run_rate_loop(args, cfg, policy, sim);
+        Summary summary = run_rate_loop(args, cfg, core, sim);
         const std::string json = summary_json(summary);
         std::cout << "RATE_SUMMARY " << json << std::endl;
         if (!args.summary_json.empty()) {
