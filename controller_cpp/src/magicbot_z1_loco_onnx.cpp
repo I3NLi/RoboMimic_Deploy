@@ -418,9 +418,11 @@ float apply_axis_deadzone(float value, float deadzone)
 struct LiveInputState {
     std::array<float, 3> command{0.0f, 0.0f, 0.0f};
     bool stop_requested{false};
+    bool passive_requested{false};
     bool loco_requested{false};
     bool stand_requested{false};
     bool dance_requested{false};
+    bool final_damping_requested{false};
     bool toggle_loco_requested{false};
     bool reset_stand_requested{false};
     bool pause_zero{false};
@@ -430,20 +432,26 @@ struct LiveInputState {
 };
 
 enum class RunMode {
+    Passive,
     Stand,
     Loco,
     Dance,
+    FinalDamping,
 };
 
 const char* mode_name(RunMode mode)
 {
     switch (mode) {
+    case RunMode::Passive:
+        return "PASSIVE";
     case RunMode::Stand:
         return "STAND";
     case RunMode::Loco:
         return "LOCO";
     case RunMode::Dance:
         return "DANCE";
+    case RunMode::FinalDamping:
+        return "FINAL_DAMPING";
     }
     return "UNKNOWN";
 }
@@ -451,12 +459,16 @@ const char* mode_name(RunMode mode)
 ml::ControlMode control_mode_for(RunMode mode)
 {
     switch (mode) {
+    case RunMode::Passive:
+        return ml::ControlMode::Passive;
     case RunMode::Stand:
         return ml::ControlMode::Stand;
     case RunMode::Loco:
         return ml::ControlMode::Loco;
     case RunMode::Dance:
         return ml::ControlMode::Dance;
+    case RunMode::FinalDamping:
+        return ml::ControlMode::FinalDamping;
     }
     return ml::ControlMode::Stand;
 }
@@ -563,6 +575,16 @@ private:
         case 'b':
         case 'B':
             out.dance_requested = true;
+            paused_ = false;
+            break;
+        case 'm':
+        case 'M':
+            out.passive_requested = true;
+            paused_ = false;
+            break;
+        case 'f':
+        case 'F':
+            out.final_damping_requested = true;
             paused_ = false;
             break;
         case 'r':
@@ -865,9 +887,18 @@ private:
         if (word == "loco" || word == "run") {
             paused_ = false;
             out.loco_requested = true;
+        } else if (word == "passive" || word == "damping") {
+            cmd = {0.0f, 0.0f, 0.0f};
+            paused_ = false;
+            out.passive_requested = true;
         } else if (word == "dance" || word == "beyond" || word == "beyondmimic") {
             paused_ = false;
             out.dance_requested = true;
+        } else if (word == "final" || word == "finaldamping" || word == "final_damping" ||
+                   word == "fail_safe" || word == "failsafe") {
+            cmd = {0.0f, 0.0f, 0.0f};
+            paused_ = false;
+            out.final_damping_requested = true;
         } else if (word == "stand") {
             cmd = {0.0f, 0.0f, 0.0f};
             paused_ = false;
@@ -904,8 +935,8 @@ public:
     {
         if (args.keyboard_control) {
             keyboard_ = std::make_unique<TerminalKeyboardInput>(initial_command, args.input_step);
-            std::cout << "[Input] Keyboard control enabled: L stand/loco, R re-stand, W/S vx, Q/E vy, A/D wz, "
-                         "X zero, Space/P pause-zero, Esc stop"
+            std::cout << "[Input] Keyboard control enabled: L stand/loco, M passive, F final damping, B dance, "
+                         "R re-stand, W/S vx, Q/E vy, A/D wz, X zero, Space/P pause-zero, Esc stop"
                       << std::endl;
         }
         if (args.gamepad_control) {
@@ -925,7 +956,8 @@ public:
             udp_ = std::make_unique<UdpCommandInput>(args, initial_command);
             std::cout << "[Input] UDP command enabled: bind=" << args.udp_bind << ":" << args.udp_port
                       << " timeout_s=" << args.udp_timeout_s
-                      << " format='vx vy wz [loco|stand|beyond|stop]' or 'vx=... vy=... wz=... mode=loco'"
+                      << " format='vx vy wz [loco|stand|passive|final_damping|beyond|stop]'"
+                         " or 'vx=... vy=... wz=... mode=loco'"
                       << std::endl;
         }
     }
@@ -1140,6 +1172,9 @@ int input_check_only(const Args& args)
         if (state.toggle_loco_requested) {
             mode = mode == RunMode::Loco ? RunMode::Stand : RunMode::Loco;
         }
+        if (state.passive_requested) {
+            mode = RunMode::Passive;
+        }
         if (state.stand_requested || state.reset_stand_requested) {
             mode = RunMode::Stand;
         }
@@ -1149,13 +1184,18 @@ int input_check_only(const Args& args)
         if (state.dance_requested) {
             mode = RunMode::Dance;
         }
+        if (state.final_damping_requested) {
+            mode = RunMode::FinalDamping;
+        }
         if (state.changed || std::chrono::duration<double>(now - last_log).count() >= args.log_interval) {
             std::cout << "[InputCheck] " << state.status << " mode=" << mode_name(mode)
                       << " cmd=[" << state.command[0] << " " << state.command[1] << " " << state.command[2] << "]";
             if (state.zeroed_by_deadman) std::cout << " deadman=open";
             if (state.pause_zero) std::cout << " pause-zero";
             if (state.reset_stand_requested) std::cout << " reset-stand";
+            if (state.passive_requested) std::cout << " passive";
             if (state.dance_requested) std::cout << " dance";
+            if (state.final_damping_requested) std::cout << " final-damping";
             std::cout << std::endl;
             last_log = now;
         }
@@ -1312,6 +1352,10 @@ int run_robot_with_finally(const Args& args, const ml::LocoConfig& cfg, ml::Cont
                         requested_mode = run_mode == RunMode::Loco ? RunMode::Stand : RunMode::Loco;
                         mode_requested = true;
                     }
+                    if (input.passive_requested) {
+                        requested_mode = RunMode::Passive;
+                        mode_requested = true;
+                    }
                     if (input.stand_requested) {
                         requested_mode = RunMode::Stand;
                         mode_requested = true;
@@ -1328,6 +1372,10 @@ int run_robot_with_finally(const Args& args, const ml::LocoConfig& cfg, ml::Cont
                             requested_mode = RunMode::Dance;
                             mode_requested = true;
                         }
+                    }
+                    if (input.final_damping_requested) {
+                        requested_mode = RunMode::FinalDamping;
+                        mode_requested = true;
                     }
                     if (input.reset_stand_requested) {
                         std::cout << "[Input] Re-stand requested" << std::endl;
@@ -1352,7 +1400,9 @@ int run_robot_with_finally(const Args& args, const ml::LocoConfig& cfg, ml::Cont
                                   << " cmd=[" << raw_cmd[0] << " " << raw_cmd[1] << " " << raw_cmd[2] << "]";
                         if (input.zeroed_by_deadman) std::cout << " deadman=open";
                         if (input.pause_zero) std::cout << " pause-zero";
+                        if (input.passive_requested) std::cout << " passive";
                         if (input.dance_requested) std::cout << " dance";
+                        if (input.final_damping_requested) std::cout << " final-damping";
                         std::cout << std::endl;
                     }
                 }

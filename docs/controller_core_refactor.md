@@ -106,6 +106,10 @@ LOCO still requires the explicit `--allow-loco` gate. When `--beyond-yaml PATH`
 is supplied, the runner registers BeyondMimic as the keyed shared `DANCE`
 external policy and accepts `mode=beyond` / `mode=dance` from UDP, `B` from
 keyboard input, or an explicitly configured gamepad dance button.
+The same UDP input now accepts `mode=passive` / `mode=damping` for shared
+`PASSIVE` and `mode=final`, `mode=finaldamping`, or `mode=final_damping` for
+shared `FINAL_DAMPING`; both clear velocity commands and route through
+`ControllerCore`, not through runner-local control logic.
 
 `mujoco_loco_viewer.cpp` now routes its closed-loop STAND/LOCO/PASSIVE execution
 through the same `ControllerRuntime` and `MujocoSimAdapter`. Viewer input, UDP
@@ -123,6 +127,8 @@ perturb/camera operations without moving control logic out of `ControllerCore`.
 When `--beyond-yaml PATH` is supplied, the viewer registers BeyondMimic as the
 same keyed shared `DANCE` external policy used by the real runner; `B` and UDP
 `mode=beyond` / `mode=dance` enter it.
+Viewer UDP also accepts `mode=passive` and `mode=final_damping`, and local
+keyboard shortcuts `M` / `N` request those shared modes.
 
 The first `ControllerCore` implementation supports `PASSIVE`, `STAND`, `LOCO`,
 and `FINAL_DAMPING`. `DANCE` and `SKILL` are represented in the shared mode enum

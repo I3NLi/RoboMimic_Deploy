@@ -1022,7 +1022,7 @@ magicbot_loco::ControlMode control_mode_for_fsm_state(FSMStateName state)
     }
 }
 
-const char* viewer_mode_label(bool loco, bool passive, bool dance);
+const char* viewer_mode_label(bool loco, bool passive, bool dance, bool final_damping);
 
 std::string body_name(const mjModel* model, int body_id)
 {
@@ -1109,6 +1109,7 @@ std::string viewer_summary_json(
     bool loco_active,
     bool passive_active,
     bool dance_active,
+    bool final_damping_active,
     bool paused,
     double wall_s,
     int push_body_id)
@@ -1116,7 +1117,7 @@ std::string viewer_summary_json(
     std::ostringstream out;
     out << std::fixed << std::setprecision(6)
         << "{"
-        << "\"mode\":\"" << viewer_mode_label(loco_active, passive_active, dance_active) << "\","
+        << "\"mode\":\"" << viewer_mode_label(loco_active, passive_active, dance_active, final_damping_active) << "\","
         << "\"paused\":" << (paused ? "true" : "false") << ","
         << "\"wall_s\":" << wall_s << ","
         << "\"sim_time_s\":" << data->time << ","
@@ -1271,6 +1272,7 @@ public:
         bool& loco_active,
         bool& passive_active,
         bool& dance_active,
+        bool& final_damping_active,
         bool& paused,
         bool& running,
         bool& reset_requested)
@@ -1289,6 +1291,7 @@ public:
                 const bool old_loco_active = loco_active;
                 const bool old_passive_active = passive_active;
                 const bool old_dance_active = dance_active;
+                const bool old_final_damping_active = final_damping_active;
                 const bool old_paused = paused;
                 const bool old_running = running;
                 const bool old_reset_requested = reset_requested;
@@ -1298,6 +1301,7 @@ public:
                     loco_active,
                     passive_active,
                     dance_active,
+                    final_damping_active,
                     paused,
                     running,
                     reset_requested);
@@ -1307,6 +1311,7 @@ public:
                           old_loco_active != loco_active ||
                           old_passive_active != passive_active ||
                           old_dance_active != dance_active ||
+                          old_final_damping_active != final_damping_active ||
                           old_paused != paused ||
                           old_running != running || old_reset_requested != reset_requested;
                 continue;
@@ -1333,6 +1338,7 @@ private:
         bool& loco_active,
         bool& passive_active,
         bool& dance_active,
+        bool& final_damping_active,
         bool& paused,
         bool& running,
         bool& reset_requested)
@@ -1357,7 +1363,16 @@ private:
                 } else if ((key == "wz" || key == "yaw") && parse_float_token(val, parsed)) {
                     cmd[2] = clamp_cmd(parsed);
                 } else if (key == "mode") {
-                    handle_word(val, cmd, loco_active, passive_active, dance_active, paused, running, reset_requested);
+                    handle_word(
+                        val,
+                        cmd,
+                        loco_active,
+                        passive_active,
+                        dance_active,
+                        final_damping_active,
+                        paused,
+                        running,
+                        reset_requested);
                 }
                 continue;
             }
@@ -1368,7 +1383,16 @@ private:
                 ++numeric_index;
                 continue;
             }
-            handle_word(lower_copy(token), cmd, loco_active, passive_active, dance_active, paused, running, reset_requested);
+            handle_word(
+                lower_copy(token),
+                cmd,
+                loco_active,
+                passive_active,
+                dance_active,
+                final_damping_active,
+                paused,
+                running,
+                reset_requested);
         }
     }
 
@@ -1378,27 +1402,31 @@ private:
         bool& loco_active,
         bool& passive_active,
         bool& dance_active,
+        bool& final_damping_active,
         bool& paused,
         bool& running,
         bool& reset_requested)
     {
         if (word == "loco" || word == "run") {
-            if (!loco_active || passive_active || dance_active) reset_requested = true;
+            if (!loco_active || passive_active || dance_active || final_damping_active) reset_requested = true;
             loco_active = true;
             passive_active = false;
             dance_active = false;
+            final_damping_active = false;
             paused = false;
         } else if (word == "stand") {
             cmd = {0.0f, 0.0f, 0.0f};
             loco_active = false;
             passive_active = false;
             dance_active = false;
+            final_damping_active = false;
             reset_requested = true;
             paused = false;
         } else if (word == "reset" || word == "restand") {
             cmd = {0.0f, 0.0f, 0.0f};
             passive_active = false;
             dance_active = false;
+            final_damping_active = false;
             reset_requested = true;
             paused = false;
         } else if (word == "passive" || word == "damping") {
@@ -1406,6 +1434,15 @@ private:
             loco_active = false;
             passive_active = true;
             dance_active = false;
+            final_damping_active = false;
+            paused = false;
+        } else if (word == "final" || word == "finaldamping" || word == "final_damping" ||
+                   word == "fail_safe" || word == "failsafe") {
+            cmd = {0.0f, 0.0f, 0.0f};
+            loco_active = false;
+            passive_active = false;
+            dance_active = false;
+            final_damping_active = true;
             paused = false;
         } else if (word == "dance" || word == "beyond" || word == "beyondmimic") {
             if (!dance_enabled_) {
@@ -1416,6 +1453,7 @@ private:
             loco_active = false;
             passive_active = false;
             dance_active = true;
+            final_damping_active = false;
             paused = false;
         } else if (word == "zero" || word == "x") {
             cmd = {0.0f, 0.0f, 0.0f};
@@ -1435,41 +1473,55 @@ private:
     Clock::time_point last_packet_t_{};
 };
 
-const char* viewer_mode_label(bool loco, bool passive, bool dance)
+const char* viewer_mode_label(bool loco, bool passive, bool dance, bool final_damping)
 {
+    if (final_damping) return "FINAL_DAMPING";
     if (passive) return "PASSIVE";
     if (dance) return "DANCE";
     return loco ? "LOCO" : "STAND";
 }
 
-magicbot_loco::ControlMode viewer_control_mode(bool loco, bool passive, bool dance)
+magicbot_loco::ControlMode viewer_control_mode(bool loco, bool passive, bool dance, bool final_damping)
 {
+    if (final_damping) return magicbot_loco::ControlMode::FinalDamping;
     if (passive) return magicbot_loco::ControlMode::Passive;
     if (dance) return magicbot_loco::ControlMode::Dance;
     return loco ? magicbot_loco::ControlMode::Loco : magicbot_loco::ControlMode::Stand;
 }
 
-magicbot_loco::ModeRequest viewer_mode_request(bool loco, bool passive, bool dance)
+magicbot_loco::ModeRequest viewer_mode_request(bool loco, bool passive, bool dance, bool final_damping)
 {
-    const magicbot_loco::ControlMode mode = viewer_control_mode(loco, passive, dance);
+    const magicbot_loco::ControlMode mode = viewer_control_mode(loco, passive, dance, final_damping);
     if (mode == magicbot_loco::ControlMode::Dance) {
         return magicbot_loco::ModeRequest::enter_external(mode, "BeyondMimic");
     }
     return magicbot_loco::ModeRequest::enter(mode);
 }
 
-void sync_viewer_mode_flags(magicbot_loco::ControlMode mode, bool& loco, bool& passive, bool& dance)
+void sync_viewer_mode_flags(
+    magicbot_loco::ControlMode mode,
+    bool& loco,
+    bool& passive,
+    bool& dance,
+    bool& final_damping)
 {
+    final_damping = mode == magicbot_loco::ControlMode::FinalDamping;
     passive = mode == magicbot_loco::ControlMode::Passive;
     loco = mode == magicbot_loco::ControlMode::Loco;
     dance = mode == magicbot_loco::ControlMode::Dance;
 }
 
-void print_cmd(const std::array<float, 3>& cmd, bool loco, bool passive, bool dance, bool paused)
+void print_cmd(
+    const std::array<float, 3>& cmd,
+    bool loco,
+    bool passive,
+    bool dance,
+    bool final_damping,
+    bool paused)
 {
     std::printf(
         "[Viewer] mode=%s paused=%s cmd(vx,vy,wz)=[%.2f %.2f %.2f]\n",
-        viewer_mode_label(loco, passive, dance),
+        viewer_mode_label(loco, passive, dance, final_damping),
         paused ? "yes" : "no",
         cmd[0],
         cmd[1],
@@ -1482,6 +1534,7 @@ void handle_key(
     bool& loco_active,
     bool& passive_active,
     bool& dance_active,
+    bool& final_damping_active,
     bool dance_enabled,
     bool& paused,
     bool& follow,
@@ -1501,6 +1554,25 @@ void handle_key(
         loco_active = !loco_active;
         passive_active = false;
         dance_active = false;
+        final_damping_active = false;
+        break;
+    case XK_m:
+    case XK_M:
+        cmd = {0.0f, 0.0f, 0.0f};
+        loco_active = false;
+        passive_active = true;
+        dance_active = false;
+        final_damping_active = false;
+        paused = false;
+        break;
+    case XK_n:
+    case XK_N:
+        cmd = {0.0f, 0.0f, 0.0f};
+        loco_active = false;
+        passive_active = false;
+        dance_active = false;
+        final_damping_active = true;
+        paused = false;
         break;
     case XK_b:
     case XK_B:
@@ -1511,6 +1583,7 @@ void handle_key(
         loco_active = false;
         passive_active = false;
         dance_active = !dance_active;
+        final_damping_active = false;
         if (dance_active) paused = false;
         break;
     case XK_r:
@@ -1518,6 +1591,7 @@ void handle_key(
         reset_requested = true;
         passive_active = false;
         dance_active = false;
+        final_damping_active = false;
         break;
     case XK_f:
     case XK_F:
@@ -1558,7 +1632,7 @@ void handle_key(
     default:
         return;
     }
-    print_cmd(cmd, loco_active, passive_active, dance_active, paused);
+    print_cmd(cmd, loco_active, passive_active, dance_active, final_damping_active, paused);
 }
 
 void process_events(
@@ -1575,6 +1649,7 @@ void process_events(
     bool& loco_active,
     bool& passive_active,
     bool& dance_active,
+    bool& final_damping_active,
     bool dance_enabled,
     bool& paused,
     bool& follow,
@@ -1600,6 +1675,7 @@ void process_events(
                 loco_active,
                 passive_active,
                 dance_active,
+                final_damping_active,
                 dance_enabled,
                 paused,
                 follow,
@@ -2025,6 +2101,7 @@ int main(int argc, char** argv)
         bool loco_active = args.start_loco;
         bool passive_active = false;
         bool dance_active = false;
+        bool final_damping_active = false;
         bool paused = args.paused;
         bool follow = args.follow;
         bool reset_requested = false;
@@ -2057,10 +2134,12 @@ int main(int argc, char** argv)
             std::printf("Beyond : %s\n", resolve_path(root, args.beyond_yaml).string().c_str());
         }
         std::printf(
-            "Keys   : L loco, B beyond/dance, Space pause, R reset, F follow, X zero, W/S vx, Q/E vy, A/D wz, Esc close\n");
+            "Keys   : L loco, M passive, N final damping, B beyond/dance, Space pause, R reset, "
+            "F follow, X zero, W/S vx, Q/E vy, A/D wz, Esc close\n");
         if (udp_input) {
             std::printf(
-                "UDP    : command input on %s:%d, timeout %.2fs (text: vx=0.3 vy=0 wz=0 mode=loco)\n",
+                "UDP    : command input on %s:%d, timeout %.2fs "
+                "(text: vx=0.3 vy=0 wz=0 mode=loco|passive|final_damping)\n",
                 args.udp_bind.c_str(),
                 args.udp_port,
                 args.udp_timeout_s);
@@ -2078,7 +2157,7 @@ int main(int argc, char** argv)
         if (!args.summary_json.empty()) {
             std::printf("Summary: %s\n", resolve_path(root, args.summary_json).string().c_str());
         }
-        print_cmd(cmd, loco_active, passive_active, dance_active, paused);
+        print_cmd(cmd, loco_active, passive_active, dance_active, final_damping_active, paused);
 
         while (running) {
             const auto frame_start = Clock::now();
@@ -2096,6 +2175,7 @@ int main(int argc, char** argv)
                 loco_active,
                 passive_active,
                 dance_active,
+                final_damping_active,
                 dance_enabled,
                 paused,
                 follow,
@@ -2124,8 +2204,16 @@ int main(int argc, char** argv)
                 }
             }
             if (udp_input &&
-                udp_input->poll(cmd, loco_active, passive_active, dance_active, paused, running, reset_requested)) {
-                print_cmd(cmd, loco_active, passive_active, dance_active, paused);
+                udp_input->poll(
+                    cmd,
+                    loco_active,
+                    passive_active,
+                    dance_active,
+                    final_damping_active,
+                    paused,
+                    running,
+                    reset_requested)) {
+                print_cmd(cmd, loco_active, passive_active, dance_active, final_damping_active, paused);
             }
             if (!running) break;
 
@@ -2148,11 +2236,17 @@ int main(int argc, char** argv)
                 for (int i = 0; i < steps_per_frame; ++i) {
                     magicbot_loco::RuntimeTickInput tick_input;
                     tick_input.command.velocity = cmd;
-                    tick_input.mode_request = viewer_mode_request(loco_active, passive_active, dance_active);
+                    tick_input.mode_request =
+                        viewer_mode_request(loco_active, passive_active, dance_active, final_damping_active);
                     tick_input.control_dt_s = static_cast<float>(model->opt.timestep);
                     tick_input.publish_target = true;
                     const auto tick = runtime.tick(tick_input);
-                    sync_viewer_mode_flags(tick.core.telemetry.mode, loco_active, passive_active, dance_active);
+                    sync_viewer_mode_flags(
+                        tick.core.telemetry.mode,
+                        loco_active,
+                        passive_active,
+                        dance_active,
+                        final_damping_active);
                     policy_step = tick.core.telemetry.policy_steps;
                     const auto gravity = tick.core.telemetry.projected_gravity;
                     stats.max_gravity_xy = std::max(
@@ -2240,7 +2334,7 @@ int main(int argc, char** argv)
                 left,
                 sizeof(left),
                 "mode: %s\npause: %s\nsim: %.2fs\nbase: %.2f %.2f %.3f\npolicy steps: %d",
-                viewer_mode_label(loco_active, passive_active, dance_active),
+                viewer_mode_label(loco_active, passive_active, dance_active, final_damping_active),
                 paused ? "yes" : "no",
                 data->time,
                 data->qpos[0],
@@ -2250,7 +2344,7 @@ int main(int argc, char** argv)
             std::snprintf(
                 right,
                 sizeof(right),
-                "cmd vx %.2f\ncmd vy %.2f\ncmd wz %.2f\npush steps %d impulse %s\nperturb %s\nL loco | B dance\nSpace pause | R reset | X zero",
+                "cmd vx %.2f\ncmd vy %.2f\ncmd wz %.2f\npush steps %d impulse %s\nperturb %s\nL loco | M passive | N final\nB dance | Space pause | R reset | X zero",
                 cmd[0],
                 cmd[1],
                 cmd[2],
@@ -2268,7 +2362,7 @@ int main(int argc, char** argv)
                     "[Viewer] wall=%.1f sim=%.2f mode=%s cmd=[%.2f %.2f %.2f] base=[%.2f %.2f %.3f]\n",
                     wall_s,
                     data->time,
-                    viewer_mode_label(loco_active, passive_active, dance_active),
+                    viewer_mode_label(loco_active, passive_active, dance_active, final_damping_active),
                     cmd[0],
                     cmd[1],
                     cmd[2],
@@ -2300,6 +2394,7 @@ int main(int argc, char** argv)
                 loco_active,
                 passive_active,
                 dance_active,
+                final_damping_active,
                 paused,
                 wall_s,
                 push_body_id);
