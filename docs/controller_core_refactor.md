@@ -252,7 +252,10 @@ scripts/run_magicbot_loco_safety_gate_smoke_native.sh
 
 This verifies explicit dry-run policy loading, the default dry-run mode, and
 that `--run` is rejected before any robot connection path unless
-`--allow-loco` is present.
+`--allow-loco` is present. It also verifies several no-robot CLI safety gates:
+only one main mode may be selected, `--input-check` requires an input source,
+and live keyboard/gamepad/UDP inputs remain mutually exclusive before any robot
+connection path starts.
 
 Real-runner external-policy gate smoke (no robot connection):
 

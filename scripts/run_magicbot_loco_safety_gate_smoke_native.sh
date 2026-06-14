@@ -44,13 +44,26 @@ done
 dry_log="$(mktemp /tmp/magicbot_loco_safety_dry_XXXXXX.log)"
 default_log="$(mktemp /tmp/magicbot_loco_safety_default_XXXXXX.log)"
 blocked_log="$(mktemp /tmp/magicbot_loco_safety_blocked_XXXXXX.log)"
+exclusive_log="$(mktemp /tmp/magicbot_loco_safety_exclusive_XXXXXX.log)"
+input_source_log="$(mktemp /tmp/magicbot_loco_safety_input_source_XXXXXX.log)"
+live_input_log="$(mktemp /tmp/magicbot_loco_safety_live_input_XXXXXX.log)"
 
 cleanup() {
     if [[ "${keep_log}" -eq 0 ]]; then
-        rm -f "${dry_log}" "${default_log}" "${blocked_log}"
+        rm -f "${dry_log}" "${default_log}" "${blocked_log}" \
+            "${exclusive_log}" "${input_source_log}" "${live_input_log}"
     fi
 }
 trap cleanup EXIT
+
+assert_no_robot_path() {
+    local log_path="$1"
+    if rg -q '\[MagicBot\]|\[ConnectCheck\]|\[ReadState\]|\[State\] Robot state ready|\[Stage\]|\[Final\]|MagicBot SDK initialize failed|SetMotionControlLevel|LowLevel controller initialize' "${log_path}"; then
+        echo "[Smoke][ERROR] blocked command appears to have entered robot connection path" >&2
+        sed -n '1,180p' "${log_path}" >&2
+        exit 1
+    fi
+}
 
 echo "[Smoke] Checking explicit dry-run"
 "${RUNNER}" --dry-run >"${dry_log}" 2>&1
@@ -81,15 +94,53 @@ if ! rg -q 'refusing ONNX loco without --allow-loco' "${blocked_log}"; then
     sed -n '1,180p' "${blocked_log}" >&2
     exit 1
 fi
-if rg -q 'initialize|connect|LowLevel|Robot state ready' "${blocked_log}"; then
-    echo "[Smoke][ERROR] blocked --run appears to have entered robot connection path" >&2
-    sed -n '1,180p' "${blocked_log}" >&2
+assert_no_robot_path "${blocked_log}"
+
+echo "[Smoke] Checking main modes are mutually exclusive before connection"
+if "${RUNNER}" --connect-check --read-state >"${exclusive_log}" 2>&1; then
+    echo "[Smoke][ERROR] mutually exclusive modes unexpectedly succeeded" >&2
+    sed -n '1,180p' "${exclusive_log}" >&2
     exit 1
 fi
+if ! rg -q 'use only one of --dry-run, --connect-check, --read-state, --run, --input-check, --debug-entry-only' "${exclusive_log}"; then
+    echo "[Smoke][ERROR] exclusive-mode failure did not report mode gate" >&2
+    sed -n '1,180p' "${exclusive_log}" >&2
+    exit 1
+fi
+assert_no_robot_path "${exclusive_log}"
+
+echo "[Smoke] Checking --input-check requires an input source"
+if "${RUNNER}" --input-check >"${input_source_log}" 2>&1; then
+    echo "[Smoke][ERROR] --input-check without input source unexpectedly succeeded" >&2
+    sed -n '1,180p' "${input_source_log}" >&2
+    exit 1
+fi
+if ! rg -q -- '--input-check requires --keyboard-control, --gamepad-control or --udp-control' "${input_source_log}"; then
+    echo "[Smoke][ERROR] input-check failure did not report input-source gate" >&2
+    sed -n '1,180p' "${input_source_log}" >&2
+    exit 1
+fi
+assert_no_robot_path "${input_source_log}"
+
+echo "[Smoke] Checking live input sources are mutually exclusive before connection"
+if "${RUNNER}" --run --allow-loco --keyboard-control --udp-control --duration 0.01 >"${live_input_log}" 2>&1; then
+    echo "[Smoke][ERROR] multiple live input sources unexpectedly succeeded" >&2
+    sed -n '1,180p' "${live_input_log}" >&2
+    exit 1
+fi
+if ! rg -q -- 'use only one of --keyboard-control, --gamepad-control or --udp-control' "${live_input_log}"; then
+    echo "[Smoke][ERROR] live-input failure did not report exclusivity gate" >&2
+    sed -n '1,180p' "${live_input_log}" >&2
+    exit 1
+fi
+assert_no_robot_path "${live_input_log}"
 
 echo "[Smoke] PASSED real-runner safety gates"
 if [[ "${keep_log}" -eq 1 ]]; then
     echo "[Smoke] dry_log=${dry_log}"
     echo "[Smoke] default_log=${default_log}"
     echo "[Smoke] blocked_log=${blocked_log}"
+    echo "[Smoke] exclusive_log=${exclusive_log}"
+    echo "[Smoke] input_source_log=${input_source_log}"
+    echo "[Smoke] live_input_log=${live_input_log}"
 fi
