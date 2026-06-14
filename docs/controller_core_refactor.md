@@ -196,6 +196,19 @@ responsible only for state/command I/O.
 
 ## Validation commands
 
+No-hardware shared-runtime suite:
+
+```bash
+scripts/run_shared_runtime_smoke_suite_native.sh
+```
+
+This composes the focused checks below: shared parser/mode/core checks,
+pure-sim closed-loop disturbance, native viewer HTTP/UDP/external-policy and
+remote perturb paths, Python-facing viewer compatibility paths, and the
+real-runner no-robot safety/input gates. The suite only orchestrates existing
+scripts; control, policy, mode, safety, and adapter behavior stay in the shared
+runtime being tested.
+
 Shared text-control parser check:
 
 ```bash
