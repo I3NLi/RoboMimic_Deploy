@@ -449,9 +449,22 @@ void set_live_input_mode_request(LiveInputState& out, ml::ModeRequest request)
     out.mode_request = request;
 }
 
-void apply_live_input_action_effect(LiveInputState& out, const ml::TextControlActionEffect& effect)
+void apply_live_input_action_effect(
+    LiveInputState& out,
+    const ml::TextControlActionEffect& effect,
+    std::array<float, 3>* command = nullptr,
+    bool* paused = nullptr)
 {
-    if (effect.stop) {
+    ml::TextControlIntentState intent;
+    if (command != nullptr) intent.command = *command;
+    if (paused != nullptr) intent.paused = *paused;
+    intent.running = !out.stop_requested;
+
+    (void)ml::apply_text_control_effect_to_intent(intent, effect);
+
+    if (command != nullptr) *command = intent.command;
+    if (paused != nullptr) *paused = intent.paused;
+    if (!intent.running) {
         out.stop_requested = true;
     }
     if (effect.toggle_loco) {
@@ -463,9 +476,13 @@ void apply_live_input_action_effect(LiveInputState& out, const ml::TextControlAc
     set_live_input_mode_request(out, ml::mode_request_for_text_control_effect(effect));
 }
 
-void set_live_input_action_request(LiveInputState& out, ml::TextControlAction action)
+void set_live_input_action_request(
+    LiveInputState& out,
+    ml::TextControlAction action,
+    std::array<float, 3>* command = nullptr,
+    bool* paused = nullptr)
 {
-    apply_live_input_action_effect(out, ml::text_control_action_effect(action));
+    apply_live_input_action_effect(out, ml::text_control_action_effect(action), command, paused);
 }
 
 bool live_input_requested_mode(const LiveInputState& input, ml::ControlMode mode)
@@ -569,38 +586,32 @@ private:
         switch (ch) {
         case 3:
         case 27:
-            out.stop_requested = true;
+            set_live_input_action_request(out, ml::TextControlAction::Stop, &command_, &paused_);
             out.changed = true;
             return;
         case 'l':
         case 'L':
-            set_live_input_action_request(out, ml::TextControlAction::ToggleLoco);
-            paused_ = false;
+            set_live_input_action_request(out, ml::TextControlAction::ToggleLoco, &command_, &paused_);
             break;
         case 'b':
         case 'B':
-            set_live_input_action_request(out, ml::TextControlAction::Dance);
-            paused_ = false;
+            set_live_input_action_request(out, ml::TextControlAction::Dance, &command_, &paused_);
             break;
         case 't':
         case 'T':
-            set_live_input_action_request(out, ml::TextControlAction::Skill);
-            paused_ = false;
+            set_live_input_action_request(out, ml::TextControlAction::Skill, &command_, &paused_);
             break;
         case 'm':
         case 'M':
-            set_live_input_action_request(out, ml::TextControlAction::Passive);
-            paused_ = false;
+            set_live_input_action_request(out, ml::TextControlAction::Passive, &command_, &paused_);
             break;
         case 'f':
         case 'F':
-            set_live_input_action_request(out, ml::TextControlAction::FinalDamping);
-            paused_ = false;
+            set_live_input_action_request(out, ml::TextControlAction::FinalDamping, &command_, &paused_);
             break;
         case 'r':
         case 'R':
-            set_live_input_action_request(out, ml::TextControlAction::ResetStand);
-            paused_ = false;
+            set_live_input_action_request(out, ml::TextControlAction::ResetStand, &command_, &paused_);
             break;
         case 'w':
         case 'W':
@@ -629,12 +640,16 @@ private:
         case 'x':
         case 'X':
         case '0':
-            command_ = {0.0f, 0.0f, 0.0f};
+            set_live_input_action_request(out, ml::TextControlAction::Zero, &command_, &paused_);
             break;
         case ' ':
         case 'p':
         case 'P':
-            paused_ = !paused_;
+            set_live_input_action_request(
+                out,
+                paused_ ? ml::TextControlAction::Resume : ml::TextControlAction::Pause,
+                &command_,
+                &paused_);
             break;
         default:
             return;
@@ -689,6 +704,9 @@ public:
             axis_command(args_.gamepad_axis_vy, args_.gamepad_axis_vy_sign),
             axis_command(args_.gamepad_axis_wz, args_.gamepad_axis_wz_sign),
         };
+        if (out.mode_request.requested && out.mode_request.mode != ml::ControlMode::Loco) {
+            out.command = {0.0f, 0.0f, 0.0f};
+        }
         if (!deadman_pressed) {
             out.command = {0.0f, 0.0f, 0.0f};
             out.zeroed_by_deadman = true;
@@ -714,34 +732,33 @@ private:
             buttons_[event.number] = event.value ? 1 : 0;
             out.changed = true;
             if (args_.gamepad_stop_button >= 0 && event.number == args_.gamepad_stop_button && event.value) {
-                out.stop_requested = true;
+                set_live_input_action_request(out, ml::TextControlAction::Stop, nullptr, &paused_);
             }
             if (event.value) {
                 if (args_.gamepad_loco_button >= 0 && event.number == args_.gamepad_loco_button) {
-                    paused_ = false;
-                    set_live_input_action_request(out, ml::TextControlAction::Loco);
+                    set_live_input_action_request(out, ml::TextControlAction::Loco, nullptr, &paused_);
                 }
                 if (args_.gamepad_stand_button >= 0 && event.number == args_.gamepad_stand_button) {
-                    paused_ = false;
-                    set_live_input_action_request(out, ml::TextControlAction::Stand);
+                    set_live_input_action_request(out, ml::TextControlAction::Stand, nullptr, &paused_);
                 }
                 if (args_.gamepad_zero_button >= 0 && event.number == args_.gamepad_zero_button) {
-                    paused_ = true;
+                    set_live_input_action_request(out, ml::TextControlAction::Pause, nullptr, &paused_);
                 }
                 if (args_.gamepad_pause_button >= 0 && event.number == args_.gamepad_pause_button) {
-                    paused_ = !paused_;
+                    set_live_input_action_request(
+                        out,
+                        paused_ ? ml::TextControlAction::Resume : ml::TextControlAction::Pause,
+                        nullptr,
+                        &paused_);
                 }
                 if (args_.gamepad_reset_button >= 0 && event.number == args_.gamepad_reset_button) {
-                    paused_ = false;
-                    set_live_input_action_request(out, ml::TextControlAction::ResetStand);
+                    set_live_input_action_request(out, ml::TextControlAction::ResetStand, nullptr, &paused_);
                 }
                 if (args_.gamepad_dance_button >= 0 && event.number == args_.gamepad_dance_button) {
-                    paused_ = false;
-                    set_live_input_action_request(out, ml::TextControlAction::Dance);
+                    set_live_input_action_request(out, ml::TextControlAction::Dance, nullptr, &paused_);
                 }
                 if (args_.gamepad_skill_button >= 0 && event.number == args_.gamepad_skill_button) {
-                    paused_ = false;
-                    set_live_input_action_request(out, ml::TextControlAction::Skill);
+                    set_live_input_action_request(out, ml::TextControlAction::Skill, nullptr, &paused_);
                 }
             }
         }
@@ -858,16 +875,7 @@ private:
     void handle_action(ml::TextControlAction action, LiveInputState& out, std::array<float, 3>& cmd)
     {
         const ml::TextControlActionEffect effect = ml::text_control_action_effect(action);
-        if (effect.zero_command) {
-            cmd = {0.0f, 0.0f, 0.0f};
-        }
-        if (effect.pause) {
-            paused_ = true;
-        }
-        if (effect.unpause) {
-            paused_ = false;
-        }
-        apply_live_input_action_effect(out, effect);
+        apply_live_input_action_effect(out, effect, &cmd, &paused_);
     }
 
     const Args& args_;

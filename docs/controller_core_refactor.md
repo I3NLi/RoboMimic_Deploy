@@ -318,7 +318,10 @@ scripts/run_magicbot_loco_input_check_smoke_native.sh
 This sends UDP text-control packets through `--input-check`, verifies LOCO,
 PASSIVE, and FINAL_DAMPING are observed, verifies DANCE/SKILL stay gated by
 default, and guards keyboard/gamepad/UDP absolute mode inputs against bypassing
-the shared text-control action helpers.
+the shared text-control action helpers. It also guards that the real live-input
+helper applies `TextControlIntentState` semantics for zero-command,
+pause/resume, stop, and reset requests instead of reimplementing those mutations
+inside each input source.
 
 Real-runner safety-gate smoke (no robot connection):
 

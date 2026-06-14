@@ -110,6 +110,14 @@ if re.search(r"out\\.toggle_loco_requested\\s*=", block):
     sys.exit(1)
 
 helper_start, helper_end = function_extent("apply_live_input_action_effect")
+helper_body = source[helper_start:helper_end]
+if "TextControlIntentState intent" not in helper_body:
+    print("[Smoke][ERROR] real input helper must build a shared TextControlIntentState", file=sys.stderr)
+    sys.exit(1)
+if "apply_text_control_effect_to_intent(intent, effect)" not in helper_body:
+    print("[Smoke][ERROR] real input helper must apply shared text-control intent semantics", file=sys.stderr)
+    sys.exit(1)
+
 for field in ("toggle_loco_requested", "reset_stand_requested"):
     for assignment in re.finditer(rf"out\\.{field}\\s*=", source):
         if not (helper_start <= assignment.start() < helper_end):
@@ -131,6 +139,16 @@ if "reset-stand input missing shared mode request" not in source:
 if "mode_request_for_control_mode(ml::ControlMode::Stand" in source:
     print("[Smoke][ERROR] real runner reset branch must not rebuild stand requests locally", file=sys.stderr)
     sys.exit(1)
+
+udp_action_start, udp_action_end = function_extent("handle_action")
+udp_action_body = source[udp_action_start:udp_action_end]
+for local_check in ("effect.zero_command", "effect.pause", "effect.unpause"):
+    if local_check in udp_action_body:
+        print(
+            "[Smoke][ERROR] UDP live input must not duplicate shared zero/pause/unpause semantics",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 PY
 
 if [[ -z "${udp_port}" ]]; then
