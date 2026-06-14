@@ -100,6 +100,47 @@ if errors:
     sys.exit(1)
 PY
 
+echo "[Smoke] Checking backend adapters stay I/O-only"
+python3 - "${CPP_DIR}" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+cpp_dir = Path(sys.argv[1])
+adapter_headers = [
+    "mujoco_sim_adapter.h",
+    "magicbot_real_adapter.h",
+]
+
+forbidden = [
+    (re.compile(r"#\s*include\s*[<\"].*(controller_runtime|mode_manager|policy_adapter|beyond_mimic|onnx_skill)", re.I), "control/policy include"),
+    (re.compile(r"\b(ControllerCore|ControllerRuntime|ModeManager|ModeRequest|ControlMode|ExternalPolicyAdapter)\b"), "control brain symbol"),
+    (re.compile(r"\b(OnnxLocoPolicy|MotionSafety)\b"), "policy/safety symbol"),
+    (re.compile(r"\b(torque_limited_target|clamp_and_rate_limit|gravity_orientation)\b"), "shared target/safety helper"),
+    (re.compile(r"\.infer\s*\("), "local policy inference"),
+    (re.compile(r"safety\.check"), "local safety check"),
+]
+
+errors = []
+for name in adapter_headers:
+    path = cpp_dir / "include" / name
+    if not path.is_file():
+        errors.append(f"missing adapter header: {name}")
+        continue
+    text = path.read_text(encoding="utf-8")
+    for pattern, label in forbidden:
+        match = pattern.search(text)
+        if match:
+            line = text.count("\n", 0, match.start()) + 1
+            errors.append(f"{name}:{line}: {label}: {match.group(0)}")
+
+if errors:
+    print("[Smoke][ERROR] backend adapters must stay I/O-only; policy, mode, safety, and target limiting belong in ControllerCore", file=sys.stderr)
+    for error in errors:
+        print("  " + error, file=sys.stderr)
+    sys.exit(1)
+PY
+
 ONNXRUNTIME_DIR="${ONNXRUNTIME_DIR:-/home/hiyio/unitree_rl_lab/deploy/thirdparty/onnxruntime-linux-x64-1.22.0}"
 ONNXRUNTIME_INCLUDE_DIR="${ONNXRUNTIME_INCLUDE_DIR:-${ONNXRUNTIME_DIR}/include}"
 ONNXRUNTIME_LIB="${ONNXRUNTIME_LIB:-}"

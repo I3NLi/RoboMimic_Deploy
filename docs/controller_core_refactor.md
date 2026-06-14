@@ -325,6 +325,10 @@ controller headers and fails if `ControllerCore`, `ControllerRuntime`,
 loco safety/limit utilities include MuJoCo, MagicBot SDK, DDS, direct MuJoCo
 `ctrl` writes, or real SDK publishers. Backend details must remain in
 `MujocoSimAdapter` / `MagicbotRealAdapter` and entrypoint code.
+The same smoke scans the concrete backend adapter headers and fails if they pull
+in control/runtime/policy headers or use policy inference, mode manager, motion
+safety, or shared target-limit helpers; adapters are allowed to translate
+`RobotSnapshot` / `JointTarget` to backend I/O only.
 
 Real-runner UDP input smoke (no robot connection):
 
