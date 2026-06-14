@@ -52,6 +52,54 @@ if [[ ! -f "${CONFIG}" ]]; then
     exit 1
 fi
 
+echo "[Smoke] Checking shared controller headers stay backend-free"
+python3 - "${CPP_DIR}" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+cpp_dir = Path(sys.argv[1])
+shared_headers = [
+    "controller_core.h",
+    "controller_runtime.h",
+    "fsm_external_policy_adapter.h",
+    "magicbot_loco_core.h",
+    "mode_manager.h",
+    "native_fsm_policy_types.h",
+    "policy_adapter.h",
+    "robot_adapter.h",
+    "text_control_command.h",
+]
+
+forbidden = [
+    (re.compile(r"#\s*include\s*[<\"].*mujoco", re.I), "MuJoCo include"),
+    (re.compile(r"#\s*include\s*[<\"].*(magic_robot|unitree|dds|magicbot_loco_sdk_adapter)", re.I), "real SDK/DDS include"),
+    (re.compile(r"\b(mjModel|mjData|mj_step|mj_forward|mj_name2id|mju_[A-Za-z0-9_]+)\b"), "MuJoCo API symbol"),
+    (re.compile(r"\b(MagicbotSdkAdapter|SdkRobotState|SetMotionControlLevel|LowLevel)\b"), "real SDK symbol"),
+    (re.compile(r"\b(publish_sdk24_command|publish_damping)\b"), "real command publisher"),
+    (re.compile(r"data->ctrl\s*\["), "direct MuJoCo ctrl write"),
+]
+
+errors = []
+for name in shared_headers:
+    path = cpp_dir / "include" / name
+    if not path.is_file():
+        errors.append(f"missing shared header: {name}")
+        continue
+    text = path.read_text(encoding="utf-8")
+    for pattern, label in forbidden:
+        match = pattern.search(text)
+        if match:
+            line = text.count("\n", 0, match.start()) + 1
+            errors.append(f"{name}:{line}: {label}: {match.group(0)}")
+
+if errors:
+    print("[Smoke][ERROR] shared ControllerCore boundary must stay backend-free", file=sys.stderr)
+    for error in errors:
+        print("  " + error, file=sys.stderr)
+    sys.exit(1)
+PY
+
 ONNXRUNTIME_DIR="${ONNXRUNTIME_DIR:-/home/hiyio/unitree_rl_lab/deploy/thirdparty/onnxruntime-linux-x64-1.22.0}"
 ONNXRUNTIME_INCLUDE_DIR="${ONNXRUNTIME_INCLUDE_DIR:-${ONNXRUNTIME_DIR}/include}"
 ONNXRUNTIME_LIB="${ONNXRUNTIME_LIB:-}"

@@ -319,6 +319,12 @@ behavior, explicit held-target forwarding, shared motion-safety triggering, and
 STAND plus external-policy target-rate clamp checks inside `ControllerCore`. It
 registers fake DANCE/SKILL external policies to verify keyed policy selection,
 reset/step calls, entry command zeroing, and completion back to a damping mode.
+Before building the check binary, the script statically scans the shared
+controller headers and fails if `ControllerCore`, `ControllerRuntime`,
+`ModeManager`, policy adapters, `RobotAdapter`, text-control helpers, or shared
+loco safety/limit utilities include MuJoCo, MagicBot SDK, DDS, direct MuJoCo
+`ctrl` writes, or real SDK publishers. Backend details must remain in
+`MujocoSimAdapter` / `MagicbotRealAdapter` and entrypoint code.
 
 Real-runner UDP input smoke (no robot connection):
 
