@@ -68,7 +68,8 @@ not inspect mode requests, run policies, or perform safety checks.
 
 `mujoco_sim_adapter.h` is the first concrete sim adapter. It reads MuJoCo
 `qpos` / `qvel` into `RobotSnapshot` and writes `JointTarget` as PD torques into
-`mjData::ctrl`. It does not step the simulation, handle viewer input, or run
+`mjData::ctrl`, preserving the shared torque-limit clamp before MuJoCo actuator
+range clamping. It does not step the simulation, handle viewer input, or run
 policy logic.
 
 `dual_inference_rate.cpp` now routes pure-sim through `ControllerRuntime` and
@@ -87,6 +88,13 @@ flow is preserved: dry-run, connect-check, read-state, debug/passive damping,
 stand interpolation, and PD stand-only remain outside high-risk LOCO execution.
 LOCO still requires the explicit `--allow-loco` gate.
 
+`mujoco_loco_viewer.cpp` now routes its closed-loop STAND/LOCO/PASSIVE execution
+through the same `ControllerRuntime` and `MujocoSimAdapter`. Viewer input, UDP
+commands, pause/reset, camera streaming, rendering, and ground correction remain
+viewer responsibilities; ONNX inference, mode requests, target limiting, gains,
+and MuJoCo PD torque publication now use the shared runtime path. Viewer-specific
+initial-pose YAML overrides still feed the shared core default target and gains.
+
 The first `ControllerCore` implementation supports `PASSIVE`, `STAND`, `LOCO`,
 and `FINAL_DAMPING`. `DANCE` and `SKILL` are represented in the shared mode enum
 but intentionally reject requests until the skill policy adapter is wired.
@@ -97,8 +105,6 @@ state/command I/O.
 
 ## Next cuts
 
-1. Route MuJoCo viewer closed-loop code through `MujocoSimAdapter` and the same
-   `ControllerCore` API.
-2. Wrap existing Dance/BeyondMimic policies behind `ExternalPolicyAdapter`.
-3. Move viewer mode/control API code to send requests only; it must not duplicate
+1. Wrap existing Dance/BeyondMimic policies behind `ExternalPolicyAdapter`.
+2. Move viewer mode/control API code to send requests only; it must not duplicate
    core policy or safety logic.

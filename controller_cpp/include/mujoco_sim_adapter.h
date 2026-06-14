@@ -73,6 +73,7 @@ public:
             const double target_q =
                 (options_.zero_head_target && i == kHeadMotorIndex) ? 0.0 : static_cast<double>(target.q[i]);
             double tau = (target_q - q) * target.gains.kp[i] - dq * target.gains.kd[i];
+            clamp_tau_limit(i, target.gains.tau_limit, tau);
             clamp_actuator(i, tau);
             data_->ctrl[i] = tau;
         }
@@ -100,6 +101,12 @@ public:
 
 private:
     static constexpr int kHeadMotorIndex = 13;
+
+    void clamp_tau_limit(int joint_id, const JointArray& tau_limit, double& tau) const
+    {
+        const double limit = std::max(0.0f, tau_limit[static_cast<size_t>(joint_id)]);
+        if (limit > 0.0) tau = std::clamp(tau, -limit, limit);
+    }
 
     void clamp_actuator(int actuator_id, double& tau) const
     {

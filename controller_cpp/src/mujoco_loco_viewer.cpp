@@ -1,16 +1,23 @@
+#include "controller_core.h"
+#include "controller_runtime.h"
 #include "magicbot_loco_core.h"
+#include "mujoco_sim_adapter.h"
 
 #include <algorithm>
 #include <array>
+#include <cerrno>
+#include <cctype>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <fcntl.h>
 #include <memory>
 #include <mutex>
 #include <netinet/in.h>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <sys/select.h>
@@ -45,8 +52,6 @@ using Clock = std::chrono::steady_clock;
 
 namespace {
 
-constexpr int kHeadMotorIndex = 13;
-
 struct Args {
     std::string config = "policies/loco_mode/config/LocoMode_lowKp.yaml";
     std::string mujoco_yaml = "configs/simulation/mujoco.yaml";
@@ -63,6 +68,10 @@ struct Args {
     bool paused = true;
     bool realtime = true;
     bool follow = true;
+    bool udp_control = false;
+    std::string udp_bind = "0.0.0.0";
+    int udp_port = 15000;
+    double udp_timeout_s = 0.35;
     bool camera_stream = false;
     bool camera_stream_set = false;
     std::string camera_name = "head_rgba_camera";
@@ -420,6 +429,7 @@ void usage(const char* argv0)
         "Usage: %s [--config PATH] [--mujoco-yaml PATH] [--xml PATH]\n"
         "          [--initial-pose-yaml PATH] [--loco] [--paused|--unpaused]\n"
         "          [--duration SEC] [--width N] [--height N]\n"
+        "          [--udp-control] [--udp-bind IP] [--udp-port N] [--udp-timeout-s SEC]\n"
         "          [--camera-stream] [--camera-port N] [--camera-name NAME]\n"
         "          [--camera-ros2] [--ros2-topic-rgb TOPIC] [--ros2-topic-rgba TOPIC]\n"
         "\n"
@@ -472,6 +482,14 @@ Args parse_args(int argc, char** argv)
             args.realtime = false;
         } else if (arg == "--no-follow") {
             args.follow = false;
+        } else if (arg == "--udp-control") {
+            args.udp_control = true;
+        } else if (arg == "--udp-bind") {
+            args.udp_bind = need_value(i, argc, argv);
+        } else if (arg == "--udp-port") {
+            args.udp_port = std::atoi(need_value(i, argc, argv).c_str());
+        } else if (arg == "--udp-timeout-s") {
+            args.udp_timeout_s = std::atof(need_value(i, argc, argv).c_str());
         } else if (arg == "--camera-stream") {
             args.camera_stream = true;
             args.camera_stream_set = true;
@@ -533,6 +551,8 @@ Args parse_args(int argc, char** argv)
     args.height = std::max(240, args.height);
     args.control_decimation = std::max(1, args.control_decimation);
     args.render_fps = std::max(1, args.render_fps);
+    args.udp_port = std::clamp(args.udp_port, 1, 65535);
+    args.udp_timeout_s = std::clamp(args.udp_timeout_s, 0.02, 10.0);
     args.camera_port = std::max(1, args.camera_port);
     args.camera_width = std::max(64, args.camera_width);
     args.camera_height = std::max(64, args.camera_height);
@@ -771,68 +791,6 @@ void reset_sim(
     mj_forward(model, data);
 }
 
-magicbot_loco::JointArray read_q(const mjData* data, const std::vector<int>& qpos_idx)
-{
-    magicbot_loco::JointArray out{};
-    for (int i = 0; i < magicbot_loco::kNumJoints; ++i) out[i] = static_cast<float>(data->qpos[7 + qpos_idx[i]]);
-    return out;
-}
-
-magicbot_loco::JointArray read_dq(const mjData* data, const std::vector<int>& qvel_idx)
-{
-    magicbot_loco::JointArray out{};
-    for (int i = 0; i < magicbot_loco::kNumJoints; ++i) out[i] = static_cast<float>(data->qvel[6 + qvel_idx[i]]);
-    return out;
-}
-
-std::array<float, 4> read_quat(const mjData* data)
-{
-    return {
-        static_cast<float>(data->qpos[3]),
-        static_cast<float>(data->qpos[4]),
-        static_cast<float>(data->qpos[5]),
-        static_cast<float>(data->qpos[6]),
-    };
-}
-
-std::array<float, 3> read_ang_vel(const mjModel* model, const mjData* data, int body_id)
-{
-    (void)model;
-    (void)body_id;
-    return {
-        static_cast<float>(data->qvel[3]),
-        static_cast<float>(data->qvel[4]),
-        static_cast<float>(data->qvel[5]),
-    };
-}
-
-void apply_pd(
-    mjModel* model,
-    mjData* data,
-    const std::vector<int>& qpos_idx,
-    const std::vector<int>& qvel_idx,
-    const magicbot_loco::JointArray& target,
-    const magicbot_loco::JointArray& kp,
-    const magicbot_loco::JointArray& kd,
-    const magicbot_loco::JointArray& tau_limit)
-{
-    for (int i = 0; i < model->nu && i < magicbot_loco::kNumJoints; ++i) {
-        const double q = data->qpos[7 + qpos_idx[i]];
-        const double dq = data->qvel[6 + qvel_idx[i]];
-        const double target_q = (i == kHeadMotorIndex) ? 0.0 : static_cast<double>(target[static_cast<size_t>(i)]);
-        const double lim = std::max(0.0f, tau_limit[static_cast<size_t>(i)]);
-        double tau = (target_q - q) * static_cast<double>(kp[static_cast<size_t>(i)]) -
-                     dq * static_cast<double>(kd[static_cast<size_t>(i)]);
-        tau = std::clamp(tau, -lim, lim);
-        if (model->actuator_ctrllimited && model->actuator_ctrllimited[i]) {
-            const double lo = model->actuator_ctrlrange[2 * i + 0];
-            const double hi = model->actuator_ctrlrange[2 * i + 1];
-            tau = std::clamp(tau, lo, hi);
-        }
-        data->ctrl[i] = std::isfinite(tau) ? tau : 0.0;
-    }
-}
-
 XGlWindow create_window(int width, int height)
 {
     XGlWindow out;
@@ -898,11 +856,223 @@ void destroy_window(XGlWindow& win)
 
 float clamp_cmd(float v) { return std::clamp(v, -1.0f, 1.0f); }
 
-void print_cmd(const std::array<float, 3>& cmd, bool loco, bool paused)
+std::string lower_copy(std::string value)
+{
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+    return value;
+}
+
+bool parse_float_token(const std::string& token, float& value)
+{
+    char* end = nullptr;
+    errno = 0;
+    const float parsed = std::strtof(token.c_str(), &end);
+    if (end == token.c_str() || *end != '\0' || errno == ERANGE) return false;
+    value = parsed;
+    return true;
+}
+
+class ViewerUdpCommandInput {
+public:
+    explicit ViewerUdpCommandInput(const Args& args)
+        : args_(args)
+    {
+        fd_ = socket(AF_INET, SOCK_DGRAM, 0);
+        if (fd_ < 0) throw std::runtime_error(std::string("viewer udp socket failed: ") + std::strerror(errno));
+
+        const int flags = fcntl(fd_, F_GETFL, 0);
+        if (flags < 0 || fcntl(fd_, F_SETFL, flags | O_NONBLOCK) != 0) {
+            throw std::runtime_error(std::string("viewer udp fcntl failed: ") + std::strerror(errno));
+        }
+
+        sockaddr_in addr{};
+        addr.sin_family = AF_INET;
+        addr.sin_port = htons(static_cast<uint16_t>(args_.udp_port));
+        if (args_.udp_bind.empty() || args_.udp_bind == "0.0.0.0") {
+            addr.sin_addr.s_addr = htonl(INADDR_ANY);
+        } else if (inet_pton(AF_INET, args_.udp_bind.c_str(), &addr.sin_addr) != 1) {
+            throw std::runtime_error("invalid --udp-bind address: " + args_.udp_bind);
+        }
+
+        if (bind(fd_, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0) {
+            throw std::runtime_error(
+                "viewer udp bind " + args_.udp_bind + ":" + std::to_string(args_.udp_port) +
+                " failed: " + std::strerror(errno));
+        }
+    }
+
+    ~ViewerUdpCommandInput()
+    {
+        if (fd_ >= 0) close(fd_);
+    }
+
+    bool poll(
+        std::array<float, 3>& cmd,
+        bool& loco_active,
+        bool& passive_active,
+        bool& paused,
+        bool& running,
+        bool& reset_requested)
+    {
+        bool changed = false;
+        while (true) {
+            char buffer[512]{};
+            sockaddr_in src{};
+            socklen_t src_len = sizeof(src);
+            const ssize_t n = recvfrom(
+                fd_, buffer, sizeof(buffer) - 1, 0,
+                reinterpret_cast<sockaddr*>(&src), &src_len);
+            if (n > 0) {
+                buffer[n] = '\0';
+                const auto old_cmd = cmd;
+                const bool old_loco_active = loco_active;
+                const bool old_passive_active = passive_active;
+                const bool old_paused = paused;
+                const bool old_running = running;
+                const bool old_reset_requested = reset_requested;
+                handle_message(
+                    std::string(buffer, static_cast<size_t>(n)),
+                    cmd,
+                    loco_active,
+                    passive_active,
+                    paused,
+                    running,
+                    reset_requested);
+                have_packet_ = true;
+                last_packet_t_ = Clock::now();
+                changed = changed || old_cmd != cmd ||
+                          old_loco_active != loco_active ||
+                          old_passive_active != passive_active ||
+                          old_paused != paused ||
+                          old_running != running || old_reset_requested != reset_requested;
+                continue;
+            }
+            if (n < 0 && errno != EAGAIN && errno != EWOULDBLOCK) {
+                throw std::runtime_error(std::string("viewer udp recvfrom failed: ") + std::strerror(errno));
+            }
+            break;
+        }
+
+        if (have_packet_ && std::chrono::duration<double>(Clock::now() - last_packet_t_).count() > args_.udp_timeout_s) {
+            if (cmd != std::array<float, 3>{0.0f, 0.0f, 0.0f}) {
+                cmd = {0.0f, 0.0f, 0.0f};
+                changed = true;
+            }
+        }
+        return changed;
+    }
+
+private:
+    void handle_message(
+        std::string message,
+        std::array<float, 3>& cmd,
+        bool& loco_active,
+        bool& passive_active,
+        bool& paused,
+        bool& running,
+        bool& reset_requested)
+    {
+        for (char& ch : message) {
+            if (ch == ',' || ch == ';' || ch == '\n' || ch == '\r' || ch == '\t') ch = ' ';
+        }
+
+        int numeric_index = 0;
+        std::istringstream iss(message);
+        std::string token;
+        while (iss >> token) {
+            const auto eq = token.find('=');
+            if (eq != std::string::npos) {
+                const std::string key = lower_copy(token.substr(0, eq));
+                const std::string val = lower_copy(token.substr(eq + 1));
+                float parsed = 0.0f;
+                if ((key == "vx" || key == "x") && parse_float_token(val, parsed)) {
+                    cmd[0] = clamp_cmd(parsed);
+                } else if ((key == "vy" || key == "y") && parse_float_token(val, parsed)) {
+                    cmd[1] = clamp_cmd(parsed);
+                } else if ((key == "wz" || key == "yaw") && parse_float_token(val, parsed)) {
+                    cmd[2] = clamp_cmd(parsed);
+                } else if (key == "mode") {
+                    handle_word(val, cmd, loco_active, passive_active, paused, running, reset_requested);
+                }
+                continue;
+            }
+
+            float parsed = 0.0f;
+            if (numeric_index < 3 && parse_float_token(token, parsed)) {
+                cmd[static_cast<size_t>(numeric_index)] = clamp_cmd(parsed);
+                ++numeric_index;
+                continue;
+            }
+            handle_word(lower_copy(token), cmd, loco_active, passive_active, paused, running, reset_requested);
+        }
+    }
+
+    void handle_word(
+        const std::string& word,
+        std::array<float, 3>& cmd,
+        bool& loco_active,
+        bool& passive_active,
+        bool& paused,
+        bool& running,
+        bool& reset_requested)
+    {
+        if (word == "loco" || word == "run") {
+            if (!loco_active || passive_active) reset_requested = true;
+            loco_active = true;
+            passive_active = false;
+            paused = false;
+        } else if (word == "stand") {
+            cmd = {0.0f, 0.0f, 0.0f};
+            loco_active = false;
+            passive_active = false;
+            reset_requested = true;
+            paused = false;
+        } else if (word == "reset" || word == "restand") {
+            cmd = {0.0f, 0.0f, 0.0f};
+            passive_active = false;
+            reset_requested = true;
+            paused = false;
+        } else if (word == "passive" || word == "damping") {
+            cmd = {0.0f, 0.0f, 0.0f};
+            loco_active = false;
+            passive_active = true;
+            paused = false;
+        } else if (word == "zero" || word == "x") {
+            cmd = {0.0f, 0.0f, 0.0f};
+        } else if (word == "pause") {
+            paused = true;
+        } else if (word == "resume") {
+            paused = false;
+        } else if (word == "stop" || word == "exit") {
+            running = false;
+        }
+    }
+
+    const Args& args_;
+    int fd_{-1};
+    bool have_packet_{false};
+    Clock::time_point last_packet_t_{};
+};
+
+const char* viewer_mode_label(bool loco, bool passive)
+{
+    if (passive) return "PASSIVE";
+    return loco ? "LOCO" : "STAND";
+}
+
+magicbot_loco::ControlMode viewer_control_mode(bool loco, bool passive)
+{
+    if (passive) return magicbot_loco::ControlMode::Passive;
+    return loco ? magicbot_loco::ControlMode::Loco : magicbot_loco::ControlMode::Stand;
+}
+
+void print_cmd(const std::array<float, 3>& cmd, bool loco, bool passive, bool paused)
 {
     std::printf(
         "[Viewer] mode=%s paused=%s cmd(vx,vy,wz)=[%.2f %.2f %.2f]\n",
-        loco ? "LOCO" : "STAND",
+        viewer_mode_label(loco, passive),
         paused ? "yes" : "no",
         cmd[0],
         cmd[1],
@@ -913,11 +1083,11 @@ void handle_key(
     KeySym sym,
     bool& running,
     bool& loco_active,
+    bool& passive_active,
     bool& paused,
     bool& follow,
     bool& reset_requested,
-    std::array<float, 3>& cmd,
-    magicbot_loco::OnnxLocoPolicy& policy)
+    std::array<float, 3>& cmd)
 {
     constexpr float dv = 0.1f;
     switch (sym) {
@@ -930,12 +1100,12 @@ void handle_key(
     case XK_l:
     case XK_L:
         loco_active = !loco_active;
-        policy.reset();
+        passive_active = false;
         break;
     case XK_r:
     case XK_R:
         reset_requested = true;
-        policy.reset();
+        passive_active = false;
         break;
     case XK_f:
     case XK_F:
@@ -976,7 +1146,7 @@ void handle_key(
     default:
         return;
     }
-    print_cmd(cmd, loco_active, paused);
+    print_cmd(cmd, loco_active, passive_active, paused);
 }
 
 void process_events(
@@ -987,11 +1157,11 @@ void process_events(
     MouseState& mouse,
     bool& running,
     bool& loco_active,
+    bool& passive_active,
     bool& paused,
     bool& follow,
     bool& reset_requested,
-    std::array<float, 3>& cmd,
-    magicbot_loco::OnnxLocoPolicy& policy)
+    std::array<float, 3>& cmd)
 {
     while (XPending(win.display) > 0) {
         XEvent event;
@@ -1006,7 +1176,7 @@ void process_events(
             break;
         case KeyPress: {
             KeySym sym = XLookupKeysym(&event.xkey, 0);
-            handle_key(sym, running, loco_active, paused, follow, reset_requested, cmd, policy);
+            handle_key(sym, running, loco_active, passive_active, paused, follow, reset_requested, cmd);
             break;
         }
         case ButtonPress:
@@ -1117,14 +1287,22 @@ int main(int argc, char** argv)
         const fs::path xml_path = resolve_path(root, args.xml);
         const fs::path config_path = resolve_path(root, args.config);
         auto loco_cfg = magicbot_loco::load_loco_config(config_path);
-        magicbot_loco::OnnxLocoPolicy policy(loco_cfg);
-        policy.warmup(20);
+        magicbot_loco::ControllerCoreOptions core_options;
+        core_options.safety.enabled = false;
+        magicbot_loco::ControllerCore core(loco_cfg, core_options);
+        core.warmup(20);
 
         magicbot_loco::JointArray stand_q = loco_cfg.default_motor();
         magicbot_loco::JointArray kp = loco_cfg.kps_motor();
         magicbot_loco::JointArray kd = loco_cfg.kds_motor();
         magicbot_loco::JointArray tau_limit = loco_cfg.tau_limit_motor();
         (void)load_initial_pose(root, args.initial_pose_yaml, stand_q, kp, kd, tau_limit);
+        magicbot_loco::JointGains sim_gains;
+        sim_gains.kp = kp;
+        sim_gains.kd = kd;
+        sim_gains.tau_limit = tau_limit;
+        core.set_gains(sim_gains);
+        core.set_default_target(stand_q);
 
         char error[1024] = {0};
         mjModel* model = mj_loadXML(xml_path.string().c_str(), nullptr, error, sizeof(error));
@@ -1161,7 +1339,6 @@ int main(int argc, char** argv)
 
         const auto qpos_idx = actuator_qpos_indices(model);
         const auto qvel_idx = actuator_qvel_indices(model);
-        const int root_body_id = mj_name2id(model, mjOBJ_BODY, "pelvis");
         const int floor_geom_id = args.ground_correction
                                       ? mj_name2id(model, mjOBJ_GEOM, args.ground_floor_geom.c_str())
                                       : -1;
@@ -1173,6 +1350,12 @@ int main(int argc, char** argv)
                          args.ground_floor_geom.c_str());
         }
         reset_sim(model, data, qpos_idx, args.initial_base_height, stand_q);
+        magicbot_loco::MujocoSimAdapterOptions sim_adapter_options;
+        sim_adapter_options.qpos_idx = qpos_idx;
+        sim_adapter_options.qvel_idx = qvel_idx;
+        magicbot_loco::MujocoSimAdapter sim_adapter(model, data, sim_adapter_options);
+        magicbot_loco::ControllerRuntime runtime(core, sim_adapter);
+        core.reset_policy();
 
         XGlWindow win = create_window(args.width, args.height);
         mjvCamera cam;
@@ -1224,13 +1407,16 @@ int main(int argc, char** argv)
 
         bool running = true;
         bool loco_active = args.start_loco;
+        bool passive_active = false;
         bool paused = args.paused;
         bool follow = args.follow;
         bool reset_requested = false;
         std::array<float, 3> cmd{0.0f, 0.0f, 0.0f};
+        std::unique_ptr<ViewerUdpCommandInput> udp_input;
+        if (args.udp_control) {
+            udp_input = std::make_unique<ViewerUdpCommandInput>(args);
+        }
         MouseState mouse;
-        magicbot_loco::JointArray target = stand_q;
-        magicbot_loco::JointArray previous_raw_target = stand_q;
         int sim_step = 0;
         int policy_step = 0;
         const int steps_per_frame = std::max(1, static_cast<int>(std::round(1.0 / (args.render_fps * args.sim_dt))));
@@ -1246,7 +1432,14 @@ int main(int argc, char** argv)
         std::printf("Config : %s\n", config_path.string().c_str());
         std::printf("ONNX   : %s\n", loco_cfg.policy_path.string().c_str());
         std::printf("Keys   : L loco, Space pause, R reset, F follow, X zero, W/S vx, Q/E vy, A/D wz, Esc close\n");
-        print_cmd(cmd, loco_active, paused);
+        if (udp_input) {
+            std::printf(
+                "UDP    : command input on %s:%d, timeout %.2fs (text: vx=0.3 vy=0 wz=0 mode=loco)\n",
+                args.udp_bind.c_str(),
+                args.udp_port,
+                args.udp_timeout_s);
+        }
+        print_cmd(cmd, loco_active, passive_active, paused);
 
         while (running) {
             const auto frame_start = Clock::now();
@@ -1258,18 +1451,21 @@ int main(int argc, char** argv)
                 mouse,
                 running,
                 loco_active,
+                passive_active,
                 paused,
                 follow,
                 reset_requested,
-                cmd,
-                policy);
+                cmd);
+            if (!running) break;
+            if (udp_input && udp_input->poll(cmd, loco_active, passive_active, paused, running, reset_requested)) {
+                print_cmd(cmd, loco_active, passive_active, paused);
+            }
             if (!running) break;
 
             if (reset_requested) {
                 reset_sim(model, data, qpos_idx, args.initial_base_height, stand_q);
-                target = stand_q;
-                previous_raw_target = stand_q;
-                policy.reset();
+                core.set_default_target(stand_q);
+                core.reset_policy();
                 sim_step = 0;
                 policy_step = 0;
                 reset_requested = false;
@@ -1277,25 +1473,14 @@ int main(int argc, char** argv)
 
             if (!paused) {
                 for (int i = 0; i < steps_per_frame; ++i) {
-                    const bool control_tick = (sim_step % args.control_decimation) == 0;
-                    if (control_tick) {
-                        const auto q = read_q(data, qpos_idx);
-                        const auto dq = read_dq(data, qvel_idx);
-                        if (loco_active) {
-                            const auto quat = read_quat(data);
-                            const auto gravity = magicbot_loco::gravity_orientation(quat);
-                            const auto ang_vel = read_ang_vel(model, data, root_body_id);
-                            auto infer = policy.infer(q, dq, ang_vel, gravity, cmd);
-                            magicbot_loco::JointArray raw = infer.target_motor;
-                            target = magicbot_loco::torque_limited_target(
-                                raw, q, dq, kp, kd, tau_limit, loco_cfg.tau_limit_scale);
-                            previous_raw_target = raw;
-                            ++policy_step;
-                        } else {
-                            target = stand_q;
-                        }
-                    }
-                    apply_pd(model, data, qpos_idx, qvel_idx, target, kp, kd, tau_limit);
+                    magicbot_loco::RuntimeTickInput tick_input;
+                    tick_input.command.velocity = cmd;
+                    tick_input.mode_request =
+                        magicbot_loco::ModeRequest::enter(viewer_control_mode(loco_active, passive_active));
+                    tick_input.control_dt_s = static_cast<float>(model->opt.timestep);
+                    tick_input.publish_target = true;
+                    const auto tick = runtime.tick(tick_input);
+                    policy_step = tick.core.telemetry.policy_steps;
                     mj_step(model, data);
                     if (args.ground_correction) {
                         (void)correct_ground_penetration(
@@ -1359,10 +1544,12 @@ int main(int argc, char** argv)
             std::snprintf(
                 left,
                 sizeof(left),
-                "mode: %s\npause: %s\nsim: %.2fs\nbase z: %.3f\npolicy steps: %d",
-                loco_active ? "LOCO" : "STAND",
+                "mode: %s\npause: %s\nsim: %.2fs\nbase: %.2f %.2f %.3f\npolicy steps: %d",
+                viewer_mode_label(loco_active, passive_active),
                 paused ? "yes" : "no",
                 data->time,
+                data->qpos[0],
+                data->qpos[1],
                 data->qpos[2],
                 policy_step);
             std::snprintf(
@@ -1380,13 +1567,15 @@ int main(int argc, char** argv)
             if (std::chrono::duration<double>(now - last_print).count() >= 1.0) {
                 last_print = now;
                 std::printf(
-                    "[Viewer] wall=%.1f sim=%.2f mode=%s cmd=[%.2f %.2f %.2f] z=%.3f\n",
+                    "[Viewer] wall=%.1f sim=%.2f mode=%s cmd=[%.2f %.2f %.2f] base=[%.2f %.2f %.3f]\n",
                     wall_s,
                     data->time,
-                    loco_active ? "LOCO" : "STAND",
+                    viewer_mode_label(loco_active, passive_active),
                     cmd[0],
                     cmd[1],
                     cmd[2],
+                    data->qpos[0],
+                    data->qpos[1],
                     data->qpos[2]);
                 std::fflush(stdout);
             }

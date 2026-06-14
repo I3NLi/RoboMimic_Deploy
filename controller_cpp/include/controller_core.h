@@ -84,6 +84,21 @@ public:
         have_previous_raw_policy_target_ = false;
     }
 
+    void set_default_target(const JointArray& target)
+    {
+        default_target_ = target;
+        seed_target(target);
+    }
+
+    void set_gains(JointGains gains)
+    {
+        for (int i = 0; i < kNumJoints; ++i) {
+            gains.kp[i] *= options_.kp_scale;
+            gains.kd[i] *= options_.kd_scale;
+        }
+        gains_ = gains;
+    }
+
     void reset_policy()
     {
         loco_policy_.reset();
