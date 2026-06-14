@@ -317,7 +317,8 @@ scripts/run_dual_push_smoke_native.sh --duration 1.0 --keep-summary
 This wraps the native dual-rate runner in pure-sim mode, applies both a
 scheduled force and an impulse to `pelvis`, and checks the summary for
 `pass == true`, advancing sim/control steps, non-zero `push_force_steps`, and
-`push_impulse_applied == true`.
+`push_impulse_applied == true`. It also guards the validation tool against
+direct MuJoCo `data->ctrl` writes outside `MujocoSimAdapter`.
 
 Viewer disturbance smoke:
 

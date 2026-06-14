@@ -3,6 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 RUNNER="${SCRIPT_DIR}/run_dual_inference_rate_native.sh"
+DUAL_SOURCE="${SCRIPT_DIR}/../controller_cpp/src/dual_inference_rate.cpp"
 
 duration="1.0"
 summary_json=""
@@ -92,8 +93,16 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-if ! command -v jq >/dev/null 2>&1; then
-    echo "[Smoke][ERROR] required tool not found: jq" >&2
+for tool in jq rg; do
+    if ! command -v "${tool}" >/dev/null 2>&1; then
+        echo "[Smoke][ERROR] required tool not found: ${tool}" >&2
+        exit 1
+    fi
+done
+
+echo "[Smoke] Checking dual-rate sim writes through adapter boundary"
+if rg -n 'data->ctrl\[[^]]+\]\s*=' "${DUAL_SOURCE}"; then
+    echo "[Smoke][ERROR] dual_inference_rate.cpp must not write MuJoCo ctrl directly; use MujocoSimAdapter" >&2
     exit 1
 fi
 
