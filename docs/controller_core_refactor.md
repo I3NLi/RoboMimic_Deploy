@@ -71,9 +71,10 @@ not inspect mode requests, run policies, or perform safety checks.
 `mjData::ctrl`. It does not step the simulation, handle viewer input, or run
 policy logic.
 
-`dual_inference_rate.cpp` now routes its pure-sim and real-state-sim LOCO policy
-step through `ControllerCore`. It remains a validation tool only and still never
-publishes commands to the real robot.
+`dual_inference_rate.cpp` now routes pure-sim through `ControllerRuntime` and
+`MujocoSimAdapter`, and routes real-state-sim policy stepping through
+`ControllerCore`. It remains a validation tool only and still never publishes
+commands to the real robot.
 
 `controller_runtime.h` adds the shared one-tick runtime flow:
 `RobotAdapter::read_snapshot()` -> `ControllerCore::step()` ->

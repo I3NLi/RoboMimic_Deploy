@@ -10,7 +10,9 @@
  */
 
 #include "controller_core.h"
+#include "controller_runtime.h"
 #include "magicbot_loco_core.h"
+#include "mujoco_sim_adapter.h"
 
 #ifdef ENABLE_MAGICBOT_SDK
 #include "magicbot_loco_sdk_adapter.h"
@@ -460,27 +462,6 @@ ml::JointArray get_dq(const mjData* data, const std::vector<int>& qvel_idx)
     return dq;
 }
 
-std::array<float, 4> get_quat(const mjData* data)
-{
-    return {
-        static_cast<float>(data->qpos[3]),
-        static_cast<float>(data->qpos[4]),
-        static_cast<float>(data->qpos[5]),
-        static_cast<float>(data->qpos[6]),
-    };
-}
-
-std::array<float, 3> get_ang_vel(const mjModel* model, const mjData* data, int body_id)
-{
-    (void)model;
-    (void)body_id;
-    return {
-        static_cast<float>(data->qvel[3]),
-        static_cast<float>(data->qvel[4]),
-        static_cast<float>(data->qvel[5]),
-    };
-}
-
 void set_sim_state(
     mjData* data,
     const std::vector<int>& qpos_idx,
@@ -529,6 +510,15 @@ double apply_pd(
         max_abs_tau = std::max(max_abs_tau, std::fabs(tau));
     }
     return max_abs_tau;
+}
+
+double max_abs_ctrl(const mjModel* model, const mjData* data)
+{
+    double out = 0.0;
+    for (int i = 0; i < model->nu; ++i) {
+        out = std::max(out, std::fabs(data->ctrl[i]));
+    }
+    return out;
 }
 
 double max_abs(const ml::JointArray& values)
@@ -712,6 +702,11 @@ Summary run_rate_loop(
     core.seed_target(policy_target);
     core.reset_policy();
     const ml::Command command{{args.vx, args.vy, args.wz}};
+    ml::MujocoSimAdapterOptions sim_adapter_options;
+    sim_adapter_options.qpos_idx = sim.qpos_idx;
+    sim_adapter_options.qvel_idx = sim.qvel_idx;
+    ml::MujocoSimAdapter sim_adapter(sim.model, sim.data, sim_adapter_options);
+    ml::ControllerRuntime sim_runtime(core, sim_adapter);
     std::vector<double> infer_ms;
     std::vector<double> state_age_ms;
     int missed_deadline = 0;
@@ -756,73 +751,90 @@ Summary run_rate_loop(
         for (int step = 0; step < target_steps && g_running.load(); ++step) {
             ++executed_steps;
             const bool control_tick =
-                (real && args.real_forward_only) || (step % args.control_decimation == 0);
+                !real || (real && args.real_forward_only) || (step % args.control_decimation == 0);
 
             if (control_tick) {
-                ml::RobotSnapshot snap;
+                ml::RuntimeTickOutput tick;
 
 #ifdef ENABLE_MAGICBOT_SDK
                 if (real) {
-                    snap = robot_state.snapshot();
+                    ml::RobotSnapshot snap = robot_state.snapshot();
                     set_sim_state(sim.data, sim.qpos_idx, sim.qvel_idx, snap);
                     mj_forward(sim.model, sim.data);
                     const double age = robot_state.state_age_ms();
                     if (age >= 0.0) state_age_ms.push_back(age);
+                    const auto t0 = std::chrono::steady_clock::now();
+                    const auto mode_request = requested_loco
+                                                  ? ml::ModeRequest::none()
+                                                  : ml::ModeRequest::enter(ml::ControlMode::Loco);
+                    tick.snapshot = snap;
+                    tick.core = core.step(snap, command, mode_request, static_cast<float>(control_dt));
+                    tick.adapter.backend = "real-state-sim";
+                    const auto t1 = std::chrono::steady_clock::now();
+                    if (tick.core.telemetry.policy_evaluated) {
+                        infer_ms.push_back(std::chrono::duration<double, std::milli>(t1 - t0).count());
+                    }
                 } else
 #endif
                 {
-                    snap.q = get_q(sim.data, sim.qpos_idx);
-                    snap.dq = get_dq(sim.data, sim.qvel_idx);
-                    snap.quat = get_quat(sim.data);
-                    snap.ang_vel = get_ang_vel(sim.model, sim.data, sim.root_body_id);
+                    ml::RuntimeTickInput tick_input;
+                    tick_input.command = command;
+                    tick_input.mode_request = requested_loco
+                                                  ? ml::ModeRequest::none()
+                                                  : ml::ModeRequest::enter(ml::ControlMode::Loco);
+                    tick_input.control_dt_s = static_cast<float>(sim.model->opt.timestep);
+                    tick_input.publish_target = true;
+                    const auto t0 = std::chrono::steady_clock::now();
+                    tick = sim_runtime.tick(tick_input);
+                    const auto t1 = std::chrono::steady_clock::now();
+                    if (tick.core.telemetry.policy_evaluated) {
+                        infer_ms.push_back(std::chrono::duration<double, std::milli>(t1 - t0).count());
+                    }
                 }
 
-                const auto gravity = ml::gravity_orientation(snap.quat);
+                const auto gravity = tick.core.telemetry.projected_gravity;
                 max_gravity_xy = std::max(
                     max_gravity_xy,
                     std::sqrt(static_cast<double>(gravity[0]) * gravity[0] +
                               static_cast<double>(gravity[1]) * gravity[1]));
-                const auto t0 = std::chrono::steady_clock::now();
-                const auto mode_request = requested_loco
-                                              ? ml::ModeRequest::none()
-                                              : ml::ModeRequest::enter(ml::ControlMode::Loco);
-                const auto result = core.step(snap, command, mode_request, static_cast<float>(control_dt));
-                const auto t1 = std::chrono::steady_clock::now();
                 requested_loco = true;
-                if (result.telemetry.policy_evaluated && have_previous_policy_target) {
+                if (tick.core.telemetry.policy_evaluated && have_previous_policy_target) {
                     double jump = 0.0;
                     for (int i = 0; i < ml::kNumJoints; ++i) {
                         jump = std::max(
                             jump,
                             static_cast<double>(
-                                std::fabs(result.telemetry.raw_policy_target[i] - previous_policy_target[i])));
+                                std::fabs(tick.core.telemetry.raw_policy_target[i] - previous_policy_target[i])));
                     }
                     max_policy_target_jump = std::max(max_policy_target_jump, jump);
                 }
-                if (result.telemetry.policy_evaluated) {
-                    previous_policy_target = result.telemetry.raw_policy_target;
+                if (tick.core.telemetry.policy_evaluated) {
+                    previous_policy_target = tick.core.telemetry.raw_policy_target;
                     have_previous_policy_target = true;
-                    infer_ms.push_back(std::chrono::duration<double, std::milli>(t1 - t0).count());
+                    ++control_steps;
                 }
-                policy_target = result.target.q;
-                ++control_steps;
-                max_abs_q = std::max(max_abs_q, max_abs(snap.q));
-                max_abs_dq = std::max(max_abs_dq, max_abs(snap.dq));
+                policy_target = tick.core.target.q;
+                max_abs_q = std::max(max_abs_q, max_abs(tick.snapshot.q));
+                max_abs_dq = std::max(max_abs_dq, max_abs(tick.snapshot.dq));
             }
 
             if (!(real && args.real_forward_only)) {
-                max_abs_tau = std::max(
-                    max_abs_tau,
-                    apply_pd(
-                        args,
-                        sim.model,
-                        sim.data,
-                        sim.qpos_idx,
-                        sim.qvel_idx,
-                        policy_target,
-                        core.gains().kp,
-                        core.gains().kd,
-                        core.gains().tau_limit));
+                if (real) {
+                    max_abs_tau = std::max(
+                        max_abs_tau,
+                        apply_pd(
+                            args,
+                            sim.model,
+                            sim.data,
+                            sim.qpos_idx,
+                            sim.qvel_idx,
+                            policy_target,
+                            core.gains().kp,
+                            core.gains().kd,
+                            core.gains().tau_limit));
+                } else {
+                    max_abs_tau = std::max(max_abs_tau, max_abs_ctrl(sim.model, sim.data));
+                }
                 mj_step(sim.model, sim.data);
                 if (args.ground_correction) {
                     (void)correct_ground_penetration(
