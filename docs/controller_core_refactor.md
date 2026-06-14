@@ -121,14 +121,19 @@ The viewer can write a telemetry JSON summary with `--summary-json`, run the sam
 scheduled push/impulse disturbance inputs as the rate smoke, and apply interactive
 MuJoCo perturb forces with `Shift+left` / `Shift+middle` mouse dragging on a
 selected body. When `--camera-stream` is enabled, the same HTTP server also
-accepts `POST /reset` and `POST /viewer-event?...`; this lets the web/Electron
-control station reset the sim and forward remote drag gestures into MuJoCo
-perturb/camera operations without moving control logic out of `ControllerCore`.
+accepts `POST /reset`, `POST /control?...`, and `POST /viewer-event?...`; this
+lets the web/Electron control station reset the sim, send mode/velocity requests,
+and forward remote drag gestures into MuJoCo perturb/camera operations without
+moving control logic out of `ControllerCore`.
 When `--beyond-yaml PATH` is supplied, the viewer registers BeyondMimic as the
 same keyed shared `DANCE` external policy used by the real runner; `B` and UDP
 `mode=beyond` / `mode=dance` enter it.
 Viewer UDP also accepts `mode=passive` and `mode=final_damping`, and local
 keyboard shortcuts `M` / `N` request those shared modes.
+The HTTP control endpoint accepts the same mode vocabulary through query
+parameters, for example `POST /control?mode=final_damping` or
+`POST /control?mode=loco&vx=0.2&wz=-0.1`; the main viewer loop consumes those
+requests and then still routes each tick through the shared runtime.
 
 The first `ControllerCore` implementation supports `PASSIVE`, `STAND`, `LOCO`,
 and `FINAL_DAMPING`. `DANCE` and `SKILL` are represented in the shared mode enum
@@ -187,10 +192,14 @@ controller_cpp/build_mujoco_viewer/mujoco_loco_viewer --duration 1.0 \
   --summary-json /tmp/viewer_http_control_summary.json
 
 curl -X POST http://127.0.0.1:18181/reset
+curl -X POST 'http://127.0.0.1:18181/control?mode=final_damping&vx=0.4&vy=0.2&wz=-0.1'
 curl -X POST 'http://127.0.0.1:18181/viewer-event?type=down&x=320&y=240&width=640&height=480&button=0'
 curl -X POST 'http://127.0.0.1:18181/viewer-event?type=move&x=340&y=240&dx=20&dy=0&width=640&height=480&button=0'
 curl -X POST 'http://127.0.0.1:18181/viewer-event?type=up&x=340&y=240&width=640&height=480&button=0'
 ```
+
+The summary should include `http_control_commands > 0` and the requested mode
+when `/control` is used.
 
 For an unpaused remote perturb smoke, keep the drag active for a short wall-clock
 interval before sending `type=up`; the summary should report

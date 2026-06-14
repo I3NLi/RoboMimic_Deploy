@@ -152,6 +152,7 @@ struct ViewerStats {
     int mouse_perturb_steps{0};
     int http_reset_requests{0};
     int http_viewer_events{0};
+    int http_control_commands{0};
     int last_perturb_body{0};
     std::string last_perturb_body_name;
     double min_base_height{std::numeric_limits<double>::infinity()};
@@ -170,11 +171,23 @@ struct ViewerHttpEvent {
     int button{0};
 };
 
+struct ViewerControlCommand {
+    bool has_mode{false};
+    std::string mode;
+    bool has_vx{false};
+    bool has_vy{false};
+    bool has_wz{false};
+    std::array<float, 3> velocity{0.0f, 0.0f, 0.0f};
+    bool has_pause{false};
+    bool paused{false};
+};
+
 struct CameraStreamState {
     std::mutex mutex;
     std::vector<unsigned char> latest_jpg;
     std::vector<unsigned char> latest_png;
     std::vector<ViewerHttpEvent> viewer_events;
+    std::vector<ViewerControlCommand> control_commands;
     double timestamp{0.0};
     uint64_t seq{0};
     bool reset_requested{false};
@@ -234,6 +247,14 @@ public:
         std::vector<ViewerHttpEvent> events;
         events.swap(state_->viewer_events);
         return events;
+    }
+
+    std::vector<ViewerControlCommand> take_control_commands()
+    {
+        std::lock_guard<std::mutex> lock(state_->mutex);
+        std::vector<ViewerControlCommand> commands;
+        commands.swap(state_->control_commands);
+        return commands;
     }
 
     std::string url() const
@@ -351,6 +372,94 @@ private:
         return end != raw.c_str() && *end == '\0' ? static_cast<int>(value) : fallback;
     }
 
+    static std::string lower_ascii(std::string value)
+    {
+        std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
+            return static_cast<char>(std::tolower(c));
+        });
+        return value;
+    }
+
+    static bool query_float_optional(
+        const std::string& query,
+        const std::string& key,
+        float& value)
+    {
+        const std::string raw = query_value(query, key);
+        if (raw.empty()) return false;
+        char* end = nullptr;
+        const float parsed = std::strtof(raw.c_str(), &end);
+        if (end == raw.c_str() || *end != '\0' || !std::isfinite(parsed)) {
+            throw std::runtime_error("invalid numeric control field: " + key);
+        }
+        value = std::clamp(parsed, -1.0f, 1.0f);
+        return true;
+    }
+
+    static bool query_bool_optional(
+        const std::string& query,
+        const std::string& key,
+        bool& value)
+    {
+        const std::string raw = lower_ascii(query_value(query, key));
+        if (raw.empty()) return false;
+        if (raw == "1" || raw == "true" || raw == "yes" || raw == "on" || raw == "pause") {
+            value = true;
+            return true;
+        }
+        if (raw == "0" || raw == "false" || raw == "no" || raw == "off" || raw == "resume") {
+            value = false;
+            return true;
+        }
+        throw std::runtime_error("invalid boolean control field: " + key);
+    }
+
+    static ViewerControlCommand parse_control_command(const std::string& query)
+    {
+        ViewerControlCommand command;
+        bool any = false;
+        const std::string mode = lower_ascii(query_value(query, "mode"));
+        if (!mode.empty()) {
+            const bool valid_mode =
+                mode == "loco" || mode == "run" || mode == "stand" ||
+                mode == "reset" || mode == "restand" ||
+                mode == "passive" || mode == "damping" ||
+                mode == "final" || mode == "finaldamping" || mode == "final_damping" ||
+                mode == "fail_safe" || mode == "failsafe" ||
+                mode == "dance" || mode == "beyond" || mode == "beyondmimic" ||
+                mode == "zero" || mode == "x" ||
+                mode == "pause" || mode == "resume" ||
+                mode == "stop" || mode == "exit";
+            if (!valid_mode) {
+                throw std::runtime_error("invalid control mode: " + mode);
+            }
+            command.has_mode = true;
+            command.mode = mode;
+            any = true;
+        }
+        if (query_float_optional(query, "vx", command.velocity[0])) {
+            command.has_vx = true;
+            any = true;
+        }
+        if (query_float_optional(query, "vy", command.velocity[1])) {
+            command.has_vy = true;
+            any = true;
+        }
+        if (query_float_optional(query, "wz", command.velocity[2])) {
+            command.has_wz = true;
+            any = true;
+        }
+        if (query_bool_optional(query, "pause", command.paused) ||
+            query_bool_optional(query, "paused", command.paused)) {
+            command.has_pause = true;
+            any = true;
+        }
+        if (!any) {
+            throw std::runtime_error("missing control fields");
+        }
+        return command;
+    }
+
     static void handle_client(int fd, std::shared_ptr<CameraStreamState> state)
     {
         char buffer[4096] = {0};
@@ -372,6 +481,7 @@ private:
             std::string body = "{\"ok\":true,\"seq\":" + std::to_string(state->seq) +
                                ",\"timestamp\":" + std::to_string(state->timestamp) +
                                ",\"reset_pending\":" + (state->reset_requested ? "true" : "false") +
+                               ",\"control_queue\":" + std::to_string(state->control_commands.size()) +
                                ",\"viewer_event_queue\":" + std::to_string(state->viewer_events.size()) + "}\n";
             send_text(fd, 200, "OK", body, "application/json");
         } else if (path == "/reset") {
@@ -399,6 +509,25 @@ private:
                     state->viewer_events.push_back(event);
                 }
                 send_text(fd, 200, "OK", "{\"ok\":true,\"action\":\"viewer-event\"}\n", "application/json");
+            }
+        } else if (path == "/control") {
+            try {
+                const ViewerControlCommand command = parse_control_command(query);
+                {
+                    std::lock_guard<std::mutex> lock(state->mutex);
+                    if (state->control_commands.size() > 128) {
+                        state->control_commands.erase(state->control_commands.begin());
+                    }
+                    state->control_commands.push_back(command);
+                }
+                send_text(fd, 200, "OK", "{\"ok\":true,\"action\":\"control\"}\n", "application/json");
+            } catch (const std::exception& e) {
+                send_text(
+                    fd,
+                    400,
+                    "Bad Request",
+                    std::string("{\"ok\":false,\"error\":\"") + e.what() + "\"}\n",
+                    "application/json");
             }
         } else if (path == "/frame.jpg") {
             std::vector<unsigned char> jpg;
@@ -1143,6 +1272,7 @@ std::string viewer_summary_json(
         << "\"mouse_perturb_steps\":" << stats.mouse_perturb_steps << ","
         << "\"http_reset_requests\":" << stats.http_reset_requests << ","
         << "\"http_viewer_events\":" << stats.http_viewer_events << ","
+        << "\"http_control_commands\":" << stats.http_control_commands << ","
         << "\"last_perturb_body\":" << stats.last_perturb_body << ","
         << "\"last_perturb_body_name\":\"" << json_escape(stats.last_perturb_body_name) << "\""
         << "}";
@@ -1526,6 +1656,84 @@ void print_cmd(
         cmd[0],
         cmd[1],
         cmd[2]);
+}
+
+void apply_viewer_control_command(
+    const ViewerControlCommand& control,
+    std::array<float, 3>& cmd,
+    bool& loco_active,
+    bool& passive_active,
+    bool& dance_active,
+    bool& final_damping_active,
+    bool dance_enabled,
+    bool& paused,
+    bool& running,
+    bool& reset_requested)
+{
+    if (control.has_vx) cmd[0] = clamp_cmd(control.velocity[0]);
+    if (control.has_vy) cmd[1] = clamp_cmd(control.velocity[1]);
+    if (control.has_wz) cmd[2] = clamp_cmd(control.velocity[2]);
+    if (control.has_pause) paused = control.paused;
+    if (!control.has_mode) return;
+
+    const std::string& mode = control.mode;
+    if (mode == "loco" || mode == "run") {
+        if (!loco_active || passive_active || dance_active || final_damping_active) reset_requested = true;
+        loco_active = true;
+        passive_active = false;
+        dance_active = false;
+        final_damping_active = false;
+        paused = false;
+    } else if (mode == "stand") {
+        cmd = {0.0f, 0.0f, 0.0f};
+        loco_active = false;
+        passive_active = false;
+        dance_active = false;
+        final_damping_active = false;
+        reset_requested = true;
+        paused = false;
+    } else if (mode == "reset" || mode == "restand") {
+        cmd = {0.0f, 0.0f, 0.0f};
+        passive_active = false;
+        dance_active = false;
+        final_damping_active = false;
+        reset_requested = true;
+        paused = false;
+    } else if (mode == "passive" || mode == "damping") {
+        cmd = {0.0f, 0.0f, 0.0f};
+        loco_active = false;
+        passive_active = true;
+        dance_active = false;
+        final_damping_active = false;
+        paused = false;
+    } else if (mode == "final" || mode == "finaldamping" || mode == "final_damping" ||
+               mode == "fail_safe" || mode == "failsafe") {
+        cmd = {0.0f, 0.0f, 0.0f};
+        loco_active = false;
+        passive_active = false;
+        dance_active = false;
+        final_damping_active = true;
+        paused = false;
+    } else if (mode == "dance" || mode == "beyond" || mode == "beyondmimic") {
+        if (!dance_enabled) {
+            std::fprintf(stderr, "[Viewer] DANCE ignored; start with --beyond-yaml PATH to enable BeyondMimic\n");
+            return;
+        }
+        cmd = {0.0f, 0.0f, 0.0f};
+        loco_active = false;
+        passive_active = false;
+        dance_active = true;
+        final_damping_active = false;
+        paused = false;
+    } else if (mode == "zero" || mode == "x") {
+        cmd = {0.0f, 0.0f, 0.0f};
+    } else if (mode == "pause") {
+        paused = true;
+    } else if (mode == "resume") {
+        paused = false;
+    } else if (mode == "stop" || mode == "exit") {
+        running = false;
+    }
 }
 
 void handle_key(
@@ -2079,6 +2287,7 @@ int main(int argc, char** argv)
             std::printf("[CameraStream] %s/frame.jpg\n", camera_server->url().c_str());
             std::printf("[CameraStream] %s/frame.png\n", camera_server->url().c_str());
             std::printf("[CameraStream] %s/stream.mjpg\n", camera_server->url().c_str());
+            std::printf("[CameraStream] POST %s/control?mode=loco&vx=0.2\n", camera_server->url().c_str());
         }
 #ifdef ENABLE_ROS2_CAMERA
         std::unique_ptr<Ros2CameraPublisher> ros2_camera;
@@ -2201,6 +2410,24 @@ int main(int argc, char** argv)
                         remote_drag,
                         stats,
                         push_body_id);
+                }
+                const auto control_commands = camera_server->take_control_commands();
+                if (!control_commands.empty()) {
+                    stats.http_control_commands += static_cast<int>(control_commands.size());
+                    for (const ViewerControlCommand& control : control_commands) {
+                        apply_viewer_control_command(
+                            control,
+                            cmd,
+                            loco_active,
+                            passive_active,
+                            dance_active,
+                            final_damping_active,
+                            dance_enabled,
+                            paused,
+                            running,
+                            reset_requested);
+                    }
+                    print_cmd(cmd, loco_active, passive_active, dance_active, final_damping_active, paused);
                 }
             }
             if (udp_input &&
