@@ -174,7 +174,7 @@ struct ViewerHttpEvent {
 
 struct ViewerControlCommand {
     bool has_mode{false};
-    std::string mode;
+    magicbot_loco::TextControlAction action{magicbot_loco::TextControlAction::Zero};
     bool has_vx{false};
     bool has_vy{false};
     bool has_wz{false};
@@ -375,10 +375,7 @@ private:
 
     static std::string lower_ascii(std::string value)
     {
-        std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
-            return static_cast<char>(std::tolower(c));
-        });
-        return value;
+        return magicbot_loco::lower_ascii_copy(std::move(value));
     }
 
     static bool query_float_optional(
@@ -421,21 +418,12 @@ private:
         bool any = false;
         const std::string mode = lower_ascii(query_value(query, "mode"));
         if (!mode.empty()) {
-            const bool valid_mode =
-                mode == "loco" || mode == "run" || mode == "stand" ||
-                mode == "reset" || mode == "restand" ||
-                mode == "passive" || mode == "damping" ||
-                mode == "final" || mode == "finaldamping" || mode == "final_damping" ||
-                mode == "fail_safe" || mode == "failsafe" ||
-                mode == "dance" || mode == "beyond" || mode == "beyondmimic" ||
-                mode == "zero" || mode == "x" ||
-                mode == "pause" || mode == "resume" ||
-                mode == "stop" || mode == "exit";
-            if (!valid_mode) {
+            magicbot_loco::TextControlAction action{};
+            if (!magicbot_loco::text_control_action_from_word(mode, action)) {
                 throw std::runtime_error("invalid control mode: " + mode);
             }
             command.has_mode = true;
-            command.mode = mode;
+            command.action = action;
             any = true;
         }
         if (query_float_optional(query, "vx", command.velocity[0])) {
@@ -1345,6 +1333,100 @@ void destroy_window(XGlWindow& win)
 
 float clamp_cmd(float v) { return std::clamp(v, -1.0f, 1.0f); }
 
+void apply_viewer_text_action(
+    magicbot_loco::TextControlAction action,
+    std::array<float, 3>& cmd,
+    bool& loco_active,
+    bool& passive_active,
+    bool& dance_active,
+    bool& final_damping_active,
+    bool dance_enabled,
+    bool& paused,
+    bool& running,
+    bool& reset_requested)
+{
+    switch (action) {
+    case magicbot_loco::TextControlAction::Loco:
+        if (!loco_active || passive_active || dance_active || final_damping_active) reset_requested = true;
+        loco_active = true;
+        passive_active = false;
+        dance_active = false;
+        final_damping_active = false;
+        paused = false;
+        break;
+    case magicbot_loco::TextControlAction::Stand:
+        cmd = {0.0f, 0.0f, 0.0f};
+        loco_active = false;
+        passive_active = false;
+        dance_active = false;
+        final_damping_active = false;
+        reset_requested = true;
+        paused = false;
+        break;
+    case magicbot_loco::TextControlAction::ResetStand:
+        cmd = {0.0f, 0.0f, 0.0f};
+        passive_active = false;
+        dance_active = false;
+        final_damping_active = false;
+        reset_requested = true;
+        paused = false;
+        break;
+    case magicbot_loco::TextControlAction::Passive:
+        cmd = {0.0f, 0.0f, 0.0f};
+        loco_active = false;
+        passive_active = true;
+        dance_active = false;
+        final_damping_active = false;
+        paused = false;
+        break;
+    case magicbot_loco::TextControlAction::FinalDamping:
+        cmd = {0.0f, 0.0f, 0.0f};
+        loco_active = false;
+        passive_active = false;
+        dance_active = false;
+        final_damping_active = true;
+        paused = false;
+        break;
+    case magicbot_loco::TextControlAction::Dance:
+        if (!dance_enabled) {
+            std::fprintf(stderr, "[Viewer] DANCE ignored; start with --beyond-yaml PATH to enable BeyondMimic\n");
+            return;
+        }
+        cmd = {0.0f, 0.0f, 0.0f};
+        loco_active = false;
+        passive_active = false;
+        dance_active = true;
+        final_damping_active = false;
+        paused = false;
+        break;
+    case magicbot_loco::TextControlAction::Zero:
+        cmd = {0.0f, 0.0f, 0.0f};
+        break;
+    case magicbot_loco::TextControlAction::Pause:
+        paused = true;
+        break;
+    case magicbot_loco::TextControlAction::Resume:
+        paused = false;
+        break;
+    case magicbot_loco::TextControlAction::Stop:
+        running = false;
+        break;
+    case magicbot_loco::TextControlAction::ToggleLoco:
+        if (loco_active) {
+            loco_active = false;
+            cmd = {0.0f, 0.0f, 0.0f};
+        } else {
+            reset_requested = true;
+            loco_active = true;
+        }
+        passive_active = false;
+        dance_active = false;
+        final_damping_active = false;
+        paused = false;
+        break;
+    }
+}
+
 class ViewerUdpCommandInput {
 public:
     explicit ViewerUdpCommandInput(const Args& args, bool dance_enabled)
@@ -1463,110 +1545,18 @@ private:
                     cmd[static_cast<size_t>(op.axis)] = op.value;
                 }
             } else {
-                handle_action(
+                apply_viewer_text_action(
                     op.action,
                     cmd,
                     loco_active,
                     passive_active,
                     dance_active,
                     final_damping_active,
+                    dance_enabled_,
                     paused,
                     running,
                     reset_requested);
             }
-        }
-    }
-
-    void handle_action(
-        magicbot_loco::TextControlAction action,
-        std::array<float, 3>& cmd,
-        bool& loco_active,
-        bool& passive_active,
-        bool& dance_active,
-        bool& final_damping_active,
-        bool& paused,
-        bool& running,
-        bool& reset_requested)
-    {
-        switch (action) {
-        case magicbot_loco::TextControlAction::Loco:
-            if (!loco_active || passive_active || dance_active || final_damping_active) reset_requested = true;
-            loco_active = true;
-            passive_active = false;
-            dance_active = false;
-            final_damping_active = false;
-            paused = false;
-            break;
-        case magicbot_loco::TextControlAction::Stand:
-            cmd = {0.0f, 0.0f, 0.0f};
-            loco_active = false;
-            passive_active = false;
-            dance_active = false;
-            final_damping_active = false;
-            reset_requested = true;
-            paused = false;
-            break;
-        case magicbot_loco::TextControlAction::ResetStand:
-            cmd = {0.0f, 0.0f, 0.0f};
-            passive_active = false;
-            dance_active = false;
-            final_damping_active = false;
-            reset_requested = true;
-            paused = false;
-            break;
-        case magicbot_loco::TextControlAction::Passive:
-            cmd = {0.0f, 0.0f, 0.0f};
-            loco_active = false;
-            passive_active = true;
-            dance_active = false;
-            final_damping_active = false;
-            paused = false;
-            break;
-        case magicbot_loco::TextControlAction::FinalDamping:
-            cmd = {0.0f, 0.0f, 0.0f};
-            loco_active = false;
-            passive_active = false;
-            dance_active = false;
-            final_damping_active = true;
-            paused = false;
-            break;
-        case magicbot_loco::TextControlAction::Dance:
-            if (!dance_enabled_) {
-                std::fprintf(stderr, "[Viewer] DANCE ignored; start with --beyond-yaml PATH to enable BeyondMimic\n");
-                return;
-            }
-            cmd = {0.0f, 0.0f, 0.0f};
-            loco_active = false;
-            passive_active = false;
-            dance_active = true;
-            final_damping_active = false;
-            paused = false;
-            break;
-        case magicbot_loco::TextControlAction::Zero:
-            cmd = {0.0f, 0.0f, 0.0f};
-            break;
-        case magicbot_loco::TextControlAction::Pause:
-            paused = true;
-            break;
-        case magicbot_loco::TextControlAction::Resume:
-            paused = false;
-            break;
-        case magicbot_loco::TextControlAction::Stop:
-            running = false;
-            break;
-        case magicbot_loco::TextControlAction::ToggleLoco:
-            if (loco_active) {
-                loco_active = false;
-                cmd = {0.0f, 0.0f, 0.0f};
-            } else {
-                reset_requested = true;
-                loco_active = true;
-            }
-            passive_active = false;
-            dance_active = false;
-            final_damping_active = false;
-            paused = false;
-            break;
         }
     }
 
@@ -1650,64 +1640,17 @@ void apply_viewer_control_command(
     if (control.has_pause) paused = control.paused;
     if (!control.has_mode) return;
 
-    const std::string& mode = control.mode;
-    if (mode == "loco" || mode == "run") {
-        if (!loco_active || passive_active || dance_active || final_damping_active) reset_requested = true;
-        loco_active = true;
-        passive_active = false;
-        dance_active = false;
-        final_damping_active = false;
-        paused = false;
-    } else if (mode == "stand") {
-        cmd = {0.0f, 0.0f, 0.0f};
-        loco_active = false;
-        passive_active = false;
-        dance_active = false;
-        final_damping_active = false;
-        reset_requested = true;
-        paused = false;
-    } else if (mode == "reset" || mode == "restand") {
-        cmd = {0.0f, 0.0f, 0.0f};
-        passive_active = false;
-        dance_active = false;
-        final_damping_active = false;
-        reset_requested = true;
-        paused = false;
-    } else if (mode == "passive" || mode == "damping") {
-        cmd = {0.0f, 0.0f, 0.0f};
-        loco_active = false;
-        passive_active = true;
-        dance_active = false;
-        final_damping_active = false;
-        paused = false;
-    } else if (mode == "final" || mode == "finaldamping" || mode == "final_damping" ||
-               mode == "fail_safe" || mode == "failsafe") {
-        cmd = {0.0f, 0.0f, 0.0f};
-        loco_active = false;
-        passive_active = false;
-        dance_active = false;
-        final_damping_active = true;
-        paused = false;
-    } else if (mode == "dance" || mode == "beyond" || mode == "beyondmimic") {
-        if (!dance_enabled) {
-            std::fprintf(stderr, "[Viewer] DANCE ignored; start with --beyond-yaml PATH to enable BeyondMimic\n");
-            return;
-        }
-        cmd = {0.0f, 0.0f, 0.0f};
-        loco_active = false;
-        passive_active = false;
-        dance_active = true;
-        final_damping_active = false;
-        paused = false;
-    } else if (mode == "zero" || mode == "x") {
-        cmd = {0.0f, 0.0f, 0.0f};
-    } else if (mode == "pause") {
-        paused = true;
-    } else if (mode == "resume") {
-        paused = false;
-    } else if (mode == "stop" || mode == "exit") {
-        running = false;
-    }
+    apply_viewer_text_action(
+        control.action,
+        cmd,
+        loco_active,
+        passive_active,
+        dance_active,
+        final_damping_active,
+        dance_enabled,
+        paused,
+        running,
+        reset_requested);
 }
 
 void handle_key(

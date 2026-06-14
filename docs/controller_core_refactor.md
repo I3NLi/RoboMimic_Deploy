@@ -137,7 +137,8 @@ not own policy, safety, or adapter behavior. Local viewer keyboard shortcuts
 The HTTP control endpoint accepts the same mode vocabulary through query
 parameters, for example `POST /control?mode=final_damping` or
 `POST /control?mode=loco&vx=0.2&wz=-0.1`; the main viewer loop consumes those
-requests and then still routes each tick through the shared runtime.
+requests, maps mode aliases through the same shared action parser used by UDP,
+and then still routes each tick through the shared runtime.
 
 The first `ControllerCore` implementation supports `PASSIVE`, `STAND`, `LOCO`,
 and `FINAL_DAMPING`. `DANCE` and `SKILL` are represented in the shared mode enum
