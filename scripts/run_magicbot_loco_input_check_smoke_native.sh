@@ -6,7 +6,7 @@ PROJECT_ROOT="$( cd "${SCRIPT_DIR}/.." &> /dev/null && pwd )"
 RUNNER="${SCRIPT_DIR}/run_magicbot_loco_native.sh"
 RUNNER_SOURCE="${PROJECT_ROOT}/controller_cpp/src/magicbot_z1_loco_onnx.cpp"
 
-duration="2.2"
+duration="2.8"
 udp_port=""
 keep_log=0
 extra_args=()
@@ -197,6 +197,8 @@ import time
 port = int("${udp_port}")
 packets = [
     b"vx=0.25 vy=-0.10 wz=0.05 mode=loco",
+    b"pause",
+    b"resume",
     b"mode=beyond",
     b"mode=track_mimic",
     b"mode=passive",
@@ -217,7 +219,7 @@ if ! wait "${runner_pid}"; then
 fi
 runner_pid=""
 
-for expected in 'mode=LOCO' 'mode=PASSIVE' 'reset-stand' 'mode=FINAL_DAMPING'; do
+for expected in 'mode=LOCO' 'pause-zero' 'mode=PASSIVE' 'reset-stand' 'mode=FINAL_DAMPING'; do
     if ! rg -q "${expected}" "${log_path}"; then
         echo "[Smoke][ERROR] missing expected input-check output: ${expected}" >&2
         sed -n '1,220p' "${log_path}" >&2
@@ -250,4 +252,4 @@ echo "[Smoke] PASSED real-runner UDP input-check"
 if [[ "${keep_log}" -eq 1 ]]; then
     echo "[Smoke] log=${log_path}"
 fi
-rg 'mode=(LOCO|PASSIVE|FINAL_DAMPING)|reset-stand|DANCE ignored|SKILL ignored' "${log_path}"
+rg 'mode=(LOCO|PASSIVE|FINAL_DAMPING)|pause-zero|reset-stand|DANCE ignored|SKILL ignored' "${log_path}"
