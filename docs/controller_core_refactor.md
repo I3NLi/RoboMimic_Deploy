@@ -280,6 +280,17 @@ controller_cpp/build_mujoco_viewer/mujoco_loco_viewer --duration 0.2 \
   --summary-json /tmp/viewer_beyond_summary.json
 ```
 
+Viewer HTTP DANCE / BeyondMimic smoke:
+
+```bash
+scripts/run_viewer_http_dance_smoke_native.sh --duration 0.8 --keep-summary
+```
+
+The script registers BeyondMimic as the shared `DANCE` external policy in the
+viewer, posts `mode=beyond` through `/control`, then checks live `/status` and
+the summary for `mode == DANCE`, active `external_policy == BeyondMimic`,
+advancing `sim_steps` and `policy_steps`, and at least one HTTP control command.
+
 Viewer HTTP control smoke:
 
 ```bash
