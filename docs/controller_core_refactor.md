@@ -144,6 +144,10 @@ same keyed shared `DANCE` external policy used by the real runner; `B` and UDP
 When `--track-mimic-yaml PATH` is supplied, the viewer registers the BeyondMimic
 trajectory variant as the keyed shared `SKILL` external policy; `T`, UDP text,
 or HTTP `mode=skill` / `mode=track_mimic` enter it.
+The `scripts/run_mujoco_loco_viewer_native.sh --control-station` preset now
+auto-registers both default YAML files when they are present, so the remote
+operation station starts with camera streaming, HTTP control, UDP control,
+DANCE/BeyondMimic, and SKILL/TrackMimic trajectory entrypoints together.
 Viewer UDP and the real runner UDP input now share `text_control_command.h` for
 text command tokenization and mode aliases (`loco`, `stand`, `passive`,
 `final_damping`, `beyond`, `track_mimic`, `pause`, `resume`, `stop`, and
@@ -346,6 +350,18 @@ text controls for `mode=beyond` and `mode=track_mimic`, checks live `/status`
 for `DANCE/BeyondMimic` and `SKILL/TrackMimic` trajectory, then checks the summary for a
 final `SKILL` state with active `external_policy == TrackMimic`,
 `adapter_backend == mujoco-sim`, and `adapter_command_published == true`.
+
+Viewer control-station preset smoke:
+
+```bash
+scripts/run_viewer_control_station_smoke_native.sh --duration 1.4 --keep-summary
+```
+
+The script starts `run_mujoco_loco_viewer_native.sh --control-station` without
+explicit `--beyond-yaml` or `--track-mimic-yaml`, then uses the HTTP control API
+to enter `DANCE/BeyondMimic` and `SKILL/TrackMimic` trajectory, verifying that
+the preset mounts the same shared external-policy adapters used by direct viewer
+launches.
 
 Viewer HTTP remote perturb smoke:
 

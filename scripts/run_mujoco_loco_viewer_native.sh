@@ -8,6 +8,7 @@ BUILD_DIR="${CPP_DIR}/build_mujoco_viewer"
 NATIVE_BIN="${BUILD_DIR}/mujoco_loco_viewer"
 DEFAULT_CONFIG="${PROJECT_ROOT}/policies/loco_mode/config/LocoMode_lowKp.yaml"
 DEFAULT_BEYOND_YAML="${PROJECT_ROOT}/policies/beyond_mimic/config/BeyondMimic.yaml"
+DEFAULT_TRACK_MIMIC_YAML="${PROJECT_ROOT}/policies/track_mimic/config/BeyondMimic.yaml"
 
 WANT_ROS2_CAMERA=0
 for arg in "$@"; do
@@ -67,6 +68,9 @@ if [[ "${CONTROL_STATION}" == "1" ]]; then
     fi
     if ! has_arg "--beyond-yaml" "${args[@]}" && [[ -f "${DEFAULT_BEYOND_YAML}" ]]; then
         args+=(--beyond-yaml "${DEFAULT_BEYOND_YAML}")
+    fi
+    if ! has_arg "--track-mimic-yaml" "${args[@]}" && [[ -f "${DEFAULT_TRACK_MIMIC_YAML}" ]]; then
+        args+=(--track-mimic-yaml "${DEFAULT_TRACK_MIMIC_YAML}")
     fi
 fi
 
