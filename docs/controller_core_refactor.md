@@ -70,6 +70,11 @@ policy logic.
 step through `ControllerCore`. It remains a validation tool only and still never
 publishes commands to the real robot.
 
+`controller_runtime.h` adds the shared one-tick runtime flow:
+`RobotAdapter::read_snapshot()` -> `ControllerCore::step()` ->
+`RobotAdapter::write_target()`. It is glue around the shared control brain, not
+a second place for policy, mode, or safety logic.
+
 The first `ControllerCore` implementation supports `PASSIVE`, `STAND`, `LOCO`,
 and `FINAL_DAMPING`. `DANCE` and `SKILL` are represented in the shared mode enum
 but intentionally reject requests until the skill policy adapter is wired.
