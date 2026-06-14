@@ -107,6 +107,26 @@ if disconnect_pos < 0 or final_pos > disconnect_pos:
     print("[Smoke][ERROR] final_damping() must run before robot.disconnect()", file=sys.stderr)
     sys.exit(1)
 
+stand_marker = "ml::JointArray stand_interpolation"
+stand_start = source.find(stand_marker)
+if stand_start < 0:
+    print("[Smoke][ERROR] could not locate stand_interpolation", file=sys.stderr)
+    sys.exit(1)
+stand_brace = source.find("{", stand_start)
+depth = 0
+stand_end = -1
+for index in range(stand_brace, len(source)):
+    if source[index] == "{":
+        depth += 1
+    elif source[index] == "}":
+        depth -= 1
+        if depth == 0:
+            stand_end = index + 1
+            break
+if stand_end < 0:
+    print("[Smoke][ERROR] could not parse stand_interpolation", file=sys.stderr)
+    sys.exit(1)
+
 hold_marker = "ml::JointArray hold_default_stand"
 hold_start = source.find(hold_marker)
 if hold_start < 0:
@@ -143,6 +163,20 @@ for forbidden in (
             file=sys.stderr,
         )
         sys.exit(1)
+
+for direct_pattern in (
+    r"torque_limited_target",
+    r"clamp_and_rate_limit",
+    r"real_adapter\.write_target",
+):
+    for match in re.finditer(direct_pattern, source):
+        if not (stand_start <= match.start() < stand_end):
+            print(
+                "[Smoke][ERROR] direct target limiting/writes are only allowed in stand_interpolation: "
+                + direct_pattern,
+                file=sys.stderr,
+            )
+            sys.exit(1)
 PY
 
 dry_log="$(mktemp /tmp/magicbot_loco_safety_dry_XXXXXX.log)"

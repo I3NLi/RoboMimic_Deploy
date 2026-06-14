@@ -343,7 +343,10 @@ real runner does not publish robot commands directly from the main entrypoint;
 SDK writes must stay behind `MagicbotRealAdapter`, independent of the local
 variable name used for the SDK object. A static safety-wall guard verifies that
 `run_robot_with_finally()` keeps its exception catch and publishes final damping
-through `ControllerRuntime.write_damping()` before disconnect. It also verifies
+through `ControllerRuntime.write_damping()` before disconnect. It also guards
+that direct real-runner target limiting/writes remain confined to the staged
+stand-interpolation ramp; STAND hold and runtime execution must publish through
+`ControllerRuntime` / `ControllerCore`. It also verifies
 several no-robot CLI safety gates: only one main mode may be selected,
 `--input-check` requires an input source, and live keyboard/gamepad/UDP inputs
 remain mutually exclusive before any robot connection path starts.
