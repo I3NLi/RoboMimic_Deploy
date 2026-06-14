@@ -50,7 +50,7 @@ struct ControllerCoreOptions {
     SafetyConfig safety{};
     float kp_scale{1.0f};
     float kd_scale{1.0f};
-    float max_target_rate{4.0f};
+    float max_target_rate{25.0f};
     float joint_limit_margin{0.01f};
     float damping_kd{3.0f};
 };

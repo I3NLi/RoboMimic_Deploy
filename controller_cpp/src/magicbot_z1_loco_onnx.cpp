@@ -109,7 +109,7 @@ struct Args {
     float stand_kp_scale{0.5f};
     float kp_scale{1.0f};
     float kd_scale{1.0f};
-    float max_target_rate{4.0f};
+    float max_target_rate{25.0f};
     float joint_limit_margin{0.01f};
     float damping_kd{3.0f};
     ml::RateWatchdogConfig rate;
@@ -148,6 +148,7 @@ void print_usage(const char* argv0)
         << "  --final-stand-time S             Return-to-stand time on normal exit\n"
         << "  --final-stand-hold-s S           Stand hold before final damping\n"
         << "  --hold-final-stand               Hold final stand until signal\n"
+        << "  --max-target-rate R              Max target slew rate in rad/s, default 25\n"
         << "\n"
         << "Operator input:\n"
         << "  --keyboard-control               Live terminal keyboard input in run loop\n"

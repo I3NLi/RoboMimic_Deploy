@@ -45,8 +45,6 @@ namespace ml = magicbot_loco;
 
 namespace {
 
-constexpr int kHeadMotorIndex = 13;
-
 std::atomic<bool> g_running{true};
 
 void signal_handler(int signum)
@@ -74,6 +72,7 @@ struct Args {
     float vx{0.0f};
     float vy{0.0f};
     float wz{0.0f};
+    float max_target_rate{25.0f};
     double damping_kd{8.0};
     bool ground_correction{false};
     std::string ground_floor_geom{"floor"};
@@ -213,6 +212,7 @@ void usage(const char* argv0)
         << "  --skip-network-check       Skip local IP preflight\n"
         << "  --real-disconnect          Run full SDK Disconnect/Shutdown on exit\n"
         << "  --vx V --vy V --wz V       Normalized command inputs; YAML cmd_range maps physical speed\n"
+        << "  --max-target-rate R        Max target slew rate in rad/s, default 25\n"
         << "\n"
         << "Disturbance test, pure-sim/forward sim only:\n"
         << "  --push-body NAME           Body receiving external force, default pelvis\n"
@@ -289,6 +289,8 @@ Args parse_args(int argc, char** argv)
             args.vy = std::stof(need_value(i, argc, argv));
         } else if (a == "--wz") {
             args.wz = std::stof(need_value(i, argc, argv));
+        } else if (a == "--max-target-rate") {
+            args.max_target_rate = std::stof(need_value(i, argc, argv));
         } else if (a == "--damping-kd") {
             args.damping_kd = std::stod(need_value(i, argc, argv));
         } else if (a == "--push-body") {
@@ -571,7 +573,7 @@ double apply_pd(
     for (int i = 0; i < model->nu && i < ml::kNumJoints; ++i) {
         const double q = data->qpos[7 + qpos_idx[i]];
         const double dq = data->qvel[6 + qvel_idx[i]];
-        const double target_q = (i == kHeadMotorIndex) ? 0.0 : static_cast<double>(target[i]);
+        const double target_q = static_cast<double>(target[i]);
         double tau = (target_q - q) * kp[i] - dq * kd[i];
         if (!std::isfinite(tau)) tau = -args.damping_kd * dq;
         double lo = -std::max(1.0f, tau_limit[i]);
@@ -1076,6 +1078,7 @@ int main(int argc, char** argv)
         ml::LocoConfig cfg = ml::load_loco_config(config_path);
         ml::ControllerCoreOptions core_options;
         core_options.safety.enabled = false;
+        core_options.max_target_rate = args.max_target_rate;
         ml::ControllerCore core(cfg, core_options);
         core.warmup(3);
 

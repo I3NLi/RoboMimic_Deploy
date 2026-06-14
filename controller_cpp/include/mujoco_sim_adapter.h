@@ -15,7 +15,7 @@ namespace magicbot_loco {
 struct MujocoSimAdapterOptions {
     std::vector<int> qpos_idx;
     std::vector<int> qvel_idx;
-    bool zero_head_target{true};
+    bool zero_head_target{false};
 };
 
 class MujocoSimAdapter final : public RobotAdapter {
