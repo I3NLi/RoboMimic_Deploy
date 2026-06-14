@@ -173,6 +173,16 @@ Shared mode transition check:
 scripts/run_mode_manager_check_native.sh
 ```
 
+Shared ControllerCore mode output check:
+
+```bash
+scripts/run_controller_core_check_native.sh
+```
+
+This loads the loco YAML and ONNX policy, then verifies that shared
+`ControllerCore` STAND stays position-targeted while PASSIVE and FINAL_DAMPING
+produce damping-only targets seeded from the current robot state.
+
 Real-runner UDP input smoke (no robot connection):
 
 ```bash
