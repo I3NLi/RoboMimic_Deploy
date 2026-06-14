@@ -82,7 +82,7 @@ if rg -n 'data->ctrl\[[^]]+\]\s*=' "${VIEWER_SOURCE}"; then
     exit 1
 fi
 
-echo "[Smoke] Checking viewer keyboard LOCO uses shared text action"
+echo "[Smoke] Checking viewer keyboard mode keys use shared text actions"
 python3 - "${VIEWER_SOURCE}" <<'PY'
 import re
 import sys
@@ -98,6 +98,17 @@ if "TextControlAction::ToggleLoco" not in block:
     sys.exit(1)
 if re.search(r"desired_mode\s*=", block):
     print("[Smoke][ERROR] viewer L key must not set desired_mode directly", file=sys.stderr)
+    sys.exit(1)
+r_match = re.search(r"case XK_r:\s*case XK_R:(.*?)case XK_f:", source, re.S)
+if not r_match:
+    print("[Smoke][ERROR] could not locate viewer R key block", file=sys.stderr)
+    sys.exit(1)
+r_block = r_match.group(1)
+if "TextControlAction::ResetStand" not in r_block:
+    print("[Smoke][ERROR] viewer R key must route through TextControlAction::ResetStand", file=sys.stderr)
+    sys.exit(1)
+if re.search(r"(desired_mode\s*=|reset_requested\s*=|desired_external_policy_key\.clear\(\))", r_block):
+    print("[Smoke][ERROR] viewer R key must not set reset/mode fields directly", file=sys.stderr)
     sys.exit(1)
 PY
 

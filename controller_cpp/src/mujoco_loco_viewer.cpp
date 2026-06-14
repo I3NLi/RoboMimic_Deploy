@@ -1765,9 +1765,16 @@ void handle_key(
         break;
     case XK_r:
     case XK_R:
-        reset_requested = true;
-        desired_mode = magicbot_loco::ControlMode::Stand;
-        desired_external_policy_key.clear();
+        apply_viewer_keyboard_text_action(
+            magicbot_loco::TextControlAction::ResetStand,
+            cmd,
+            desired_mode,
+            desired_external_policy_key,
+            dance_enabled,
+            skill_enabled,
+            paused,
+            running,
+            reset_requested);
         break;
     case XK_f:
     case XK_F:

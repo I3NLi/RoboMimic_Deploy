@@ -208,6 +208,8 @@ modes out into runner-specific per-mode booleans.
 The viewer's local keyboard LOCO toggle also routes through the shared text
 action effect, so local keys, HTTP, and UDP no longer maintain separate LOCO
 request semantics.
+The viewer's local reset/re-stand key likewise uses `ResetStand` text action
+semantics instead of directly mutating desired mode/reset fields.
 The real runner keyboard LOCO toggle now uses the same `ToggleLoco` text action
 effect before the run loop turns it into a shared desired-mode request.
 Real-runner relative input flags such as LOCO toggle and re-stand are assigned
