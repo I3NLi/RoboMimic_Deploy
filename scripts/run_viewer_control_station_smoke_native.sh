@@ -5,7 +5,7 @@ SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 PROJECT_ROOT="$( cd "${SCRIPT_DIR}/.." &> /dev/null && pwd )"
 RUNNER="${SCRIPT_DIR}/run_mujoco_loco_viewer_native.sh"
 
-duration="1.4"
+duration="2.0"
 camera_port=""
 udp_port=""
 summary_json=""
@@ -19,8 +19,8 @@ Usage: $0 [options] [-- extra run_mujoco_loco_viewer_native args]
 
 Smoke-test the --control-station preset. The script starts the native viewer
 through the control-station wrapper, provides a smoke TrackMimic trajectory
-YAML, then verifies HTTP control can enter DANCE/BeyondMimic and
-SKILL/TrackMimic trajectory.
+YAML, then verifies HTTP control can enter the base modes, reset back to STAND,
+and enter DANCE/BeyondMimic plus SKILL/TrackMimic trajectory.
 
 Options:
   --duration S       Viewer wall-clock duration, default ${duration}
@@ -158,6 +158,7 @@ viewer_pid=$!
 
 health_url="http://127.0.0.1:${camera_port}/health"
 control_url="http://127.0.0.1:${camera_port}/control"
+reset_url="http://127.0.0.1:${camera_port}/reset"
 status_url="http://127.0.0.1:${camera_port}/status"
 
 ready=0
@@ -181,10 +182,27 @@ fi
 
 post_control() {
     local mode="$1"
+    post_control_query "mode=${mode}" "mode=${mode}"
+}
+
+post_control_query() {
+    local query="$1"
+    local description="$2"
     local status
-    status="$(curl -sS -o "${status_body}" -w '%{http_code}' -X POST "${control_url}?mode=${mode}")"
+    status="$(curl -sS -o "${status_body}" -w '%{http_code}' -X POST "${control_url}?${query}")"
     if [[ "${status}" != "200" ]]; then
-        echo "[Smoke][ERROR] control mode=${mode} returned HTTP ${status}" >&2
+        echo "[Smoke][ERROR] control ${description} returned HTTP ${status}" >&2
+        cat "${status_body}" >&2 || true
+        sed -n '1,260p' "${viewer_log}" >&2
+        exit 1
+    fi
+}
+
+post_reset() {
+    local status
+    status="$(curl -sS -o "${status_body}" -w '%{http_code}' -X POST "${reset_url}")"
+    if [[ "${status}" != "200" ]]; then
+        echo "[Smoke][ERROR] /reset returned HTTP ${status}" >&2
         cat "${status_body}" >&2 || true
         sed -n '1,260p' "${viewer_log}" >&2
         exit 1
@@ -196,10 +214,16 @@ wait_status() {
     local description="$2"
     local ready=0
     for _ in $(seq 1 80); do
-        curl -fsS "${status_url}" -o "${status_body}"
-        if jq -e "${jq_expr}" "${status_body}" >/dev/null; then
+        if curl -fsS "${status_url}" -o "${status_body}" &&
+           jq -e "${jq_expr}" "${status_body}" >/dev/null; then
             ready=1
             break
+        fi
+        if ! kill -0 "${viewer_pid}" >/dev/null 2>&1; then
+            echo "[Smoke][ERROR] viewer exited before reporting ${description}" >&2
+            cat "${status_body}" >&2 || true
+            sed -n '1,260p' "${viewer_log}" >&2
+            exit 1
         fi
         sleep 0.05
     done
@@ -211,11 +235,26 @@ wait_status() {
     fi
 }
 
+post_control "passive"
+wait_status '.mode == "PASSIVE" and .adapter_backend == "mujoco-sim" and .adapter_command_published == true and .paused == false and .cmd[0] == 0 and .cmd[1] == 0 and .cmd[2] == 0 and .sim_steps > 0' "control-station PASSIVE"
+
+post_control "stand"
+wait_status '.mode == "STAND" and .adapter_backend == "mujoco-sim" and .adapter_command_published == true and .paused == false and .cmd[0] == 0 and .cmd[1] == 0 and .cmd[2] == 0 and .sim_steps > 0' "control-station STAND"
+
+post_control_query "mode=loco&vx=0.12&vy=0.03&wz=-0.04" "mode=loco velocity"
+wait_status '.mode == "LOCO" and .adapter_backend == "mujoco-sim" and .adapter_command_published == true and .paused == false and (.cmd[0] > 0.11 and .cmd[0] < 0.13) and (.cmd[1] > 0.02 and .cmd[1] < 0.04) and (.cmd[2] > -0.05 and .cmd[2] < -0.03) and .sim_steps > 0' "control-station LOCO velocity"
+
+post_reset
+wait_status '.mode == "STAND" and .adapter_backend == "mujoco-sim" and .adapter_command_published == true and .paused == false and .cmd[0] == 0 and .cmd[1] == 0 and .cmd[2] == 0 and .http_reset_requests >= 1 and .sim_steps > 0' "control-station /reset STAND"
+
+post_control "final_damping"
+wait_status '.mode == "FINAL_DAMPING" and .adapter_backend == "mujoco-sim" and .adapter_command_published == true and .paused == false and .cmd[0] == 0 and .cmd[1] == 0 and .cmd[2] == 0 and .sim_steps > 0' "control-station FINAL_DAMPING"
+
 post_control "beyond"
 wait_status '.mode == "DANCE" and .external_policy == "BeyondMimic" and .adapter_backend == "mujoco-sim" and .adapter_command_published == true and .paused == false and .policy_steps > 0 and .sim_steps > 0' "control-station DANCE/BeyondMimic"
 
 post_control "track_mimic"
-wait_status '.mode == "SKILL" and .external_policy == "TrackMimic" and .adapter_backend == "mujoco-sim" and .adapter_command_published == true and .paused == false and .policy_steps > 0 and .sim_steps > 0 and .http_control_commands >= 2' "control-station SKILL/TrackMimic trajectory"
+wait_status '.mode == "SKILL" and .external_policy == "TrackMimic" and .adapter_backend == "mujoco-sim" and .adapter_command_published == true and .paused == false and .policy_steps > 0 and .sim_steps > 0 and .http_control_commands >= 6 and .http_reset_requests >= 1' "control-station SKILL/TrackMimic trajectory"
 
 if ! wait "${viewer_pid}"; then
     echo "[Smoke][ERROR] viewer exited with failure" >&2
@@ -230,12 +269,12 @@ if [[ ! -s "${summary_json}" ]]; then
     exit 1
 fi
 
-if ! jq -e '.mode == "SKILL" and .external_policy == "TrackMimic" and .adapter_backend == "mujoco-sim" and .adapter_command_published == true and .paused == false and .policy_steps > 0 and .sim_steps > 0 and .http_control_commands >= 2' "${summary_json}" >/dev/null; then
+if ! jq -e '.mode == "SKILL" and .external_policy == "TrackMimic" and .adapter_backend == "mujoco-sim" and .adapter_command_published == true and .paused == false and .policy_steps > 0 and .sim_steps > 0 and .http_control_commands >= 6 and .http_reset_requests >= 1' "${summary_json}" >/dev/null; then
     echo "[Smoke][ERROR] summary did not report final control-station SKILL/TrackMimic trajectory" >&2
     cat "${summary_json}" >&2
     exit 1
 fi
 
-echo "[Smoke] PASSED viewer control-station external policies"
+echo "[Smoke] PASSED viewer control-station modes and external policies"
 echo "[Smoke] summary=${summary_json}"
-jq '{mode, external_policy, adapter_backend, adapter_command_published, paused, sim_steps, policy_steps, http_control_commands}' "${summary_json}"
+jq '{mode, external_policy, adapter_backend, adapter_command_published, paused, sim_steps, policy_steps, http_control_commands, http_reset_requests}' "${summary_json}"

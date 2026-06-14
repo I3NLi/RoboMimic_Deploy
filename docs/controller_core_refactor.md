@@ -599,26 +599,28 @@ This repeats the fake joystick check through the Python-facing viewer launcher.
 Viewer control-station preset smoke:
 
 ```bash
-scripts/run_viewer_control_station_smoke_native.sh --duration 1.4 --keep-summary
+scripts/run_viewer_control_station_smoke_native.sh --duration 2.0 --keep-summary
 ```
 
 The script starts `run_mujoco_loco_viewer_native.sh --control-station` without
 explicit `--beyond-yaml` or `--track-mimic-yaml`, then uses the HTTP control API
-to enter `DANCE/BeyondMimic` and `SKILL/TrackMimic` trajectory, verifying that
-the preset mounts the same shared external-policy adapters used by direct viewer
-launches.
+to enter `PASSIVE`, `STAND`, `LOCO`, reset back to `STAND`, enter
+`FINAL_DAMPING`, then enter `DANCE/BeyondMimic` and `SKILL/TrackMimic`
+trajectory. It verifies the preset mounts the same shared mode/control and
+external-policy adapters used by direct viewer launches.
 
 Python viewer entrypoint smoke:
 
 ```bash
 scripts/run_viewer_control_station_smoke_native.sh \
-  --runner scripts/run_python_mujoco_viewer.py --duration 1.4 --keep-summary
+  --runner scripts/run_python_mujoco_viewer.py --duration 2.0 --keep-summary
 ```
 
-This repeats the same control-station external-policy checks through the Python
-compatibility launcher, proving the Python-facing viewer command still delegates
-to the shared native runtime instead of a separate control brain. The aggregate
-suite also guards that launcher at the import/call level so it remains a thin
+This repeats the same control-station mode/control and external-policy checks
+through the Python compatibility launcher, proving the Python-facing viewer
+command still delegates to the shared native runtime instead of a separate
+control brain. The aggregate suite also guards that launcher at the import/call
+level so it remains a thin
 native-runtime wrapper.
 
 Viewer HTTP remote perturb smoke:
