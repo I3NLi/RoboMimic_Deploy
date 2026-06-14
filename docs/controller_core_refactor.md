@@ -255,9 +255,16 @@ The script sends viewer UDP text-control packets for
 summary for `mode == FINAL_DAMPING`, `paused == false`, and advancing
 `sim_steps`.
 
-For an unpaused remote perturb smoke, keep the drag active for a short wall-clock
-interval before sending `type=up`; the summary should report
-`mouse_perturb_steps > 0`.
+Viewer HTTP remote perturb smoke:
+
+```bash
+scripts/run_viewer_http_perturb_smoke_native.sh --duration 1.5 --keep-summary
+```
+
+The script posts `type=down`, `type=move`, and `type=up` to `/viewer-event`,
+keeps the drag active for a short wall-clock interval, and checks the summary
+for `mouse_perturb_steps > 0`, resolved perturb body metadata, and advancing
+`sim_steps`.
 
 ## Next cuts
 
