@@ -114,10 +114,14 @@ The viewer can write a telemetry JSON summary with `--summary-json`, run the sam
 scheduled push/impulse disturbance inputs as the rate smoke, and apply interactive
 MuJoCo perturb forces with `Shift+left` / `Shift+middle` mouse dragging on a
 selected body.
+When `--beyond-yaml PATH` is supplied, the viewer registers BeyondMimic as the
+same shared `DANCE` external policy used by the real runner; `B` and UDP
+`mode=beyond` / `mode=dance` enter it.
 
 The first `ControllerCore` implementation supports `PASSIVE`, `STAND`, `LOCO`,
 and `FINAL_DAMPING`. `DANCE` and `SKILL` are represented in the shared mode enum
-but intentionally reject requests until the skill policy adapter is wired.
+and intentionally reject requests until a matching external policy adapter is
+registered.
 
 This keeps the real-robot safety ladder intact: high-risk LOCO still requires
 the existing CLI `--allow-loco` gate, and adapters remain responsible only for
@@ -151,6 +155,15 @@ controller_cpp/build_mujoco_viewer/mujoco_loco_viewer --duration 0.4 \
   --push-body pelvis --push-force 25,0,0 --push-start 0.05 \
   --push-duration 0.08 --push-impulse 0,0.8,0 --push-impulse-time 0.18 \
   --summary-json /tmp/viewer_push_summary.json
+```
+
+Viewer BeyondMimic load smoke:
+
+```bash
+controller_cpp/build_mujoco_viewer/mujoco_loco_viewer --duration 0.2 \
+  --paused --no-realtime --width 640 --height 480 \
+  --beyond-yaml policies/beyond_mimic/config/BeyondMimic.yaml \
+  --summary-json /tmp/viewer_beyond_summary.json
 ```
 
 ## Next cuts

@@ -1,5 +1,8 @@
+#include "native_fsm_policy_types.h"
+#include "beyond_mimic_policy.h"
 #include "controller_core.h"
 #include "controller_runtime.h"
+#include "fsm_external_policy_adapter.h"
 #include "magicbot_loco_core.h"
 #include "mujoco_sim_adapter.h"
 
@@ -57,6 +60,7 @@ namespace {
 
 struct Args {
     std::string config = "policies/loco_mode/config/LocoMode_lowKp.yaml";
+    std::string beyond_yaml;
     std::string mujoco_yaml = "configs/simulation/mujoco.yaml";
     std::string xml;
     std::string initial_pose_yaml;
@@ -449,7 +453,7 @@ private:
 void usage(const char* argv0)
 {
     std::printf(
-        "Usage: %s [--config PATH] [--mujoco-yaml PATH] [--xml PATH]\n"
+        "Usage: %s [--config PATH] [--beyond-yaml PATH] [--mujoco-yaml PATH] [--xml PATH]\n"
         "          [--initial-pose-yaml PATH] [--loco] [--paused|--unpaused]\n"
         "          [--duration SEC] [--width N] [--height N]\n"
         "          [--summary-json PATH]\n"
@@ -459,7 +463,7 @@ void usage(const char* argv0)
         "          [--camera-stream] [--camera-port N] [--camera-name NAME]\n"
         "          [--camera-ros2] [--ros2-topic-rgb TOPIC] [--ros2-topic-rgba TOPIC]\n"
         "\n"
-        "Keys: L toggle loco, Space pause, R reset, F follow, X zero command,\n"
+        "Keys: L toggle loco, B Beyond/DANCE, Space pause, R reset, F follow, X zero command,\n"
         "      W/S vx, Q/E vy, A/D wz, Esc close. Mouse drags move camera;\n"
         "      Shift+left/middle drag applies MuJoCo perturb force to the selected body.\n",
         argv0);
@@ -508,6 +512,8 @@ Args parse_args(int argc, char** argv)
         std::string arg(argv[i]);
         if (arg == "--config") {
             args.config = need_value(i, argc, argv);
+        } else if (arg == "--beyond-yaml") {
+            args.beyond_yaml = need_value(i, argc, argv);
         } else if (arg == "--mujoco-yaml") {
             args.mujoco_yaml = need_value(i, argc, argv);
         } else if (arg == "--xml") {
@@ -865,7 +871,26 @@ void reset_sim(
     mj_forward(model, data);
 }
 
-const char* viewer_mode_label(bool loco, bool passive);
+magicbot_loco::ControlMode control_mode_for_fsm_state(FSMStateName state)
+{
+    switch (state) {
+    case FSMStateName::PASSIVE:
+        return magicbot_loco::ControlMode::Passive;
+    case FSMStateName::FIXEDPOSE:
+        return magicbot_loco::ControlMode::Stand;
+    case FSMStateName::LOCOMODE:
+    case FSMStateName::SKILL_COOLDOWN:
+        return magicbot_loco::ControlMode::Loco;
+    case FSMStateName::SKILL_BEYOND_MIMIC:
+    case FSMStateName::SKILL_TRACK_MIMIC:
+    case FSMStateName::SKILL_DANCE:
+        return magicbot_loco::ControlMode::Dance;
+    default:
+        return magicbot_loco::ControlMode::Skill;
+    }
+}
+
+const char* viewer_mode_label(bool loco, bool passive, bool dance);
 
 std::string body_name(const mjModel* model, int body_id)
 {
@@ -951,6 +976,7 @@ std::string viewer_summary_json(
     int policy_step,
     bool loco_active,
     bool passive_active,
+    bool dance_active,
     bool paused,
     double wall_s,
     int push_body_id)
@@ -958,7 +984,7 @@ std::string viewer_summary_json(
     std::ostringstream out;
     out << std::fixed << std::setprecision(6)
         << "{"
-        << "\"mode\":\"" << viewer_mode_label(loco_active, passive_active) << "\","
+        << "\"mode\":\"" << viewer_mode_label(loco_active, passive_active, dance_active) << "\","
         << "\"paused\":" << (paused ? "true" : "false") << ","
         << "\"wall_s\":" << wall_s << ","
         << "\"sim_time_s\":" << data->time << ","
@@ -1073,8 +1099,9 @@ bool parse_float_token(const std::string& token, float& value)
 
 class ViewerUdpCommandInput {
 public:
-    explicit ViewerUdpCommandInput(const Args& args)
-        : args_(args)
+    explicit ViewerUdpCommandInput(const Args& args, bool dance_enabled)
+        : args_(args),
+          dance_enabled_(dance_enabled)
     {
         fd_ = socket(AF_INET, SOCK_DGRAM, 0);
         if (fd_ < 0) throw std::runtime_error(std::string("viewer udp socket failed: ") + std::strerror(errno));
@@ -1109,6 +1136,7 @@ public:
         std::array<float, 3>& cmd,
         bool& loco_active,
         bool& passive_active,
+        bool& dance_active,
         bool& paused,
         bool& running,
         bool& reset_requested)
@@ -1126,6 +1154,7 @@ public:
                 const auto old_cmd = cmd;
                 const bool old_loco_active = loco_active;
                 const bool old_passive_active = passive_active;
+                const bool old_dance_active = dance_active;
                 const bool old_paused = paused;
                 const bool old_running = running;
                 const bool old_reset_requested = reset_requested;
@@ -1134,6 +1163,7 @@ public:
                     cmd,
                     loco_active,
                     passive_active,
+                    dance_active,
                     paused,
                     running,
                     reset_requested);
@@ -1142,6 +1172,7 @@ public:
                 changed = changed || old_cmd != cmd ||
                           old_loco_active != loco_active ||
                           old_passive_active != passive_active ||
+                          old_dance_active != dance_active ||
                           old_paused != paused ||
                           old_running != running || old_reset_requested != reset_requested;
                 continue;
@@ -1167,6 +1198,7 @@ private:
         std::array<float, 3>& cmd,
         bool& loco_active,
         bool& passive_active,
+        bool& dance_active,
         bool& paused,
         bool& running,
         bool& reset_requested)
@@ -1191,7 +1223,7 @@ private:
                 } else if ((key == "wz" || key == "yaw") && parse_float_token(val, parsed)) {
                     cmd[2] = clamp_cmd(parsed);
                 } else if (key == "mode") {
-                    handle_word(val, cmd, loco_active, passive_active, paused, running, reset_requested);
+                    handle_word(val, cmd, loco_active, passive_active, dance_active, paused, running, reset_requested);
                 }
                 continue;
             }
@@ -1202,7 +1234,7 @@ private:
                 ++numeric_index;
                 continue;
             }
-            handle_word(lower_copy(token), cmd, loco_active, passive_active, paused, running, reset_requested);
+            handle_word(lower_copy(token), cmd, loco_active, passive_active, dance_active, paused, running, reset_requested);
         }
     }
 
@@ -1211,30 +1243,45 @@ private:
         std::array<float, 3>& cmd,
         bool& loco_active,
         bool& passive_active,
+        bool& dance_active,
         bool& paused,
         bool& running,
         bool& reset_requested)
     {
         if (word == "loco" || word == "run") {
-            if (!loco_active || passive_active) reset_requested = true;
+            if (!loco_active || passive_active || dance_active) reset_requested = true;
             loco_active = true;
             passive_active = false;
+            dance_active = false;
             paused = false;
         } else if (word == "stand") {
             cmd = {0.0f, 0.0f, 0.0f};
             loco_active = false;
             passive_active = false;
+            dance_active = false;
             reset_requested = true;
             paused = false;
         } else if (word == "reset" || word == "restand") {
             cmd = {0.0f, 0.0f, 0.0f};
             passive_active = false;
+            dance_active = false;
             reset_requested = true;
             paused = false;
         } else if (word == "passive" || word == "damping") {
             cmd = {0.0f, 0.0f, 0.0f};
             loco_active = false;
             passive_active = true;
+            dance_active = false;
+            paused = false;
+        } else if (word == "dance" || word == "beyond" || word == "beyondmimic") {
+            if (!dance_enabled_) {
+                std::fprintf(stderr, "[Viewer] DANCE ignored; start with --beyond-yaml PATH to enable BeyondMimic\n");
+                return;
+            }
+            cmd = {0.0f, 0.0f, 0.0f};
+            loco_active = false;
+            passive_active = false;
+            dance_active = true;
             paused = false;
         } else if (word == "zero" || word == "x") {
             cmd = {0.0f, 0.0f, 0.0f};
@@ -1248,28 +1295,38 @@ private:
     }
 
     const Args& args_;
+    bool dance_enabled_{false};
     int fd_{-1};
     bool have_packet_{false};
     Clock::time_point last_packet_t_{};
 };
 
-const char* viewer_mode_label(bool loco, bool passive)
+const char* viewer_mode_label(bool loco, bool passive, bool dance)
 {
     if (passive) return "PASSIVE";
+    if (dance) return "DANCE";
     return loco ? "LOCO" : "STAND";
 }
 
-magicbot_loco::ControlMode viewer_control_mode(bool loco, bool passive)
+magicbot_loco::ControlMode viewer_control_mode(bool loco, bool passive, bool dance)
 {
     if (passive) return magicbot_loco::ControlMode::Passive;
+    if (dance) return magicbot_loco::ControlMode::Dance;
     return loco ? magicbot_loco::ControlMode::Loco : magicbot_loco::ControlMode::Stand;
 }
 
-void print_cmd(const std::array<float, 3>& cmd, bool loco, bool passive, bool paused)
+void sync_viewer_mode_flags(magicbot_loco::ControlMode mode, bool& loco, bool& passive, bool& dance)
+{
+    passive = mode == magicbot_loco::ControlMode::Passive;
+    loco = mode == magicbot_loco::ControlMode::Loco;
+    dance = mode == magicbot_loco::ControlMode::Dance;
+}
+
+void print_cmd(const std::array<float, 3>& cmd, bool loco, bool passive, bool dance, bool paused)
 {
     std::printf(
         "[Viewer] mode=%s paused=%s cmd(vx,vy,wz)=[%.2f %.2f %.2f]\n",
-        viewer_mode_label(loco, passive),
+        viewer_mode_label(loco, passive, dance),
         paused ? "yes" : "no",
         cmd[0],
         cmd[1],
@@ -1281,6 +1338,8 @@ void handle_key(
     bool& running,
     bool& loco_active,
     bool& passive_active,
+    bool& dance_active,
+    bool dance_enabled,
     bool& paused,
     bool& follow,
     bool& reset_requested,
@@ -1298,11 +1357,24 @@ void handle_key(
     case XK_L:
         loco_active = !loco_active;
         passive_active = false;
+        dance_active = false;
+        break;
+    case XK_b:
+    case XK_B:
+        if (!dance_enabled) {
+            std::fprintf(stderr, "[Viewer] DANCE ignored; start with --beyond-yaml PATH to enable BeyondMimic\n");
+            return;
+        }
+        loco_active = false;
+        passive_active = false;
+        dance_active = !dance_active;
+        if (dance_active) paused = false;
         break;
     case XK_r:
     case XK_R:
         reset_requested = true;
         passive_active = false;
+        dance_active = false;
         break;
     case XK_f:
     case XK_F:
@@ -1343,7 +1415,7 @@ void handle_key(
     default:
         return;
     }
-    print_cmd(cmd, loco_active, passive_active, paused);
+    print_cmd(cmd, loco_active, passive_active, dance_active, paused);
 }
 
 void process_events(
@@ -1359,6 +1431,8 @@ void process_events(
     bool& running,
     bool& loco_active,
     bool& passive_active,
+    bool& dance_active,
+    bool dance_enabled,
     bool& paused,
     bool& follow,
     bool& reset_requested,
@@ -1377,7 +1451,17 @@ void process_events(
             break;
         case KeyPress: {
             KeySym sym = XLookupKeysym(&event.xkey, 0);
-            handle_key(sym, running, loco_active, passive_active, paused, follow, reset_requested, cmd);
+            handle_key(
+                sym,
+                running,
+                loco_active,
+                passive_active,
+                dance_active,
+                dance_enabled,
+                paused,
+                follow,
+                reset_requested,
+                cmd);
             break;
         }
         case ButtonPress:
@@ -1560,6 +1644,35 @@ int main(int argc, char** argv)
         core.set_gains(sim_gains);
         core.set_default_target(stand_q);
 
+        StateAndCmd external_state(magicbot_loco::kNumJoints);
+        PolicyOutput external_output(magicbot_loco::kNumJoints);
+        std::unique_ptr<BeyondMimicPolicy> beyond_policy;
+        using BeyondAdapter =
+            magicbot_loco::FsmExternalPolicyAdapter<BeyondMimicPolicy, StateAndCmd, PolicyOutput, FSMStateName>;
+        std::unique_ptr<BeyondAdapter> beyond_adapter;
+        bool dance_enabled = false;
+        if (!args.beyond_yaml.empty()) {
+            const fs::path beyond_yaml_path = resolve_path(root, args.beyond_yaml);
+            if (!fs::exists(beyond_yaml_path)) {
+                throw std::runtime_error("BeyondMimic config not found: " + beyond_yaml_path.string());
+            }
+            beyond_policy = std::make_unique<BeyondMimicPolicy>(
+                external_state,
+                external_output,
+                beyond_yaml_path.string(),
+                static_cast<float>(loco_cfg.policy_dt));
+            beyond_adapter = std::make_unique<BeyondAdapter>(
+                magicbot_loco::ControlMode::Dance,
+                "BeyondMimic",
+                FSMStateName::SKILL_BEYOND_MIMIC,
+                external_state,
+                external_output,
+                *beyond_policy,
+                control_mode_for_fsm_state);
+            core.register_external_policy(*beyond_adapter);
+            dance_enabled = true;
+        }
+
         char error[1024] = {0};
         mjModel* model = mj_loadXML(xml_path.string().c_str(), nullptr, error, sizeof(error));
         if (!model) {
@@ -1670,13 +1783,14 @@ int main(int argc, char** argv)
         bool running = true;
         bool loco_active = args.start_loco;
         bool passive_active = false;
+        bool dance_active = false;
         bool paused = args.paused;
         bool follow = args.follow;
         bool reset_requested = false;
         std::array<float, 3> cmd{0.0f, 0.0f, 0.0f};
         std::unique_ptr<ViewerUdpCommandInput> udp_input;
         if (args.udp_control) {
-            udp_input = std::make_unique<ViewerUdpCommandInput>(args);
+            udp_input = std::make_unique<ViewerUdpCommandInput>(args, dance_enabled);
         }
         MouseState mouse;
         ViewerStats stats;
@@ -1697,7 +1811,11 @@ int main(int argc, char** argv)
         std::printf("XML    : %s\n", xml_path.string().c_str());
         std::printf("Config : %s\n", config_path.string().c_str());
         std::printf("ONNX   : %s\n", loco_cfg.policy_path.string().c_str());
-        std::printf("Keys   : L loco, Space pause, R reset, F follow, X zero, W/S vx, Q/E vy, A/D wz, Esc close\n");
+        if (dance_enabled) {
+            std::printf("Beyond : %s\n", resolve_path(root, args.beyond_yaml).string().c_str());
+        }
+        std::printf(
+            "Keys   : L loco, B beyond/dance, Space pause, R reset, F follow, X zero, W/S vx, Q/E vy, A/D wz, Esc close\n");
         if (udp_input) {
             std::printf(
                 "UDP    : command input on %s:%d, timeout %.2fs (text: vx=0.3 vy=0 wz=0 mode=loco)\n",
@@ -1718,7 +1836,7 @@ int main(int argc, char** argv)
         if (!args.summary_json.empty()) {
             std::printf("Summary: %s\n", resolve_path(root, args.summary_json).string().c_str());
         }
-        print_cmd(cmd, loco_active, passive_active, paused);
+        print_cmd(cmd, loco_active, passive_active, dance_active, paused);
 
         while (running) {
             const auto frame_start = Clock::now();
@@ -1735,13 +1853,16 @@ int main(int argc, char** argv)
                 running,
                 loco_active,
                 passive_active,
+                dance_active,
+                dance_enabled,
                 paused,
                 follow,
                 reset_requested,
                 cmd);
             if (!running) break;
-            if (udp_input && udp_input->poll(cmd, loco_active, passive_active, paused, running, reset_requested)) {
-                print_cmd(cmd, loco_active, passive_active, paused);
+            if (udp_input &&
+                udp_input->poll(cmd, loco_active, passive_active, dance_active, paused, running, reset_requested)) {
+                print_cmd(cmd, loco_active, passive_active, dance_active, paused);
             }
             if (!running) break;
 
@@ -1765,10 +1886,11 @@ int main(int argc, char** argv)
                     magicbot_loco::RuntimeTickInput tick_input;
                     tick_input.command.velocity = cmd;
                     tick_input.mode_request =
-                        magicbot_loco::ModeRequest::enter(viewer_control_mode(loco_active, passive_active));
+                        magicbot_loco::ModeRequest::enter(viewer_control_mode(loco_active, passive_active, dance_active));
                     tick_input.control_dt_s = static_cast<float>(model->opt.timestep);
                     tick_input.publish_target = true;
                     const auto tick = runtime.tick(tick_input);
+                    sync_viewer_mode_flags(tick.core.telemetry.mode, loco_active, passive_active, dance_active);
                     policy_step = tick.core.telemetry.policy_steps;
                     const auto gravity = tick.core.telemetry.projected_gravity;
                     stats.max_gravity_xy = std::max(
@@ -1856,7 +1978,7 @@ int main(int argc, char** argv)
                 left,
                 sizeof(left),
                 "mode: %s\npause: %s\nsim: %.2fs\nbase: %.2f %.2f %.3f\npolicy steps: %d",
-                viewer_mode_label(loco_active, passive_active),
+                viewer_mode_label(loco_active, passive_active, dance_active),
                 paused ? "yes" : "no",
                 data->time,
                 data->qpos[0],
@@ -1866,7 +1988,7 @@ int main(int argc, char** argv)
             std::snprintf(
                 right,
                 sizeof(right),
-                "cmd vx %.2f\ncmd vy %.2f\ncmd wz %.2f\npush steps %d impulse %s\nperturb %s\nL loco | Space pause\nR reset | F follow | X zero",
+                "cmd vx %.2f\ncmd vy %.2f\ncmd wz %.2f\npush steps %d impulse %s\nperturb %s\nL loco | B dance\nSpace pause | R reset | X zero",
                 cmd[0],
                 cmd[1],
                 cmd[2],
@@ -1884,7 +2006,7 @@ int main(int argc, char** argv)
                     "[Viewer] wall=%.1f sim=%.2f mode=%s cmd=[%.2f %.2f %.2f] base=[%.2f %.2f %.3f]\n",
                     wall_s,
                     data->time,
-                    viewer_mode_label(loco_active, passive_active),
+                    viewer_mode_label(loco_active, passive_active, dance_active),
                     cmd[0],
                     cmd[1],
                     cmd[2],
@@ -1915,6 +2037,7 @@ int main(int argc, char** argv)
                 policy_step,
                 loco_active,
                 passive_active,
+                dance_active,
                 paused,
                 wall_s,
                 push_body_id);

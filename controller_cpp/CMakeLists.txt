@@ -255,6 +255,7 @@ if(MUJOCO_ROOT AND MUJOCO_INCLUDE_DIR AND MUJOCO_LIB AND OpenGL_FOUND AND X11_FO
     target_link_libraries(mujoco_loco_viewer
         pthread
         yaml-cpp
+        ZLIB::ZLIB
         "${ORT_SO}"
         "${MUJOCO_LIB}"
         ${X11_LIBRARIES}
