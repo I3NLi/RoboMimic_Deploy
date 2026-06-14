@@ -433,6 +433,7 @@ float apply_axis_deadzone(float value, float deadzone)
 
 struct LiveInputState {
     std::array<float, 3> command{0.0f, 0.0f, 0.0f};
+    ml::ModeRequest mode_request{ml::ModeRequest::none()};
     bool stop_requested{false};
     bool passive_requested{false};
     bool loco_requested{false};
@@ -445,9 +446,34 @@ struct LiveInputState {
     bool pause_zero{false};
     bool changed{false};
     bool zeroed_by_deadman{false};
-    std::string requested_external_policy_key;
     std::string status;
 };
+
+void set_live_input_mode_request(LiveInputState& out, ml::ModeRequest request)
+{
+    if (!request.requested) return;
+    out.mode_request = request;
+    switch (request.mode) {
+    case ml::ControlMode::Passive:
+        out.passive_requested = true;
+        break;
+    case ml::ControlMode::Stand:
+        out.stand_requested = true;
+        break;
+    case ml::ControlMode::Loco:
+        out.loco_requested = true;
+        break;
+    case ml::ControlMode::Dance:
+        out.dance_requested = true;
+        break;
+    case ml::ControlMode::Skill:
+        out.skill_requested = true;
+        break;
+    case ml::ControlMode::FinalDamping:
+        out.final_damping_requested = true;
+        break;
+    }
+}
 
 bool dance_request_allowed(const Args& args, const char* prefix)
 {
@@ -554,22 +580,22 @@ private:
             break;
         case 'b':
         case 'B':
-            out.dance_requested = true;
+            set_live_input_mode_request(out, ml::mode_request_for_control_mode(ml::ControlMode::Dance));
             paused_ = false;
             break;
         case 't':
         case 'T':
-            out.skill_requested = true;
+            set_live_input_mode_request(out, ml::mode_request_for_control_mode(ml::ControlMode::Skill));
             paused_ = false;
             break;
         case 'm':
         case 'M':
-            out.passive_requested = true;
+            set_live_input_mode_request(out, ml::mode_request_for_control_mode(ml::ControlMode::Passive));
             paused_ = false;
             break;
         case 'f':
         case 'F':
-            out.final_damping_requested = true;
+            set_live_input_mode_request(out, ml::mode_request_for_control_mode(ml::ControlMode::FinalDamping));
             paused_ = false;
             break;
         case 'r':
@@ -693,11 +719,11 @@ private:
             if (event.value) {
                 if (args_.gamepad_loco_button >= 0 && event.number == args_.gamepad_loco_button) {
                     paused_ = false;
-                    out.loco_requested = true;
+                    set_live_input_mode_request(out, ml::mode_request_for_control_mode(ml::ControlMode::Loco));
                 }
                 if (args_.gamepad_stand_button >= 0 && event.number == args_.gamepad_stand_button) {
                     paused_ = false;
-                    out.stand_requested = true;
+                    set_live_input_mode_request(out, ml::mode_request_for_control_mode(ml::ControlMode::Stand));
                 }
                 if (args_.gamepad_zero_button >= 0 && event.number == args_.gamepad_zero_button) {
                     paused_ = true;
@@ -711,11 +737,11 @@ private:
                 }
                 if (args_.gamepad_dance_button >= 0 && event.number == args_.gamepad_dance_button) {
                     paused_ = false;
-                    out.dance_requested = true;
+                    set_live_input_mode_request(out, ml::mode_request_for_control_mode(ml::ControlMode::Dance));
                 }
                 if (args_.gamepad_skill_button >= 0 && event.number == args_.gamepad_skill_button) {
                     paused_ = false;
-                    out.skill_requested = true;
+                    set_live_input_mode_request(out, ml::mode_request_for_control_mode(ml::ControlMode::Skill));
                 }
             }
         }
@@ -853,29 +879,7 @@ private:
         if (!effect.mode_requested) {
             return;
         }
-        out.requested_external_policy_key =
-            ml::mode_request_for_text_control_effect(effect).external_policy_key;
-
-        switch (effect.mode) {
-        case ml::ControlMode::Passive:
-            out.passive_requested = true;
-            break;
-        case ml::ControlMode::Stand:
-            out.stand_requested = true;
-            break;
-        case ml::ControlMode::Loco:
-            out.loco_requested = true;
-            break;
-        case ml::ControlMode::Dance:
-            out.dance_requested = true;
-            break;
-        case ml::ControlMode::Skill:
-            out.skill_requested = true;
-            break;
-        case ml::ControlMode::FinalDamping:
-            out.final_damping_requested = true;
-            break;
-        }
+        set_live_input_mode_request(out, ml::mode_request_for_text_control_effect(effect));
     }
 
     const Args& args_;
@@ -1165,23 +1169,19 @@ int input_check_only(const Args& args)
         if (state.toggle_loco_requested) {
             mode = mode == ml::ControlMode::Loco ? ml::ControlMode::Stand : ml::ControlMode::Loco;
         }
-        if (state.passive_requested) {
-            mode = ml::ControlMode::Passive;
-        }
-        if (state.stand_requested || state.reset_stand_requested) {
+        if (state.reset_stand_requested) {
             mode = ml::ControlMode::Stand;
         }
-        if (state.loco_requested) {
-            mode = ml::ControlMode::Loco;
-        }
-        if (state.dance_requested && dance_request_allowed(args, "[InputCheck]")) {
-            mode = ml::ControlMode::Dance;
-        }
-        if (state.skill_requested && skill_request_allowed(args, "[InputCheck]")) {
-            mode = ml::ControlMode::Skill;
-        }
-        if (state.final_damping_requested) {
-            mode = ml::ControlMode::FinalDamping;
+        if (state.mode_request.requested) {
+            bool allowed = true;
+            if (state.mode_request.mode == ml::ControlMode::Dance) {
+                allowed = dance_request_allowed(args, "[InputCheck]");
+            } else if (state.mode_request.mode == ml::ControlMode::Skill) {
+                allowed = skill_request_allowed(args, "[InputCheck]");
+            }
+            if (allowed) {
+                mode = state.mode_request.mode;
+            }
         }
         if (state.changed || std::chrono::duration<double>(now - last_log).count() >= args.log_interval) {
             std::cout << "[InputCheck] " << state.status << " mode=" << ml::control_mode_name(mode)
@@ -1352,33 +1352,17 @@ int run_robot_with_finally(const Args& args, const ml::LocoConfig& cfg, ml::Cont
                             run_mode == ml::ControlMode::Loco ? ml::ControlMode::Stand : ml::ControlMode::Loco;
                         mode_requested = true;
                     }
-                    if (input.passive_requested) {
-                        requested_mode = ml::ControlMode::Passive;
-                        mode_requested = true;
-                    }
-                    if (input.stand_requested) {
-                        requested_mode = ml::ControlMode::Stand;
-                        mode_requested = true;
-                    }
-                    if (input.loco_requested) {
-                        requested_mode = ml::ControlMode::Loco;
-                        mode_requested = true;
-                    }
-                    if (input.dance_requested) {
-                        if (dance_request_allowed(args, "[Input]")) {
-                            requested_mode = ml::ControlMode::Dance;
+                    if (input.mode_request.requested) {
+                        bool allowed = true;
+                        if (input.mode_request.mode == ml::ControlMode::Dance) {
+                            allowed = dance_request_allowed(args, "[Input]");
+                        } else if (input.mode_request.mode == ml::ControlMode::Skill) {
+                            allowed = skill_request_allowed(args, "[Input]");
+                        }
+                        if (allowed) {
+                            requested_mode = input.mode_request.mode;
                             mode_requested = true;
                         }
-                    }
-                    if (input.skill_requested) {
-                        if (skill_request_allowed(args, "[Input]")) {
-                            requested_mode = ml::ControlMode::Skill;
-                            mode_requested = true;
-                        }
-                    }
-                    if (input.final_damping_requested) {
-                        requested_mode = ml::ControlMode::FinalDamping;
-                        mode_requested = true;
                     }
                     if (input.reset_stand_requested) {
                         std::cout << "[Input] Re-stand requested" << std::endl;
@@ -1393,7 +1377,7 @@ int run_robot_with_finally(const Args& args, const ml::LocoConfig& cfg, ml::Cont
                         last_log = next_control_t - std::chrono::seconds(60);
                         continue;
                     }
-                    const std::string requested_external_policy_key = input.requested_external_policy_key;
+                    const std::string requested_external_policy_key = input.mode_request.external_policy_key;
                     const bool external_key_changed =
                         mode_requested && !requested_external_policy_key.empty() &&
                         requested_external_policy_key != run_external_policy_key;
