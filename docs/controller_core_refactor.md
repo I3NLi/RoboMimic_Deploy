@@ -397,11 +397,12 @@ scripts/run_viewer_http_control_smoke_native.sh --duration 1.5 --keep-summary
 ```
 
 The script starts the viewer HTTP server, posts reset plus
-`passive -> stand -> loco -> pause -> resume -> final_damping`, verifies an invalid mode returns
+`passive -> stand -> loco -> reset -> pause -> resume -> final_damping`,
+verifies an invalid mode returns
 HTTP 400, checks live `/status` for `mode == FINAL_DAMPING`, `paused == false`,
 `adapter_backend == mujoco-sim`, `adapter_command_published == true`, and
-`http_control_commands >= 6`, then checks the summary for
-`mode == FINAL_DAMPING`, `http_control_commands >= 6`,
+`http_control_commands >= 7`, then checks the summary for
+`mode == FINAL_DAMPING`, `http_control_commands >= 7`,
 `http_reset_requests >= 1`, published adapter commands, and advancing
 `sim_steps`. With the default duration it also checks periodic viewer stdout for
 `mode=FINAL_DAMPING`, covering the display/log path that reports

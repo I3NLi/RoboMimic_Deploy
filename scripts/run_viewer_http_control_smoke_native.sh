@@ -225,6 +225,7 @@ post_ok "${reset_url}" "reset"
 post_ok "${control_url}?mode=passive" "passive"
 post_ok "${control_url}?mode=stand" "stand"
 post_ok "${control_url}?mode=loco&vx=0.15&vy=0.05&wz=-0.05" "loco"
+post_ok "${control_url}?mode=reset" "control reset"
 post_ok "${control_url}?pause=1" "pause"
 post_ok "${control_url}?pause=0" "resume"
 post_ok "${control_url}?mode=final_damping" "final_damping"
@@ -232,7 +233,7 @@ post_ok "${control_url}?mode=final_damping" "final_damping"
 status_ready=0
 for _ in $(seq 1 40); do
     if curl -sf "${status_url}" -o "${status_body}" &&
-       jq -e '.mode == "FINAL_DAMPING" and .paused == false and .adapter_backend == "mujoco-sim" and .adapter_command_published == true and .http_control_commands >= 6 and .sim_steps > 0 and (.cmd | length) == 3' "${status_body}" >/dev/null; then
+       jq -e '.mode == "FINAL_DAMPING" and .paused == false and .adapter_backend == "mujoco-sim" and .adapter_command_published == true and .http_control_commands >= 7 and .sim_steps > 0 and (.cmd | length) == 3' "${status_body}" >/dev/null; then
         status_ready=1
         break
     fi
@@ -277,8 +278,8 @@ if [[ "${mode}" != "FINAL_DAMPING" ]]; then
     cat "${summary_json}" >&2
     exit 1
 fi
-if [[ "${http_control_commands}" -lt 6 ]]; then
-    echo "[Smoke][ERROR] expected at least 6 HTTP control commands, got ${http_control_commands}" >&2
+if [[ "${http_control_commands}" -lt 7 ]]; then
+    echo "[Smoke][ERROR] expected at least 7 HTTP control commands, got ${http_control_commands}" >&2
     cat "${summary_json}" >&2
     exit 1
 fi
