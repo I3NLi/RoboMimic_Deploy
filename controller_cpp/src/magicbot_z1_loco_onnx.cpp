@@ -1,5 +1,8 @@
+#include "native_fsm_policy_types.h"
+#include "beyond_mimic_policy.h"
 #include "controller_core.h"
 #include "controller_runtime.h"
+#include "fsm_external_policy_adapter.h"
 #include "magicbot_loco_core.h"
 #include "magicbot_real_adapter.h"
 #include "magicbot_loco_sdk_adapter.h"
@@ -44,6 +47,7 @@ void signal_handler(int signum)
 
 struct Args {
     std::filesystem::path config{"policies/loco_mode/config/LocoMode_lowKp.yaml"};
+    std::filesystem::path beyond_yaml{};
     bool dry_run{false};
     bool connect_check{false};
     bool read_state{false};
@@ -89,6 +93,7 @@ struct Args {
     int gamepad_zero_button{2};
     int gamepad_pause_button{7};
     int gamepad_reset_button{6};
+    int gamepad_dance_button{-1};
     double state_timeout{10.0};
     std::string prepare_gait{"recovery_stand"};
     double stand_time{2.0};
@@ -118,6 +123,7 @@ void print_usage(const char* argv0)
         << "\n"
         << "Common:\n"
         << "  --config PATH                    Loco YAML config\n"
+        << "  --beyond-yaml PATH               Enable BeyondMimic as DANCE external policy\n"
         << "  --local-ip IP                    SDK local IP, default MAGICBOT_LOCAL_IP or 192.168.54.119\n"
         << "  --skip-network-check             Do not verify local-ip exists on this host\n"
         << "  --dry-run                        Load YAML/ONNX and run one inference\n"
@@ -140,7 +146,7 @@ void print_usage(const char* argv0)
         << "Operator input:\n"
         << "  --keyboard-control               Live terminal keyboard input in run loop\n"
         << "                                   L stand/loco, R re-stand, W/S vx, Q/E vy, A/D wz,\n"
-        << "                                   X zero, Space/P pause-zero, Esc stop\n"
+        << "                                   B beyond/dance, X zero, Space/P pause-zero, Esc stop\n"
         << "  --gamepad-control                Live Linux joystick input in run loop\n"
         << "  --gamepad-device PATH            Joystick device, default /dev/input/js0\n"
         << "  --udp-control                    Live UDP command input in run loop\n"
@@ -162,6 +168,7 @@ void print_usage(const char* argv0)
         << "  --gamepad-zero-button N          Button that pause-zeros command, default 2\n"
         << "  --gamepad-pause-button N         Button that toggles pause-zero, default 7\n"
         << "  --gamepad-reset-button N         Button that re-interpolates to STAND, default 6\n"
+        << "  --gamepad-dance-button N         Optional button that enters DANCE/BeyondMimic, default disabled\n"
         << "\n"
         << "Debug entry:\n"
         << "  --debug-entry                    TTS, wait, then LowLevel passive damping before run\n"
@@ -190,6 +197,8 @@ Args parse_args(int argc, char** argv)
             std::exit(0);
         } else if (a == "--config") {
             args.config = take_value(i, argc, argv);
+        } else if (a == "--beyond-yaml") {
+            args.beyond_yaml = take_value(i, argc, argv);
         } else if (a == "--dry-run") {
             args.dry_run = true;
         } else if (a == "--connect-check") {
@@ -276,6 +285,8 @@ Args parse_args(int argc, char** argv)
             args.gamepad_pause_button = std::stoi(take_value(i, argc, argv));
         } else if (a == "--gamepad-reset-button") {
             args.gamepad_reset_button = std::stoi(take_value(i, argc, argv));
+        } else if (a == "--gamepad-dance-button") {
+            args.gamepad_dance_button = std::stoi(take_value(i, argc, argv));
         } else if (a == "--state-timeout") {
             args.state_timeout = std::stod(take_value(i, argc, argv));
         } else if (a == "--prepare-gait") {
@@ -409,6 +420,7 @@ struct LiveInputState {
     bool stop_requested{false};
     bool loco_requested{false};
     bool stand_requested{false};
+    bool dance_requested{false};
     bool toggle_loco_requested{false};
     bool reset_stand_requested{false};
     bool pause_zero{false};
@@ -420,11 +432,52 @@ struct LiveInputState {
 enum class RunMode {
     Stand,
     Loco,
+    Dance,
 };
 
 const char* mode_name(RunMode mode)
 {
-    return mode == RunMode::Loco ? "LOCO" : "STAND";
+    switch (mode) {
+    case RunMode::Stand:
+        return "STAND";
+    case RunMode::Loco:
+        return "LOCO";
+    case RunMode::Dance:
+        return "DANCE";
+    }
+    return "UNKNOWN";
+}
+
+ml::ControlMode control_mode_for(RunMode mode)
+{
+    switch (mode) {
+    case RunMode::Stand:
+        return ml::ControlMode::Stand;
+    case RunMode::Loco:
+        return ml::ControlMode::Loco;
+    case RunMode::Dance:
+        return ml::ControlMode::Dance;
+    }
+    return ml::ControlMode::Stand;
+}
+
+ml::ControlMode control_mode_for_fsm_state(FSMStateName state)
+{
+    switch (state) {
+    case FSMStateName::PASSIVE:
+        return ml::ControlMode::Passive;
+    case FSMStateName::FIXEDPOSE:
+        return ml::ControlMode::Stand;
+    case FSMStateName::LOCOMODE:
+    case FSMStateName::SKILL_COOLDOWN:
+        return ml::ControlMode::Loco;
+    case FSMStateName::SKILL_BEYOND_MIMIC:
+    case FSMStateName::SKILL_TRACK_MIMIC:
+    case FSMStateName::SKILL_DANCE:
+        return ml::ControlMode::Dance;
+    default:
+        return ml::ControlMode::Skill;
+    }
 }
 
 class TerminalKeyboardInput {
@@ -497,6 +550,11 @@ private:
         case 'l':
         case 'L':
             out.toggle_loco_requested = true;
+            break;
+        case 'b':
+        case 'B':
+            out.dance_requested = true;
+            paused_ = false;
             break;
         case 'r':
         case 'R':
@@ -634,6 +692,10 @@ private:
                 if (args_.gamepad_reset_button >= 0 && event.number == args_.gamepad_reset_button) {
                     paused_ = false;
                     out.reset_stand_requested = true;
+                }
+                if (args_.gamepad_dance_button >= 0 && event.number == args_.gamepad_dance_button) {
+                    paused_ = false;
+                    out.dance_requested = true;
                 }
             }
         }
@@ -794,6 +856,9 @@ private:
         if (word == "loco" || word == "run") {
             paused_ = false;
             out.loco_requested = true;
+        } else if (word == "dance" || word == "beyond" || word == "beyondmimic") {
+            paused_ = false;
+            out.dance_requested = true;
         } else if (word == "stand") {
             cmd = {0.0f, 0.0f, 0.0f};
             paused_ = false;
@@ -844,13 +909,14 @@ public:
                       << " stand_button=" << args.gamepad_stand_button
                       << " zero_button=" << args.gamepad_zero_button
                       << " pause_button=" << args.gamepad_pause_button
-                      << " reset_button=" << args.gamepad_reset_button << std::endl;
+                      << " reset_button=" << args.gamepad_reset_button
+                      << " dance_button=" << args.gamepad_dance_button << std::endl;
         }
         if (args.udp_control) {
             udp_ = std::make_unique<UdpCommandInput>(args, initial_command);
             std::cout << "[Input] UDP command enabled: bind=" << args.udp_bind << ":" << args.udp_port
                       << " timeout_s=" << args.udp_timeout_s
-                      << " format='vx vy wz [loco|stand|stop]' or 'vx=... vy=... wz=... mode=loco'"
+                      << " format='vx vy wz [loco|stand|beyond|stop]' or 'vx=... vy=... wz=... mode=loco'"
                       << std::endl;
         }
     }
@@ -1071,12 +1137,16 @@ int input_check_only(const Args& args)
         if (state.loco_requested) {
             mode = RunMode::Loco;
         }
+        if (state.dance_requested) {
+            mode = RunMode::Dance;
+        }
         if (state.changed || std::chrono::duration<double>(now - last_log).count() >= args.log_interval) {
             std::cout << "[InputCheck] " << state.status << " mode=" << mode_name(mode)
                       << " cmd=[" << state.command[0] << " " << state.command[1] << " " << state.command[2] << "]";
             if (state.zeroed_by_deadman) std::cout << " deadman=open";
             if (state.pause_zero) std::cout << " pause-zero";
             if (state.reset_stand_requested) std::cout << " reset-stand";
+            if (state.dance_requested) std::cout << " dance";
             std::cout << std::endl;
             last_log = now;
         }
@@ -1198,8 +1268,7 @@ int run_robot_with_finally(const Args& args, const ml::LocoConfig& cfg, ml::Cont
             ml::ControllerRuntime runtime(core, real_adapter);
             core.seed_target(command_target);
             core.reset_policy();
-            ml::ModeRequest pending_mode_request = ml::ModeRequest::enter(
-                run_mode == RunMode::Loco ? ml::ControlMode::Loco : ml::ControlMode::Stand);
+            ml::ModeRequest pending_mode_request = ml::ModeRequest::enter(control_mode_for(run_mode));
             std::cout << "[Mode] Starting operator loop: mode=" << mode_name(run_mode)
                       << " command=[" << args.vx << " " << args.vy << " " << args.wz << "]" << std::endl;
             if (operator_input.enabled()) {
@@ -1242,6 +1311,15 @@ int run_robot_with_finally(const Args& args, const ml::LocoConfig& cfg, ml::Cont
                         requested_mode = RunMode::Loco;
                         mode_requested = true;
                     }
+                    if (input.dance_requested) {
+                        if (args.beyond_yaml.empty()) {
+                            std::cout << "[Input] DANCE ignored; start with --beyond-yaml PATH to enable BeyondMimic"
+                                      << std::endl;
+                        } else {
+                            requested_mode = RunMode::Dance;
+                            mode_requested = true;
+                        }
+                    }
                     if (input.reset_stand_requested) {
                         std::cout << "[Input] Re-stand requested" << std::endl;
                         raw_cmd = {0.0f, 0.0f, 0.0f};
@@ -1256,9 +1334,8 @@ int run_robot_with_finally(const Args& args, const ml::LocoConfig& cfg, ml::Cont
                     }
                     if (mode_requested && requested_mode != run_mode) {
                         run_mode = requested_mode;
-                        if (run_mode == RunMode::Stand) raw_cmd = {0.0f, 0.0f, 0.0f};
-                        pending_mode_request = ml::ModeRequest::enter(
-                            run_mode == RunMode::Loco ? ml::ControlMode::Loco : ml::ControlMode::Stand);
+                        if (run_mode != RunMode::Loco) raw_cmd = {0.0f, 0.0f, 0.0f};
+                        pending_mode_request = ml::ModeRequest::enter(control_mode_for(run_mode));
                         std::cout << "[Input] Mode -> " << mode_name(run_mode) << std::endl;
                     }
                     if (input.changed && std::chrono::duration<double>(now - last_log).count() < args.log_interval) {
@@ -1266,6 +1343,7 @@ int run_robot_with_finally(const Args& args, const ml::LocoConfig& cfg, ml::Cont
                                   << " cmd=[" << raw_cmd[0] << " " << raw_cmd[1] << " " << raw_cmd[2] << "]";
                         if (input.zeroed_by_deadman) std::cout << " deadman=open";
                         if (input.pause_zero) std::cout << " pause-zero";
+                        if (input.dance_requested) std::cout << " dance";
                         std::cout << std::endl;
                     }
                 }
@@ -1340,6 +1418,20 @@ int main(int argc, char** argv)
         if (args.dry_run) {
             ml::OnnxLocoPolicy policy(cfg);
             dry_run(cfg, policy);
+            if (!args.beyond_yaml.empty()) {
+                if (!std::filesystem::exists(args.beyond_yaml)) {
+                    throw std::runtime_error("BeyondMimic config not found: " + args.beyond_yaml.string());
+                }
+                StateAndCmd external_state(ml::kNumJoints);
+                PolicyOutput external_output(ml::kNumJoints);
+                BeyondMimicPolicy beyond_policy(
+                    external_state,
+                    external_output,
+                    args.beyond_yaml.string(),
+                    static_cast<float>(cfg.policy_dt));
+                beyond_policy.enter();
+                std::cout << "[DryRun] BeyondMimic loaded: " << args.beyond_yaml << std::endl;
+            }
             return 0;
         }
         if (args.connect_check) return connect_check(args);
@@ -1353,6 +1445,32 @@ int main(int argc, char** argv)
         core_options.joint_limit_margin = args.joint_limit_margin;
         core_options.damping_kd = args.damping_kd;
         ml::ControllerCore core(cfg, core_options);
+        StateAndCmd external_state(ml::kNumJoints);
+        PolicyOutput external_output(ml::kNumJoints);
+        std::unique_ptr<BeyondMimicPolicy> beyond_policy;
+        using BeyondAdapter =
+            ml::FsmExternalPolicyAdapter<BeyondMimicPolicy, StateAndCmd, PolicyOutput, FSMStateName>;
+        std::unique_ptr<BeyondAdapter> beyond_adapter;
+        if (!args.beyond_yaml.empty()) {
+            if (!std::filesystem::exists(args.beyond_yaml)) {
+                throw std::runtime_error("BeyondMimic config not found: " + args.beyond_yaml.string());
+            }
+            beyond_policy = std::make_unique<BeyondMimicPolicy>(
+                external_state,
+                external_output,
+                args.beyond_yaml.string(),
+                static_cast<float>(cfg.policy_dt));
+            beyond_adapter = std::make_unique<BeyondAdapter>(
+                ml::ControlMode::Dance,
+                "BeyondMimic",
+                FSMStateName::SKILL_BEYOND_MIMIC,
+                external_state,
+                external_output,
+                *beyond_policy,
+                control_mode_for_fsm_state);
+            core.register_external_policy(*beyond_adapter);
+            std::cout << "[ExternalPolicy] DANCE -> BeyondMimic: " << args.beyond_yaml << std::endl;
+        }
         return run_robot_with_finally(args, cfg, core);
     } catch (const std::exception& exc) {
         std::cerr << "[Error] " << exc.what() << std::endl;

@@ -57,6 +57,9 @@ such as Dance and BeyondMimic. It copies `RobotSnapshot` / velocity command into
 the old `StateAndCmd`, runs the wrapped `FSMState`, then converts `PolicyOutput`
 back into `ExternalPolicyOutput` for the shared core.
 
+`native_fsm_policy_types.h` provides the small FSM type surface needed by those
+legacy policy headers without pulling in the old monolithic controller.
+
 `robot_adapter.h` introduces the backend boundary:
 
 - `RobotAdapter::read_snapshot()`
@@ -93,7 +96,10 @@ a second place for policy, mode, or safety logic.
 through `ControllerRuntime` and `MagicbotRealAdapter`. The existing staged safety
 flow is preserved: dry-run, connect-check, read-state, debug/passive damping,
 stand interpolation, and PD stand-only remain outside high-risk LOCO execution.
-LOCO still requires the explicit `--allow-loco` gate.
+LOCO still requires the explicit `--allow-loco` gate. When `--beyond-yaml PATH`
+is supplied, the runner registers BeyondMimic as the shared `DANCE` external
+policy and accepts `mode=beyond` / `mode=dance` from UDP, `B` from keyboard input,
+or an explicitly configured gamepad dance button.
 
 `mujoco_loco_viewer.cpp` now routes its closed-loop STAND/LOCO/PASSIVE execution
 through the same `ControllerRuntime` and `MujocoSimAdapter`. Viewer input, UDP
@@ -112,7 +118,7 @@ state/command I/O.
 
 ## Next cuts
 
-1. Register concrete Dance/BeyondMimic instances through
-   `FsmExternalPolicyAdapter` in the runtime entrypoints that need those modes.
+1. Register additional concrete skill policies through `FsmExternalPolicyAdapter`
+   where those entrypoints need them.
 2. Move viewer mode/control API code to send requests only; it must not duplicate
    core policy or safety logic.

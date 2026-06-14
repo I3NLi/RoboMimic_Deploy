@@ -175,6 +175,7 @@ if(TARGET magicbot_z1_sdk_native)
         magicbot_z1_sdk_native
         pthread
         yaml-cpp
+        ZLIB::ZLIB
         "${ORT_SO}"
     )
     target_compile_options(magicbot_z1_loco_onnx PRIVATE -O2 -Wall -Wextra)
