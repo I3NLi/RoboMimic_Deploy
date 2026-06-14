@@ -187,15 +187,15 @@ shared mode helper, including the default `DANCE -> BeyondMimic` external policy
 key and default `SKILL -> TrackMimic` external policy key, so entrypoints no
 longer duplicate those mappings. TrackMimic is still a BeyondMimic-trained
 policy path; the TrackMimic key selects the BeyondMimic implementation with its
-extra trajectory input/config. The viewer also compares the requested external
-key when deciding whether to send a new request, so the same `SKILL` mode can
-switch trajectory variants without leaving and re-entering the mode first. The
-real runner now also stores its operator/input mode as shared `ControlMode`
-values, so it no longer carries a parallel local `RunMode` enum or duplicate
-mode-name/request mapping. Live keyboard/gamepad/UDP input events now carry a
-shared `ModeRequest` for absolute mode requests; the runner keeps only
-entrypoint-local relative actions such as LOCO toggle and re-stand, instead of
-fanning absolute modes out into runner-specific per-mode booleans.
+extra trajectory input/config. The shared desired-mode helper also compares the
+requested external key when deciding whether to send a new request, so viewer
+and real runner can switch trajectory variants without leaving and re-entering
+the mode first. The real runner now also stores its operator/input mode as
+shared `ControlMode` values, so it no longer carries a parallel local `RunMode`
+enum or duplicate mode-name/request mapping. Live keyboard/gamepad/UDP input
+events now carry a shared `ModeRequest` for absolute mode requests; the runner
+keeps only entrypoint-local relative actions such as LOCO toggle and re-stand,
+instead of fanning absolute modes out into runner-specific per-mode booleans.
 The native FSM state names and their `FSMStateName -> ControlMode` completion
 mapper live in `native_fsm_states.h`; viewer and real external-policy adapters
 both use that helper instead of maintaining separate return-mode mappings.

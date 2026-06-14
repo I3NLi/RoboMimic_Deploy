@@ -1357,15 +1357,18 @@ int run_robot_with_finally(const Args& args, const ml::LocoConfig& cfg, ml::Cont
                         continue;
                     }
                     const std::string requested_external_policy_key = input.mode_request.external_policy_key;
-                    const bool external_key_changed =
-                        mode_requested && !requested_external_policy_key.empty() &&
-                        requested_external_policy_key != run_external_policy_key;
-                    if (mode_requested && (requested_mode != run_mode || external_key_changed)) {
+                    const ml::ModeRequest requested_mode_change = mode_requested
+                        ? ml::mode_request_for_desired_control_mode(
+                              requested_mode,
+                              requested_external_policy_key,
+                              run_mode,
+                              run_external_policy_key)
+                        : ml::ModeRequest::none();
+                    if (requested_mode_change.requested) {
                         run_mode = requested_mode;
                         if (run_mode != ml::ControlMode::Loco) raw_cmd = {0.0f, 0.0f, 0.0f};
-                        run_external_policy_key = requested_external_policy_key;
-                        pending_mode_request =
-                            ml::mode_request_for_control_mode(run_mode, run_external_policy_key);
+                        run_external_policy_key = requested_mode_change.external_policy_key;
+                        pending_mode_request = requested_mode_change;
                         std::cout << "[Input] Mode -> " << ml::control_mode_name(run_mode) << std::endl;
                     }
                     if (input.changed && std::chrono::duration<double>(now - last_log).count() < args.log_interval) {
