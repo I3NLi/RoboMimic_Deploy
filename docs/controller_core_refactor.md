@@ -156,7 +156,10 @@ The HTTP control endpoint accepts the same mode vocabulary through query
 parameters, for example `POST /control?mode=final_damping` or
 `POST /control?mode=loco&vx=0.2&wz=-0.1`; the main viewer loop consumes those
 requests, maps mode aliases through the same shared action parser used by UDP,
-and then still routes each tick through the shared runtime.
+and then still routes each tick through the shared runtime. The viewer now
+builds a `ModeRequest` only when the operator-desired mode differs from
+`ControllerCore::mode()`; steady ticks pass `ModeRequest::none()` so the viewer
+does not continuously re-command the mode manager.
 The same HTTP server exposes `GET /status` for control-station telemetry:
 current mode, pause state, velocity command, sim/policy steps, base pose, queue
 depths, and disturbance/control counters. This is display/telemetry only; it

@@ -1651,10 +1651,20 @@ magicbot_loco::ControlMode viewer_control_mode(bool loco, bool passive, bool dan
     return loco ? magicbot_loco::ControlMode::Loco : magicbot_loco::ControlMode::Stand;
 }
 
-magicbot_loco::ModeRequest viewer_mode_request(bool loco, bool passive, bool dance, bool skill, bool final_damping)
+magicbot_loco::ModeRequest viewer_mode_request(
+    bool loco,
+    bool passive,
+    bool dance,
+    bool skill,
+    bool final_damping,
+    magicbot_loco::ControlMode current_mode)
 {
-    return magicbot_loco::mode_request_for_control_mode(
-        viewer_control_mode(loco, passive, dance, skill, final_damping));
+    const magicbot_loco::ControlMode desired_mode =
+        viewer_control_mode(loco, passive, dance, skill, final_damping);
+    if (desired_mode == current_mode) {
+        return magicbot_loco::ModeRequest::none();
+    }
+    return magicbot_loco::mode_request_for_control_mode(desired_mode);
 }
 
 void sync_viewer_mode_flags(
@@ -2514,8 +2524,13 @@ int main(int argc, char** argv)
                 for (int i = 0; i < steps_per_frame; ++i) {
                     magicbot_loco::RuntimeTickInput tick_input;
                     tick_input.command.velocity = cmd;
-                    tick_input.mode_request =
-                        viewer_mode_request(loco_active, passive_active, dance_active, skill_active, final_damping_active);
+                    tick_input.mode_request = viewer_mode_request(
+                        loco_active,
+                        passive_active,
+                        dance_active,
+                        skill_active,
+                        final_damping_active,
+                        core.mode());
                     tick_input.control_dt_s = static_cast<float>(model->opt.timestep);
                     tick_input.publish_target = true;
                     const auto tick = runtime.tick(tick_input);
