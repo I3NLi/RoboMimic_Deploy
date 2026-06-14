@@ -65,6 +65,8 @@ void check_aliases()
     require(action == ml::TextControlAction::Passive, "damping should map to passive");
     require(ml::text_control_action_from_word("beyondmimic", action), "beyondmimic alias");
     require(action == ml::TextControlAction::Dance, "beyondmimic should map to dance");
+    require(ml::text_control_action_from_word("track_mimic", action), "track_mimic alias");
+    require(action == ml::TextControlAction::Skill, "track_mimic should map to skill");
     require(ml::text_control_action_from_word("fail_safe", action), "fail_safe alias");
     require(action == ml::TextControlAction::FinalDamping, "fail_safe should map to final damping");
     require(ml::text_control_action_from_word("x", action), "x alias");
@@ -103,6 +105,17 @@ void check_action_effects()
     require(passive.mode == ml::ControlMode::Passive, "passive effect mode");
     require(passive.zero_command, "passive effect should zero command");
     require(passive.unpause, "passive effect should unpause");
+
+    const auto dance = ml::text_control_action_effect(ml::TextControlAction::Dance);
+    require(dance.mode_requested, "dance effect should request a mode");
+    require(dance.mode == ml::ControlMode::Dance, "dance effect mode");
+    require(dance.external_policy_key == ml::kBeyondMimicPolicyKey, "dance effect external key");
+
+    const auto skill = ml::text_control_action_effect(ml::TextControlAction::Skill);
+    require(skill.mode_requested, "skill effect should request a mode");
+    require(skill.mode == ml::ControlMode::Skill, "skill effect mode");
+    require(skill.zero_command, "skill effect should zero command");
+    require(skill.external_policy_key == ml::kTrackMimicPolicyKey, "skill effect external key");
 
     const auto reset = ml::text_control_action_effect(ml::TextControlAction::ResetStand);
     require(!reset.mode_requested, "reset effect should leave mode handling to entrypoint");

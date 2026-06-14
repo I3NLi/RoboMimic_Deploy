@@ -20,6 +20,7 @@ enum class TextControlAction {
     ResetStand,
     Passive,
     Dance,
+    Skill,
     FinalDamping,
     Zero,
     Pause,
@@ -37,6 +38,7 @@ struct TextControlActionEffect {
     bool stop{false};
     bool toggle_loco{false};
     bool reset_stand{false};
+    std::string external_policy_key;
 };
 
 struct TextControlOperation {
@@ -115,6 +117,10 @@ inline bool text_control_action_from_word(const std::string& word, TextControlAc
         action = TextControlAction::Dance;
         return true;
     }
+    if (word == "skill" || word == "track" || word == "trackmimic" || word == "track_mimic") {
+        action = TextControlAction::Skill;
+        return true;
+    }
     if (word == "final" || word == "finaldamping" || word == "final_damping" ||
         word == "fail_safe" || word == "failsafe") {
         action = TextControlAction::FinalDamping;
@@ -172,6 +178,14 @@ inline TextControlActionEffect text_control_action_effect(TextControlAction acti
     case TextControlAction::Dance:
         effect.mode_requested = true;
         effect.mode = ControlMode::Dance;
+        effect.external_policy_key = kBeyondMimicPolicyKey;
+        effect.zero_command = true;
+        effect.unpause = true;
+        break;
+    case TextControlAction::Skill:
+        effect.mode_requested = true;
+        effect.mode = ControlMode::Skill;
+        effect.external_policy_key = kTrackMimicPolicyKey;
         effect.zero_command = true;
         effect.unpause = true;
         break;

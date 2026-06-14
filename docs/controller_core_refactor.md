@@ -44,8 +44,9 @@ backend I/O and `RobotSnapshot` / `JointTarget`.
 reset policy history, zero commands, or seed targets from the current robot
 state. `DANCE` and `SKILL` remain explicit modes but are rejected until a skill
 policy adapter is installed. The shared mode helper also owns the default
-external-policy request mapping, including `DANCE -> BeyondMimic`, so entrypoints
-do not each encode a different dance request key.
+external-policy request mapping, including `DANCE -> BeyondMimic` and
+`SKILL -> TrackMimic`, so entrypoints do not each encode different external
+policy request keys.
 
 `policy_adapter.h` defines the external policy contract for `DANCE` / `SKILL`.
 Adapters return a raw motor-space target, an optional gains override, and a
@@ -60,7 +61,10 @@ other. `ModeRequest::enter_external(mode, key)` selects the concrete adapter;
 `fsm_external_policy_adapter.h` is a bridge for the existing native FSM policies
 such as Dance and BeyondMimic. It copies `RobotSnapshot` / velocity command into
 the old `StateAndCmd`, runs the wrapped `FSMState`, then converts `PolicyOutput`
-back into `ExternalPolicyOutput` for the shared core.
+back into `ExternalPolicyOutput` for the shared core. TrackMimic is treated as a
+BeyondMimic trajectory variant: the same `BeyondMimicPolicy` implementation is
+registered under the shared `SKILL` mode/key, and can consume a `motion_file`
+trajectory from its YAML when that artifact is available.
 
 `native_fsm_policy_types.h` provides the small FSM type surface needed by those
 legacy policy headers without pulling in the old monolithic controller.
@@ -109,7 +113,11 @@ are ignored unless `--allow-dance` is also set with `--beyond-yaml PATH`. When
 `--beyond-yaml PATH` is supplied, the runner registers BeyondMimic as the keyed
 shared `DANCE` external policy and accepts gated `mode=beyond` / `mode=dance`
 from UDP, `B` from keyboard input, or an explicitly configured gamepad dance
-button.
+button. When `--track-mimic-yaml PATH` is supplied, the runner registers the
+BeyondMimic trajectory variant as the keyed shared `SKILL` external policy;
+`mode=skill` / `mode=track_mimic`, `T` from keyboard input, or an explicitly
+configured gamepad skill button still require the separate `--allow-skill` gate
+on real hardware.
 The same UDP input now accepts `mode=passive` / `mode=damping` for shared
 `PASSIVE` and `mode=final`, `mode=finaldamping`, or `mode=final_damping` for
 shared `FINAL_DAMPING`; both clear velocity commands and route through
@@ -132,15 +140,18 @@ moving control logic out of `ControllerCore`.
 When `--beyond-yaml PATH` is supplied, the viewer registers BeyondMimic as the
 same keyed shared `DANCE` external policy used by the real runner; `B` and UDP
 `mode=beyond` / `mode=dance` enter it.
+When `--track-mimic-yaml PATH` is supplied, the viewer registers the BeyondMimic
+trajectory variant as the keyed shared `SKILL` external policy; `T`, UDP text,
+or HTTP `mode=skill` / `mode=track_mimic` enter it.
 Viewer UDP and the real runner UDP input now share `text_control_command.h` for
 text command tokenization and mode aliases (`loco`, `stand`, `passive`,
-`final_damping`, `beyond`, `pause`, `resume`, `stop`, and `zero`). The consumers
-still apply those parsed operations to their own input state; the parser does
-not own policy, safety, or adapter behavior. It does own the shared action
-effect for parsed text controls: which controls request a mode, clear velocity,
-pause/resume, stop, toggle LOCO, or request a re-stand/reset. Local viewer
-keyboard shortcuts `M` / `N` request the same shared passive and final-damping
-modes.
+`final_damping`, `beyond`, `track_mimic`, `pause`, `resume`, `stop`, and
+`zero`). The consumers still apply those parsed operations to their own input
+state; the parser does not own policy, safety, or adapter behavior. It does own
+the shared action effect for parsed text controls: which controls request a
+mode, choose the external policy key, clear velocity, pause/resume, stop, toggle
+LOCO, or request a re-stand/reset. Local viewer keyboard shortcuts `M` / `N`
+request the same shared passive and final-damping modes.
 The HTTP control endpoint accepts the same mode vocabulary through query
 parameters, for example `POST /control?mode=final_damping` or
 `POST /control?mode=loco&vx=0.2&wz=-0.1`; the main viewer loop consumes those
@@ -152,8 +163,9 @@ depths, and disturbance/control counters. This is display/telemetry only; it
 does not move policy or safety logic out of `ControllerCore`.
 Both the viewer and real runner now build `ModeRequest` objects through the
 shared mode helper, including the default `DANCE -> BeyondMimic` external policy
-key, so entrypoints no longer duplicate that mapping. The dual-rate validation
-tool also uses the helper for LOCO entry requests.
+key and default `SKILL -> TrackMimic` external policy key, so entrypoints no
+longer duplicate those mappings. The dual-rate validation tool also uses the
+helper for LOCO entry requests.
 
 The first `ControllerCore` implementation supports `PASSIVE`, `STAND`, `LOCO`,
 and `FINAL_DAMPING`. `DANCE` and `SKILL` are represented in the shared mode enum
@@ -161,8 +173,9 @@ and intentionally reject requests until a matching external policy adapter is
 registered.
 
 This keeps the real-robot safety ladder intact: high-risk LOCO and DANCE require
-the existing CLI `--allow-loco` and `--allow-dance` gates, and adapters remain
-responsible only for state/command I/O.
+the existing CLI `--allow-loco` and `--allow-dance` gates, SKILL/TrackMimic
+requires `--allow-skill`, and adapters remain responsible only for
+state/command I/O.
 
 ## Validation commands
 
@@ -260,6 +273,18 @@ and `http_control_commands >= 6`, then checks the summary for
 `mode == FINAL_DAMPING`, `http_control_commands >= 6`,
 `http_reset_requests >= 1`, and advancing `sim_steps`.
 
+Viewer HTTP SKILL / TrackMimic smoke:
+
+```bash
+scripts/run_viewer_http_skill_smoke_native.sh --duration 0.8 --keep-summary
+```
+
+The script registers the BeyondMimic trajectory variant as the shared `SKILL`
+external policy in the viewer, posts `mode=track_mimic` through `/control`, then
+checks live `/status` and the summary for `mode == SKILL`, advancing
+`sim_steps` and `policy_steps`, and at least one HTTP control command. This is
+an entry-path smoke, not a stability acceptance test.
+
 Viewer UDP control smoke:
 
 ```bash
@@ -284,7 +309,7 @@ for `mouse_perturb_steps > 0`, resolved perturb body metadata, and advancing
 
 ## Next cuts
 
-1. Register additional concrete skill policies through `FsmExternalPolicyAdapter`
-   where those entrypoints need them.
+1. Register additional concrete BeyondMimic skill/trajectory variants through
+   `FsmExternalPolicyAdapter` where those entrypoints need them.
 2. Move viewer mode/control API code to send requests only; it must not duplicate
    core policy or safety logic.

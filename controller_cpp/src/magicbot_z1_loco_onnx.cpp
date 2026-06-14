@@ -49,6 +49,7 @@ void signal_handler(int signum)
 struct Args {
     std::filesystem::path config{"policies/loco_mode/config/LocoMode_lowKp.yaml"};
     std::filesystem::path beyond_yaml{};
+    std::filesystem::path track_mimic_yaml{};
     bool dry_run{false};
     bool connect_check{false};
     bool read_state{false};
@@ -73,6 +74,7 @@ struct Args {
     float wz{0.0f};
     bool allow_loco{false};
     bool allow_dance{false};
+    bool allow_skill{false};
     bool keyboard_control{false};
     bool gamepad_control{false};
     bool udp_control{false};
@@ -96,6 +98,7 @@ struct Args {
     int gamepad_pause_button{7};
     int gamepad_reset_button{6};
     int gamepad_dance_button{-1};
+    int gamepad_skill_button{-1};
     double state_timeout{10.0};
     std::string prepare_gait{"recovery_stand"};
     double stand_time{2.0};
@@ -126,6 +129,7 @@ void print_usage(const char* argv0)
         << "Common:\n"
         << "  --config PATH                    Loco YAML config\n"
         << "  --beyond-yaml PATH               Enable BeyondMimic as DANCE external policy\n"
+        << "  --track-mimic-yaml PATH          Enable BeyondMimic trajectory/TrackMimic as SKILL policy\n"
         << "  --local-ip IP                    SDK local IP, default MAGICBOT_LOCAL_IP or 192.168.54.119\n"
         << "  --skip-network-check             Do not verify local-ip exists on this host\n"
         << "  --dry-run                        Load YAML/ONNX and run one inference\n"
@@ -136,6 +140,7 @@ void print_usage(const char* argv0)
         << "  --pd-stand-only                  With --run, hold default PD stand and never run ONNX\n"
         << "  --allow-loco                     Required before ONNX loco is allowed\n"
         << "  --allow-dance                    Required before DANCE/BeyondMimic is allowed on real robot\n"
+        << "  --allow-skill                    Required before SKILL/TrackMimic is allowed on real robot\n"
         << "\n"
         << "Motion:\n"
         << "  --vx V --vy V --wz V             Normalized command inputs; YAML cmd_range maps physical speed\n"
@@ -149,7 +154,7 @@ void print_usage(const char* argv0)
         << "Operator input:\n"
         << "  --keyboard-control               Live terminal keyboard input in run loop\n"
         << "                                   L stand/loco, R re-stand, W/S vx, Q/E vy, A/D wz,\n"
-        << "                                   B beyond/dance, X zero, Space/P pause-zero, Esc stop\n"
+        << "                                   B beyond/dance, T track/skill, X zero, Space/P pause-zero, Esc stop\n"
         << "  --gamepad-control                Live Linux joystick input in run loop\n"
         << "  --gamepad-device PATH            Joystick device, default /dev/input/js0\n"
         << "  --udp-control                    Live UDP command input in run loop\n"
@@ -172,6 +177,7 @@ void print_usage(const char* argv0)
         << "  --gamepad-pause-button N         Button that toggles pause-zero, default 7\n"
         << "  --gamepad-reset-button N         Button that re-interpolates to STAND, default 6\n"
         << "  --gamepad-dance-button N         Optional button that enters DANCE/BeyondMimic, default disabled\n"
+        << "  --gamepad-skill-button N         Optional button that enters SKILL/TrackMimic, default disabled\n"
         << "\n"
         << "Debug entry:\n"
         << "  --debug-entry                    TTS, wait, then LowLevel passive damping before run\n"
@@ -202,6 +208,8 @@ Args parse_args(int argc, char** argv)
             args.config = take_value(i, argc, argv);
         } else if (a == "--beyond-yaml") {
             args.beyond_yaml = take_value(i, argc, argv);
+        } else if (a == "--track-mimic-yaml") {
+            args.track_mimic_yaml = take_value(i, argc, argv);
         } else if (a == "--dry-run") {
             args.dry_run = true;
         } else if (a == "--connect-check") {
@@ -246,6 +254,8 @@ Args parse_args(int argc, char** argv)
             args.allow_loco = true;
         } else if (a == "--allow-dance") {
             args.allow_dance = true;
+        } else if (a == "--allow-skill") {
+            args.allow_skill = true;
         } else if (a == "--keyboard-control") {
             args.keyboard_control = true;
         } else if (a == "--gamepad-control") {
@@ -292,6 +302,8 @@ Args parse_args(int argc, char** argv)
             args.gamepad_reset_button = std::stoi(take_value(i, argc, argv));
         } else if (a == "--gamepad-dance-button") {
             args.gamepad_dance_button = std::stoi(take_value(i, argc, argv));
+        } else if (a == "--gamepad-skill-button") {
+            args.gamepad_skill_button = std::stoi(take_value(i, argc, argv));
         } else if (a == "--state-timeout") {
             args.state_timeout = std::stod(take_value(i, argc, argv));
         } else if (a == "--prepare-gait") {
@@ -427,6 +439,7 @@ struct LiveInputState {
     bool loco_requested{false};
     bool stand_requested{false};
     bool dance_requested{false};
+    bool skill_requested{false};
     bool final_damping_requested{false};
     bool toggle_loco_requested{false};
     bool reset_stand_requested{false};
@@ -441,6 +454,7 @@ enum class RunMode {
     Stand,
     Loco,
     Dance,
+    Skill,
     FinalDamping,
 };
 
@@ -455,6 +469,8 @@ const char* mode_name(RunMode mode)
         return "LOCO";
     case RunMode::Dance:
         return "DANCE";
+    case RunMode::Skill:
+        return "SKILL";
     case RunMode::FinalDamping:
         return "FINAL_DAMPING";
     }
@@ -472,6 +488,8 @@ ml::ControlMode control_mode_for(RunMode mode)
         return ml::ControlMode::Loco;
     case RunMode::Dance:
         return ml::ControlMode::Dance;
+    case RunMode::Skill:
+        return ml::ControlMode::Skill;
     case RunMode::FinalDamping:
         return ml::ControlMode::FinalDamping;
     }
@@ -499,6 +517,22 @@ bool dance_request_allowed(const Args& args, const char* prefix)
     return true;
 }
 
+bool skill_request_allowed(const Args& args, const char* prefix)
+{
+    if (!args.allow_skill) {
+        std::cout << prefix
+                  << " SKILL ignored; add --allow-skill together with --track-mimic-yaml PATH to enable BeyondMimic trajectory/TrackMimic"
+                  << std::endl;
+        return false;
+    }
+    if (args.track_mimic_yaml.empty()) {
+        std::cout << prefix << " SKILL ignored; start with --track-mimic-yaml PATH to enable BeyondMimic trajectory/TrackMimic"
+                  << std::endl;
+        return false;
+    }
+    return true;
+}
+
 ml::ControlMode control_mode_for_fsm_state(FSMStateName state)
 {
     switch (state) {
@@ -510,9 +544,10 @@ ml::ControlMode control_mode_for_fsm_state(FSMStateName state)
     case FSMStateName::SKILL_COOLDOWN:
         return ml::ControlMode::Loco;
     case FSMStateName::SKILL_BEYOND_MIMIC:
-    case FSMStateName::SKILL_TRACK_MIMIC:
     case FSMStateName::SKILL_DANCE:
         return ml::ControlMode::Dance;
+    case FSMStateName::SKILL_TRACK_MIMIC:
+        return ml::ControlMode::Skill;
     default:
         return ml::ControlMode::Skill;
     }
@@ -592,6 +627,11 @@ private:
         case 'b':
         case 'B':
             out.dance_requested = true;
+            paused_ = false;
+            break;
+        case 't':
+        case 'T':
+            out.skill_requested = true;
             paused_ = false;
             break;
         case 'm':
@@ -745,6 +785,10 @@ private:
                     paused_ = false;
                     out.dance_requested = true;
                 }
+                if (args_.gamepad_skill_button >= 0 && event.number == args_.gamepad_skill_button) {
+                    paused_ = false;
+                    out.skill_requested = true;
+                }
             }
         }
     }
@@ -895,10 +939,11 @@ private:
         case ml::ControlMode::Dance:
             out.dance_requested = true;
             break;
+        case ml::ControlMode::Skill:
+            out.skill_requested = true;
+            break;
         case ml::ControlMode::FinalDamping:
             out.final_damping_requested = true;
-            break;
-        case ml::ControlMode::Skill:
             break;
         }
     }
@@ -917,7 +962,7 @@ public:
     {
         if (args.keyboard_control) {
             keyboard_ = std::make_unique<TerminalKeyboardInput>(initial_command, args.input_step);
-            std::cout << "[Input] Keyboard control enabled: L stand/loco, M passive, F final damping, B dance, "
+            std::cout << "[Input] Keyboard control enabled: L stand/loco, M passive, F final damping, B dance, T skill, "
                          "R re-stand, W/S vx, Q/E vy, A/D wz, X zero, Space/P pause-zero, Esc stop"
                       << std::endl;
         }
@@ -932,7 +977,8 @@ public:
                       << " zero_button=" << args.gamepad_zero_button
                       << " pause_button=" << args.gamepad_pause_button
                       << " reset_button=" << args.gamepad_reset_button
-                      << " dance_button=" << args.gamepad_dance_button << std::endl;
+                      << " dance_button=" << args.gamepad_dance_button
+                      << " skill_button=" << args.gamepad_skill_button << std::endl;
         }
         if (args.udp_control) {
             udp_ = std::make_unique<UdpCommandInput>(args, initial_command);
@@ -1166,6 +1212,9 @@ int input_check_only(const Args& args)
         if (state.dance_requested && dance_request_allowed(args, "[InputCheck]")) {
             mode = RunMode::Dance;
         }
+        if (state.skill_requested && skill_request_allowed(args, "[InputCheck]")) {
+            mode = RunMode::Skill;
+        }
         if (state.final_damping_requested) {
             mode = RunMode::FinalDamping;
         }
@@ -1177,6 +1226,7 @@ int input_check_only(const Args& args)
             if (state.reset_stand_requested) std::cout << " reset-stand";
             if (state.passive_requested) std::cout << " passive";
             if (state.dance_requested) std::cout << " dance";
+            if (state.skill_requested) std::cout << " skill";
             if (state.final_damping_requested) std::cout << " final-damping";
             std::cout << std::endl;
             last_log = now;
@@ -1352,6 +1402,12 @@ int run_robot_with_finally(const Args& args, const ml::LocoConfig& cfg, ml::Cont
                             mode_requested = true;
                         }
                     }
+                    if (input.skill_requested) {
+                        if (skill_request_allowed(args, "[Input]")) {
+                            requested_mode = RunMode::Skill;
+                            mode_requested = true;
+                        }
+                    }
                     if (input.final_damping_requested) {
                         requested_mode = RunMode::FinalDamping;
                         mode_requested = true;
@@ -1381,6 +1437,7 @@ int run_robot_with_finally(const Args& args, const ml::LocoConfig& cfg, ml::Cont
                         if (input.pause_zero) std::cout << " pause-zero";
                         if (input.passive_requested) std::cout << " passive";
                         if (input.dance_requested) std::cout << " dance";
+                        if (input.skill_requested) std::cout << " skill";
                         if (input.final_damping_requested) std::cout << " final-damping";
                         std::cout << std::endl;
                     }
@@ -1470,6 +1527,23 @@ int main(int argc, char** argv)
                 beyond_policy.enter();
                 std::cout << "[DryRun] BeyondMimic loaded: " << args.beyond_yaml << std::endl;
             }
+            if (!args.track_mimic_yaml.empty()) {
+                if (!std::filesystem::exists(args.track_mimic_yaml)) {
+                    throw std::runtime_error("TrackMimic config not found: " + args.track_mimic_yaml.string());
+                }
+                StateAndCmd external_state(ml::kNumJoints);
+                PolicyOutput external_output(ml::kNumJoints);
+                BeyondMimicPolicy track_policy(
+                    external_state,
+                    external_output,
+                    args.track_mimic_yaml.string(),
+                    static_cast<float>(cfg.policy_dt),
+                    FSMStateName::SKILL_TRACK_MIMIC,
+                    "TrackMimic",
+                    false);
+                track_policy.enter();
+                std::cout << "[DryRun] BeyondMimic TrackMimic loaded: " << args.track_mimic_yaml << std::endl;
+            }
             return 0;
         }
         if (args.connect_check) return connect_check(args);
@@ -1485,10 +1559,14 @@ int main(int argc, char** argv)
         ml::ControllerCore core(cfg, core_options);
         StateAndCmd external_state(ml::kNumJoints);
         PolicyOutput external_output(ml::kNumJoints);
+        StateAndCmd skill_external_state(ml::kNumJoints);
+        PolicyOutput skill_external_output(ml::kNumJoints);
         std::unique_ptr<BeyondMimicPolicy> beyond_policy;
+        std::unique_ptr<BeyondMimicPolicy> track_mimic_policy;
         using BeyondAdapter =
             ml::FsmExternalPolicyAdapter<BeyondMimicPolicy, StateAndCmd, PolicyOutput, FSMStateName>;
         std::unique_ptr<BeyondAdapter> beyond_adapter;
+        std::unique_ptr<BeyondAdapter> track_mimic_adapter;
         if (!args.beyond_yaml.empty()) {
             if (!std::filesystem::exists(args.beyond_yaml)) {
                 throw std::runtime_error("BeyondMimic config not found: " + args.beyond_yaml.string());
@@ -1508,6 +1586,29 @@ int main(int argc, char** argv)
                 control_mode_for_fsm_state);
             core.register_external_policy(ml::kBeyondMimicPolicyKey, *beyond_adapter, true);
             std::cout << "[ExternalPolicy] DANCE -> BeyondMimic: " << args.beyond_yaml << std::endl;
+        }
+        if (!args.track_mimic_yaml.empty()) {
+            if (!std::filesystem::exists(args.track_mimic_yaml)) {
+                throw std::runtime_error("TrackMimic config not found: " + args.track_mimic_yaml.string());
+            }
+            track_mimic_policy = std::make_unique<BeyondMimicPolicy>(
+                skill_external_state,
+                skill_external_output,
+                args.track_mimic_yaml.string(),
+                static_cast<float>(cfg.policy_dt),
+                FSMStateName::SKILL_TRACK_MIMIC,
+                "TrackMimic",
+                false);
+            track_mimic_adapter = std::make_unique<BeyondAdapter>(
+                ml::ControlMode::Skill,
+                ml::kTrackMimicPolicyKey,
+                FSMStateName::SKILL_TRACK_MIMIC,
+                skill_external_state,
+                skill_external_output,
+                *track_mimic_policy,
+                control_mode_for_fsm_state);
+            core.register_external_policy(ml::kTrackMimicPolicyKey, *track_mimic_adapter, true);
+            std::cout << "[ExternalPolicy] SKILL -> BeyondMimic TrackMimic: " << args.track_mimic_yaml << std::endl;
         }
         return run_robot_with_finally(args, cfg, core);
     } catch (const std::exception& exc) {

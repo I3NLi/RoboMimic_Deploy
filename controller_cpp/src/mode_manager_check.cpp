@@ -164,6 +164,13 @@ void check_mode_request_helpers()
     require(skill.requested, "skill helper should request a mode");
     require(skill.mode == ml::ControlMode::Skill, "skill helper mode");
     require(skill.external_policy_key == "TrackMimic", "skill helper should preserve explicit key");
+
+    const ml::ModeRequest default_skill = ml::mode_request_for_control_mode(ml::ControlMode::Skill);
+    require(default_skill.requested, "default skill helper should request a mode");
+    require(default_skill.mode == ml::ControlMode::Skill, "default skill helper mode");
+    require(
+        default_skill.external_policy_key == ml::kTrackMimicPolicyKey,
+        "default skill helper should select TrackMimic");
 }
 
 }  // namespace

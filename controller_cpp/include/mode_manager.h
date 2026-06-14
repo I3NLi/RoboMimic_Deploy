@@ -16,6 +16,7 @@ enum class ControlMode {
 };
 
 inline constexpr const char kBeyondMimicPolicyKey[] = "BeyondMimic";
+inline constexpr const char kTrackMimicPolicyKey[] = "TrackMimic";
 
 struct ModeRequest {
     bool requested{false};
@@ -75,6 +76,8 @@ inline ModeRequest mode_request_for_control_mode(ControlMode mode, std::string e
     }
     if (mode == ControlMode::Dance && external_policy_key.empty()) {
         external_policy_key = kBeyondMimicPolicyKey;
+    } else if (mode == ControlMode::Skill && external_policy_key.empty()) {
+        external_policy_key = kTrackMimicPolicyKey;
     }
     return ModeRequest::enter_external(mode, std::move(external_policy_key));
 }
