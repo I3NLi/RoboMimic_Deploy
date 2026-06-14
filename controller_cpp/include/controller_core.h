@@ -1,6 +1,7 @@
 #pragma once
 
 #include "magicbot_loco_core.h"
+#include "mode_manager.h"
 
 #include <algorithm>
 #include <array>
@@ -11,25 +12,8 @@
 
 namespace magicbot_loco {
 
-enum class ControlMode {
-    Passive,
-    Stand,
-    Loco,
-    Dance,
-    Skill,
-    FinalDamping,
-};
-
 struct Command {
     std::array<float, 3> velocity{0.0f, 0.0f, 0.0f};
-};
-
-struct ModeRequest {
-    bool requested{false};
-    ControlMode mode{ControlMode::Stand};
-
-    static ModeRequest none() { return {}; }
-    static ModeRequest enter(ControlMode next_mode) { return ModeRequest{true, next_mode}; }
 };
 
 struct JointGains {
@@ -68,25 +52,6 @@ struct ControllerCoreOptions {
     float damping_kd{3.0f};
 };
 
-inline const char* control_mode_name(ControlMode mode)
-{
-    switch (mode) {
-    case ControlMode::Passive:
-        return "PASSIVE";
-    case ControlMode::Stand:
-        return "STAND";
-    case ControlMode::Loco:
-        return "LOCO";
-    case ControlMode::Dance:
-        return "DANCE";
-    case ControlMode::Skill:
-        return "SKILL";
-    case ControlMode::FinalDamping:
-        return "FINAL_DAMPING";
-    }
-    return "UNKNOWN";
-}
-
 class ControllerCore {
 public:
     explicit ControllerCore(LocoConfig cfg, ControllerCoreOptions options = {})
@@ -124,7 +89,7 @@ public:
         have_previous_raw_policy_target_ = false;
     }
 
-    ControlMode mode() const { return mode_; }
+    ControlMode mode() const { return mode_manager_.mode(); }
 
     const JointGains& gains() const { return gains_; }
 
@@ -134,45 +99,35 @@ public:
         ModeRequest request,
         float control_dt_s)
     {
-        if (request.requested) {
-            switch_mode(request.mode, snapshot);
+        const ModeTransition transition = mode_manager_.apply(request);
+        if (transition.reset_policy_history) {
+            reset_policy();
+        }
+        if (transition.seed_target_from_state) {
+            command_target_ = snapshot.q;
         }
 
         const float dt = std::max(control_dt_s, 1e-6f);
         policy_elapsed_s_ += dt;
+        const ControlMode active_mode = mode_manager_.mode();
 
-        if (mode_ == ControlMode::Passive || mode_ == ControlMode::FinalDamping) {
+        if (active_mode == ControlMode::Passive || active_mode == ControlMode::FinalDamping) {
             projected_gravity_ = gravity_orientation(snapshot.quat);
             command_target_ = snapshot.q;
             return make_output(false);
         }
-        if (mode_ == ControlMode::Stand) {
+        if (active_mode == ControlMode::Stand) {
             return step_stand(snapshot, dt);
         }
-        if (mode_ == ControlMode::Loco) {
-            return step_loco(snapshot, command);
+        if (active_mode == ControlMode::Loco) {
+            return step_loco(snapshot, transition.zero_command ? Command{} : command);
         }
 
         throw std::runtime_error(
-            std::string("ControllerCore mode is not wired yet: ") + control_mode_name(mode_));
+            std::string("ControllerCore mode is not wired yet: ") + control_mode_name(active_mode));
     }
 
 private:
-    void switch_mode(ControlMode next_mode, const RobotSnapshot& snapshot)
-    {
-        if (next_mode == mode_) return;
-        if (next_mode == ControlMode::Dance || next_mode == ControlMode::Skill) {
-            throw std::runtime_error(
-                std::string("ControllerCore mode requires a skill policy adapter: ") +
-                control_mode_name(next_mode));
-        }
-        mode_ = next_mode;
-        reset_policy();
-        if (mode_ == ControlMode::Passive || mode_ == ControlMode::FinalDamping) {
-            command_target_ = snapshot.q;
-        }
-    }
-
     ControllerCoreOutput step_stand(const RobotSnapshot& snapshot, float dt)
     {
         projected_gravity_ = gravity_orientation(snapshot.quat);
@@ -247,9 +202,10 @@ private:
         ControllerCoreOutput out;
         out.target.q = command_target_;
         out.target.gains = gains_;
-        out.target.damping_only = mode_ == ControlMode::Passive || mode_ == ControlMode::FinalDamping;
+        out.target.damping_only =
+            mode_manager_.mode() == ControlMode::Passive || mode_manager_.mode() == ControlMode::FinalDamping;
         out.target.damping_kd = options_.damping_kd;
-        out.telemetry.mode = mode_;
+        out.telemetry.mode = mode_manager_.mode();
         out.telemetry.policy_evaluated = policy_evaluated;
         out.telemetry.policy_steps = policy_steps_;
         out.telemetry.raw_policy_target = raw_policy_target_;
@@ -267,7 +223,7 @@ private:
     JointArray command_target_{};
     JointArray raw_policy_target_{};
     std::array<float, 3> projected_gravity_{0.0f, 0.0f, -1.0f};
-    ControlMode mode_{ControlMode::Stand};
+    ModeManager mode_manager_{ControlMode::Stand};
     float policy_elapsed_s_{kDefaultPolicyDt};
     bool have_previous_raw_policy_target_{false};
     int policy_steps_{0};

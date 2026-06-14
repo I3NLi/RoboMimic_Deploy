@@ -39,6 +39,12 @@ backend I/O and `RobotSnapshot` / `JointTarget`.
 - `ControllerTelemetry`
 - `ControllerCore`
 
+`mode_manager.h` owns shared mode state and transition metadata for
+`PASSIVE`, `STAND`, `LOCO`, and `FINAL_DAMPING`. It marks transitions that must
+reset policy history, zero commands, or seed targets from the current robot
+state. `DANCE` and `SKILL` remain explicit modes but are rejected until a skill
+policy adapter is installed.
+
 `robot_adapter.h` introduces the backend boundary:
 
 - `RobotAdapter::read_snapshot()`
@@ -77,7 +83,6 @@ state/command I/O.
 1. Route `magicbot_z1_loco_onnx` LOCO loop through `ControllerCore`.
 2. Route MuJoCo viewer closed-loop code through `MujocoSimAdapter` and the same
    `ControllerCore` API.
-3. Extract the mode manager for `PASSIVE` / `STAND` / `LOCO`.
-4. Add policy adapters for `DANCE` / `SKILL`.
-5. Move viewer mode/control API code to send requests only; it must not duplicate
+3. Add policy adapters for `DANCE` / `SKILL`.
+4. Move viewer mode/control API code to send requests only; it must not duplicate
    core policy or safety logic.
