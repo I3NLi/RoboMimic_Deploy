@@ -2,9 +2,9 @@
 #include "beyond_mimic_policy.h"
 #include "controller_core.h"
 #include "controller_runtime.h"
-#include "fsm_external_policy_adapter.h"
 #include "magicbot_loco_core.h"
 #include "mujoco_sim_adapter.h"
+#include "native_external_policy_registry.h"
 #include "text_control_command.h"
 
 #include <algorithm>
@@ -2115,16 +2115,8 @@ int main(int argc, char** argv)
         core.set_gains(sim_gains);
         core.set_default_target(stand_q);
 
-        StateAndCmd external_state(magicbot_loco::kNumJoints);
-        PolicyOutput external_output(magicbot_loco::kNumJoints);
-        StateAndCmd skill_external_state(magicbot_loco::kNumJoints);
-        PolicyOutput skill_external_output(magicbot_loco::kNumJoints);
-        std::unique_ptr<BeyondMimicPolicy> beyond_policy;
-        std::unique_ptr<BeyondMimicPolicy> track_mimic_policy;
-        using BeyondAdapter =
-            magicbot_loco::FsmExternalPolicyAdapter<BeyondMimicPolicy, StateAndCmd, PolicyOutput, FSMStateName>;
-        std::unique_ptr<BeyondAdapter> beyond_adapter;
-        std::unique_ptr<BeyondAdapter> track_mimic_adapter;
+        magicbot_loco::NativeBeyondMimicExternalPolicyRegistry external_policies(
+            static_cast<float>(loco_cfg.policy_dt));
         bool dance_enabled = false;
         bool skill_enabled = false;
         if (!args.beyond_yaml.empty()) {
@@ -2132,20 +2124,7 @@ int main(int argc, char** argv)
             if (!fs::exists(beyond_yaml_path)) {
                 throw std::runtime_error("BeyondMimic config not found: " + beyond_yaml_path.string());
             }
-            beyond_policy = std::make_unique<BeyondMimicPolicy>(
-                external_state,
-                external_output,
-                beyond_yaml_path.string(),
-                static_cast<float>(loco_cfg.policy_dt));
-            beyond_adapter = std::make_unique<BeyondAdapter>(
-                magicbot_loco::ControlMode::Dance,
-                magicbot_loco::kBeyondMimicPolicyKey,
-                FSMStateName::SKILL_BEYOND_MIMIC,
-                external_state,
-                external_output,
-                *beyond_policy,
-                control_mode_for_fsm_state);
-            core.register_external_policy(magicbot_loco::kBeyondMimicPolicyKey, *beyond_adapter, true);
+            external_policies.register_dance(core, beyond_yaml_path.string());
             dance_enabled = true;
         }
         if (!args.track_mimic_yaml.empty()) {
@@ -2155,23 +2134,7 @@ int main(int argc, char** argv)
                     "BeyondMimic trajectory/TrackMimic config not found: " +
                     track_yaml_path.string());
             }
-            track_mimic_policy = std::make_unique<BeyondMimicPolicy>(
-                skill_external_state,
-                skill_external_output,
-                track_yaml_path.string(),
-                static_cast<float>(loco_cfg.policy_dt),
-                FSMStateName::SKILL_TRACK_MIMIC,
-                "TrackMimic",
-                false);
-            track_mimic_adapter = std::make_unique<BeyondAdapter>(
-                magicbot_loco::ControlMode::Skill,
-                magicbot_loco::kTrackMimicPolicyKey,
-                FSMStateName::SKILL_TRACK_MIMIC,
-                skill_external_state,
-                skill_external_output,
-                *track_mimic_policy,
-                control_mode_for_fsm_state);
-            core.register_external_policy(magicbot_loco::kTrackMimicPolicyKey, *track_mimic_adapter, true);
+            external_policies.register_track_mimic(core, track_yaml_path.string());
             skill_enabled = true;
         }
 

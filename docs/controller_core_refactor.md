@@ -193,6 +193,9 @@ mode-name/request mapping.
 The native FSM state names and their `FSMStateName -> ControlMode` completion
 mapper live in `native_fsm_states.h`; viewer and real external-policy adapters
 both use that helper instead of maintaining separate return-mode mappings.
+`NativeBeyondMimicExternalPolicyRegistry` now owns the native BeyondMimic and
+TrackMimic trajectory policy/adapter lifetimes for both entrypoints, so viewer
+and real runner only pass resolved YAML paths into the shared registration path.
 
 The dual-rate validation tool also uses the helper for LOCO entry requests.
 
