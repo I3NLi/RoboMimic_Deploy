@@ -7,6 +7,7 @@ CPP_DIR="${PROJECT_ROOT}/controller_cpp"
 BUILD_DIR="${CPP_DIR}/build_mujoco_viewer"
 NATIVE_BIN="${BUILD_DIR}/mujoco_loco_viewer"
 DEFAULT_CONFIG="${PROJECT_ROOT}/policies/loco_mode/config/LocoMode_lowKp.yaml"
+DEFAULT_BEYOND_YAML="${PROJECT_ROOT}/policies/beyond_mimic/config/BeyondMimic.yaml"
 
 WANT_ROS2_CAMERA=0
 for arg in "$@"; do
@@ -32,9 +33,41 @@ has_arg() {
     return 1
 }
 
-args=("$@")
+CONTROL_STATION=0
+args=()
+for arg in "$@"; do
+    if [[ "${arg}" == "--control-station" ]]; then
+        CONTROL_STATION=1
+    else
+        args+=("${arg}")
+    fi
+done
+
 if ! has_arg "--config" "${args[@]}"; then
     args=(--config "${DEFAULT_CONFIG}" "${args[@]}")
+fi
+if [[ "${CONTROL_STATION}" == "1" ]]; then
+    if ! has_arg "--camera-stream" "${args[@]}" && ! has_arg "--no-camera-stream" "${args[@]}"; then
+        args+=(--camera-stream)
+    fi
+    if ! has_arg "--camera-host" "${args[@]}"; then
+        args+=(--camera-host 0.0.0.0)
+    fi
+    if ! has_arg "--camera-port" "${args[@]}"; then
+        args+=(--camera-port 18080)
+    fi
+    if ! has_arg "--udp-control" "${args[@]}"; then
+        args+=(--udp-control)
+    fi
+    if ! has_arg "--udp-bind" "${args[@]}"; then
+        args+=(--udp-bind 0.0.0.0)
+    fi
+    if ! has_arg "--udp-port" "${args[@]}"; then
+        args+=(--udp-port 15000)
+    fi
+    if ! has_arg "--beyond-yaml" "${args[@]}" && [[ -f "${DEFAULT_BEYOND_YAML}" ]]; then
+        args+=(--beyond-yaml "${DEFAULT_BEYOND_YAML}")
+    fi
 fi
 
 ONNXRUNTIME_DIR="${ONNXRUNTIME_DIR:-/home/hiyio/unitree_rl_lab/deploy/thirdparty/onnxruntime-linux-x64-1.22.0}"

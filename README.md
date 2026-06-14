@@ -89,6 +89,13 @@ Camera HTTP stream:
 scripts/run_mujoco_loco_viewer_native.sh --camera-stream --camera-port 18080
 ```
 
+Control-station mode opens the camera HTTP stream, the viewer HTTP control API,
+UDP velocity/mode control, and BeyondMimic/DANCE when its YAML exists:
+
+```bash
+scripts/run_mujoco_loco_viewer_native.sh --control-station
+```
+
 Endpoints:
 
 ```text
@@ -96,6 +103,8 @@ Endpoints:
 /frame.jpg
 /frame.png
 /stream.mjpg
+/reset          POST: request a simulation reset
+/viewer-event   POST: forward remote pointer drag events for perturb/camera control
 ```
 
 ROS2 image publishing:
