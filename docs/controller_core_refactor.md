@@ -282,7 +282,10 @@ scripts/run_text_control_parser_check_native.sh
 
 This covers mode aliases, velocity tokens, shared action effects, and their
 conversion into `ModeRequest` objects for LOCO/STAND/PASSIVE/DANCE/SKILL and
-FINAL_DAMPING.
+FINAL_DAMPING. It also verifies the shared UI/input intent semantics for
+zero-command, pause/resume, stop, reset-stand, final damping, DANCE/BeyondMimic,
+and SKILL/TrackMimic so entrypoints can reuse one action interpretation instead
+of each keeping local command/mode mutations.
 
 Shared mode transition check:
 

@@ -183,6 +183,13 @@ void check_intent_application()
     require(result.applied, "resume intent should apply");
     require(!intent.paused, "resume intent should unpause");
 
+    intent.command = {0.6f, -0.2f, 0.4f};
+    result = ml::apply_text_control_action_to_intent(intent, ml::TextControlAction::Zero);
+    require(result.applied, "zero intent should apply");
+    require(intent.command == std::array<float, 3>{0.0f, 0.0f, 0.0f}, "zero intent should zero command");
+    require(intent.desired_mode == ml::ControlMode::Loco, "zero intent should not change mode");
+    require(!intent.paused, "zero intent should not pause");
+
     intent.reset_requested = false;
     result = ml::apply_text_control_action_to_intent(intent, ml::TextControlAction::Stand);
     require(result.applied, "stand intent should apply");
@@ -211,6 +218,35 @@ void check_intent_application()
     require(intent.desired_mode == ml::ControlMode::Stand, "reset intent mode");
     require(intent.reset_requested, "reset intent should set reset flag");
     require(intent.command == std::array<float, 3>{0.0f, 0.0f, 0.0f}, "reset intent should zero command");
+
+    intent.reset_requested = false;
+    intent.paused = true;
+    intent.command = {0.1f, 0.2f, 0.3f};
+    result = ml::apply_text_control_action_to_intent(intent, ml::TextControlAction::FinalDamping);
+    require(result.applied, "final damping intent should apply");
+    require(intent.desired_mode == ml::ControlMode::FinalDamping, "final damping intent mode");
+    require(intent.desired_external_policy_key.empty(), "final damping intent external key");
+    require(!intent.reset_requested, "final damping intent should not request reset");
+    require(!intent.paused, "final damping intent should unpause");
+    require(intent.command == std::array<float, 3>{0.0f, 0.0f, 0.0f}, "final damping intent should zero command");
+
+    intent.command = {0.1f, 0.2f, 0.3f};
+    result = ml::apply_text_control_action_to_intent(intent, ml::TextControlAction::Dance);
+    require(result.applied, "dance intent should apply");
+    require(intent.desired_mode == ml::ControlMode::Dance, "dance intent mode");
+    require(intent.desired_external_policy_key == ml::kBeyondMimicPolicyKey, "dance intent external key");
+    require(intent.command == std::array<float, 3>{0.0f, 0.0f, 0.0f}, "dance intent should zero command");
+
+    intent.command = {0.1f, 0.2f, 0.3f};
+    result = ml::apply_text_control_action_to_intent(intent, ml::TextControlAction::Skill);
+    require(result.applied, "skill intent should apply");
+    require(intent.desired_mode == ml::ControlMode::Skill, "skill intent mode");
+    require(intent.desired_external_policy_key == ml::kTrackMimicPolicyKey, "skill intent external key");
+    require(intent.command == std::array<float, 3>{0.0f, 0.0f, 0.0f}, "skill intent should zero command");
+
+    result = ml::apply_text_control_action_to_intent(intent, ml::TextControlAction::Stop);
+    require(result.applied, "stop intent should apply");
+    require(!intent.running, "stop intent should clear running");
 
     const auto before_disabled = intent;
     result = ml::apply_text_control_action_to_intent(
