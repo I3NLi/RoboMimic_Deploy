@@ -46,9 +46,16 @@ state. `DANCE` and `SKILL` remain explicit modes but are rejected until a skill
 policy adapter is installed.
 
 `policy_adapter.h` defines the external policy contract for `DANCE` / `SKILL`.
-Adapters only return a raw motor-space target and completion hint. `ControllerCore`
-still owns policy-history reset, motion safety, torque limiting, rate limiting,
-and final `JointTarget` generation.
+Adapters return a raw motor-space target, an optional gains override, and a
+completion hint. `ControllerCore` still owns policy-history reset, motion safety,
+torque limiting, rate limiting, and final `JointTarget` generation. Optional
+external gains are held across the 500Hz adapter write ticks between lower-rate
+policy evaluations.
+
+`fsm_external_policy_adapter.h` is a bridge for the existing native FSM policies
+such as Dance and BeyondMimic. It copies `RobotSnapshot` / velocity command into
+the old `StateAndCmd`, runs the wrapped `FSMState`, then converts `PolicyOutput`
+back into `ExternalPolicyOutput` for the shared core.
 
 `robot_adapter.h` introduces the backend boundary:
 
@@ -105,6 +112,7 @@ state/command I/O.
 
 ## Next cuts
 
-1. Wrap existing Dance/BeyondMimic policies behind `ExternalPolicyAdapter`.
+1. Register concrete Dance/BeyondMimic instances through
+   `FsmExternalPolicyAdapter` in the runtime entrypoints that need those modes.
 2. Move viewer mode/control API code to send requests only; it must not duplicate
    core policy or safety logic.

@@ -73,6 +73,7 @@ public:
             gains_.kp[i] *= options_.kp_scale;
             gains_.kd[i] *= options_.kd_scale;
         }
+        command_gains_ = gains_;
     }
 
     void warmup(int rounds) { loco_policy_.warmup(rounds); }
@@ -97,6 +98,7 @@ public:
             gains.kd[i] *= options_.kd_scale;
         }
         gains_ = gains;
+        command_gains_ = gains_;
     }
 
     void reset_policy()
@@ -180,6 +182,7 @@ private:
             options_.max_target_rate,
             dt,
             options_.joint_limit_margin);
+        command_gains_ = gains_;
         safety_.check(snapshot, &command_target_, &default_target_, nullptr);
         raw_policy_target_ = default_target_;
         return make_output(false);
@@ -211,6 +214,7 @@ private:
                 options_.max_target_rate,
                 cfg_.policy_dt,
                 options_.joint_limit_margin);
+            command_gains_ = gains_;
             safety_.check(
                 snapshot,
                 &command_target_,
@@ -255,6 +259,25 @@ private:
         input.velocity_command = command.velocity;
         input.dt_s = cfg_.policy_dt;
         const ExternalPolicyOutput policy_output = policy->step(input);
+        JointGains policy_gains = gains_;
+        if (policy_output.override_gains) {
+            policy_gains.kp = policy_output.kp_motor;
+            policy_gains.kd = policy_output.kd_motor;
+            bool has_tau_limit_override = false;
+            for (float limit : policy_output.tau_limit_motor) {
+                if (limit > 0.0f) {
+                    has_tau_limit_override = true;
+                    break;
+                }
+            }
+            if (has_tau_limit_override) {
+                policy_gains.tau_limit = policy_output.tau_limit_motor;
+            }
+            for (int i = 0; i < kNumJoints; ++i) {
+                policy_gains.kp[i] *= options_.kp_scale;
+                policy_gains.kd[i] *= options_.kd_scale;
+            }
+        }
 
         safety_.check(
             snapshot,
@@ -265,9 +288,9 @@ private:
             policy_output.target_motor,
             snapshot.q,
             snapshot.dq,
-            gains_.kp,
-            gains_.kd,
-            gains_.tau_limit,
+            policy_gains.kp,
+            policy_gains.kd,
+            policy_gains.tau_limit,
             cfg_.tau_limit_scale);
         command_target_ = clamp_and_rate_limit(
             limited,
@@ -275,6 +298,7 @@ private:
             options_.max_target_rate,
             cfg_.policy_dt,
             options_.joint_limit_margin);
+        command_gains_ = policy_gains;
         safety_.check(
             snapshot,
             &command_target_,
@@ -304,7 +328,7 @@ private:
     {
         ControllerCoreOutput out;
         out.target.q = command_target_;
-        out.target.gains = gains_;
+        out.target.gains = command_gains_;
         out.target.damping_only =
             mode_manager_.mode() == ControlMode::Passive || mode_manager_.mode() == ControlMode::FinalDamping;
         out.target.damping_kd = options_.damping_kd;
@@ -336,6 +360,7 @@ private:
     OnnxLocoPolicy loco_policy_;
     MotionSafety safety_;
     JointGains gains_{};
+    JointGains command_gains_{};
     JointArray default_target_{};
     JointArray command_target_{};
     JointArray raw_policy_target_{};

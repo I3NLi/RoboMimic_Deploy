@@ -15,6 +15,10 @@ struct ExternalPolicyInput {
 
 struct ExternalPolicyOutput {
     JointArray target_motor{};
+    JointArray kp_motor{};
+    JointArray kd_motor{};
+    JointArray tau_limit_motor{};
+    bool override_gains{false};
     bool complete{false};
     ControlMode next_mode{ControlMode::Loco};
 };
