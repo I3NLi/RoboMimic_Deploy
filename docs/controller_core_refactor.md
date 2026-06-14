@@ -242,6 +242,8 @@ scripts; control, policy, mode, safety, and adapter behavior stay in the shared
 runtime being tested. The Python-facing viewer group also statically checks that
 `run_python_mujoco_viewer.py` delegates through `subprocess.run` and does not
 import MuJoCo, ONNX Runtime, Torch, NumPy, ROS, or other control/runtime stacks.
+It also checks `--print-command` preserves forwarding to the native viewer
+runner with passthrough arguments.
 
 Shared text-control parser check:
 

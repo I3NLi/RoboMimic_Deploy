@@ -162,6 +162,18 @@ if not uses_subprocess_run:
 PY
 }
 
+check_python_viewer_print_command() {
+    local output
+    output="$("${PYTHON_VIEWER}" --print-command --duration 0.1 --no-realtime)"
+    if [[ "${output}" != *"run_mujoco_loco_viewer_native.sh"* ||
+          "${output}" != *"--duration 0.1"* ||
+          "${output}" != *"--no-realtime"* ]]; then
+        echo "[Smoke][ERROR] Python viewer --print-command did not preserve native runner forwarding" >&2
+        echo "${output}" >&2
+        exit 1
+    fi
+}
+
 if [[ "${RUN_CORE}" -eq 1 ]]; then
     run_step "${SCRIPT_DIR}/run_text_control_parser_check_native.sh"
     run_step "${SCRIPT_DIR}/run_mode_manager_check_native.sh"
@@ -184,6 +196,7 @@ fi
 
 if [[ "${RUN_PYTHON}" -eq 1 ]]; then
     run_step check_python_viewer_delegates
+    run_step check_python_viewer_print_command
     run_step python3 -m py_compile "${PYTHON_VIEWER}"
     run_step "${SCRIPT_DIR}/run_viewer_http_control_smoke_native.sh" --runner "${PYTHON_VIEWER}" --duration 1.5
     run_step "${SCRIPT_DIR}/run_viewer_udp_control_smoke_native.sh" --runner "${PYTHON_VIEWER}" --duration 1.5
