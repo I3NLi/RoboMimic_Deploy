@@ -345,12 +345,13 @@ scripts/run_magicbot_loco_external_policy_smoke_native.sh
 
 This dry-runs BeyondMimic and BeyondMimic trajectory/TrackMimic through the
 shared external-policy registry, then runs `--input-check` with explicit
-`--allow-dance` and `--allow-skill` gates. It sends UDP `mode=beyond`,
-`mode=track_mimic`, `pause`, `resume`, `mode=stand`, `mode=reset`, and
-`mode=final_damping`, verifying that the real-runner input path accepts
-DANCE/SKILL only when the matching gates and YAML paths are present, that plain
-STAND is distinct from reset-stand, and that UDP pause-zero/resume stays wired,
-without connecting to the robot.
+`--allow-dance` and `--allow-skill` gates. It also statically guards that
+`register_track_mimic()` still creates a `BeyondMimicPolicy` registered as the
+shared `SKILL/TrackMimic` key, rather than introducing a separate TrackMimic
+policy family. The live UDP portion sends `mode=beyond`, `mode=track_mimic`,
+and `mode=final_damping`, verifying that the real-runner input path accepts
+DANCE/SKILL only when the matching gates and YAML paths are present, without
+connecting to the robot.
 
 Baseline closed-loop smoke:
 

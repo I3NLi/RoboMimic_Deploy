@@ -72,6 +72,57 @@ for tool in python3 ss rg; do
     fi
 done
 
+registry_header="${PROJECT_ROOT}/controller_cpp/include/native_external_policy_registry.h"
+python3 - "${registry_header}" <<'PY'
+import pathlib
+import sys
+
+header = pathlib.Path(sys.argv[1])
+src = header.read_text()
+start = src.find("void register_track_mimic")
+if start < 0:
+    print("[Smoke][ERROR] NativeBeyondMimicExternalPolicyRegistry is missing register_track_mimic", file=sys.stderr)
+    sys.exit(1)
+brace = src.find("{", start)
+if brace < 0:
+    print("[Smoke][ERROR] register_track_mimic body not found", file=sys.stderr)
+    sys.exit(1)
+
+depth = 0
+end = -1
+for idx in range(brace, len(src)):
+    if src[idx] == "{":
+        depth += 1
+    elif src[idx] == "}":
+        depth -= 1
+        if depth == 0:
+            end = idx + 1
+            break
+if end < 0:
+    print("[Smoke][ERROR] register_track_mimic body is not balanced", file=sys.stderr)
+    sys.exit(1)
+
+body = src[brace:end]
+required = [
+    "std::make_unique<::BeyondMimicPolicy>",
+    "::FSMStateName::SKILL_TRACK_MIMIC",
+    "ControlMode::Skill",
+    "kTrackMimicPolicyKey",
+    "core.register_external_policy(kTrackMimicPolicyKey",
+]
+missing = [item for item in required if item not in body]
+if missing:
+    print(
+        "[Smoke][ERROR] TrackMimic must stay a SKILL-keyed BeyondMimic trajectory path; missing: "
+        + ", ".join(missing),
+        file=sys.stderr,
+    )
+    sys.exit(1)
+if "std::make_unique<::TrackMimicPolicy>" in body or "class TrackMimicPolicy" in src:
+    print("[Smoke][ERROR] TrackMimic was split into a separate policy implementation", file=sys.stderr)
+    sys.exit(1)
+PY
+
 if [[ ! -f "${beyond_yaml}" ]]; then
     echo "[Smoke][ERROR] BeyondMimic YAML not found: ${beyond_yaml}" >&2
     exit 1
