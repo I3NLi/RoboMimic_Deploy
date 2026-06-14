@@ -6,6 +6,7 @@ PROJECT_ROOT="$( cd "${SCRIPT_DIR}/.." &> /dev/null && pwd )"
 RUNNER="${SCRIPT_DIR}/run_magicbot_loco_native.sh"
 RUNNER_SOURCE="${SCRIPT_DIR}/../controller_cpp/src/magicbot_z1_loco_onnx.cpp"
 README_PATH="${PROJECT_ROOT}/README.md"
+README_ZH_PATH="${PROJECT_ROOT}/README_zh.md"
 RUNNER_WRAPPER="${SCRIPT_DIR}/run_magicbot_loco_native.sh"
 
 keep_log=0
@@ -63,18 +64,10 @@ if rg -n 'MotionSafety[[:space:]]+[A-Za-z_]|safety\.check' "${RUNNER_SOURCE}"; t
 fi
 
 echo "[Smoke] Checking README real safety ladder order"
-python3 - "${README_PATH}" <<'PY'
+python3 - "${README_PATH}" "${README_ZH_PATH}" <<'PY'
 import sys
 from pathlib import Path
 
-readme = Path(sys.argv[1]).read_text(encoding="utf-8")
-start = readme.find("## Real-Robot Safety Ladder")
-end = readme.find("## Runtime Notes", start)
-if start < 0 or end < 0:
-    print("[Smoke][ERROR] README is missing the Real-Robot Safety Ladder section", file=sys.stderr)
-    sys.exit(1)
-
-section = readme[start:end]
 required = [
     "--dry-run",
     "--connect-check",
@@ -84,20 +77,35 @@ required = [
     "scripts/run_dual_push_smoke_native.sh",
     "--allow-loco",
 ]
-offset = 0
-for item in required:
-    next_pos = section.find(item, offset)
-    if next_pos < 0:
-        print(f"[Smoke][ERROR] README safety ladder missing or misordered step: {item}", file=sys.stderr)
-        sys.exit(1)
-    offset = next_pos + len(item)
 
-if section.count("--pd-stand-only") != 1:
-    print("[Smoke][ERROR] README safety ladder should contain exactly one PD stand step", file=sys.stderr)
-    sys.exit(1)
-if "--allow-loco" in section[: section.find("scripts/run_dual_push_smoke_native.sh")]:
-    print("[Smoke][ERROR] README safety ladder must not allow LOCO before sim closed-loop smoke", file=sys.stderr)
-    sys.exit(1)
+sections = [
+    (Path(sys.argv[1]), "## Real-Robot Safety Ladder", "## Runtime Notes", "README"),
+    (Path(sys.argv[2]), "## 真机安全阶梯", "## 运行说明", "README_zh"),
+]
+
+for path, start_marker, end_marker, label in sections:
+    readme = path.read_text(encoding="utf-8")
+    start = readme.find(start_marker)
+    end = readme.find(end_marker, start)
+    if start < 0 or end < 0:
+        print(f"[Smoke][ERROR] {label} is missing the real safety ladder section", file=sys.stderr)
+        sys.exit(1)
+
+    section = readme[start:end]
+    offset = 0
+    for item in required:
+        next_pos = section.find(item, offset)
+        if next_pos < 0:
+            print(f"[Smoke][ERROR] {label} safety ladder missing or misordered step: {item}", file=sys.stderr)
+            sys.exit(1)
+        offset = next_pos + len(item)
+
+    if section.count("--pd-stand-only") != 1:
+        print(f"[Smoke][ERROR] {label} safety ladder should contain exactly one PD stand step", file=sys.stderr)
+        sys.exit(1)
+    if "--allow-loco" in section[: section.find("scripts/run_dual_push_smoke_native.sh")]:
+        print(f"[Smoke][ERROR] {label} safety ladder must not allow LOCO before sim closed-loop smoke", file=sys.stderr)
+        sys.exit(1)
 PY
 
 echo "[Smoke] Checking real runner wrapper rebuilds on shared headers"
