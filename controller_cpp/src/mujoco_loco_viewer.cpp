@@ -14,6 +14,9 @@
 #include <cstring>
 #include <filesystem>
 #include <fcntl.h>
+#include <fstream>
+#include <iomanip>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <netinet/in.h>
@@ -68,10 +71,17 @@ struct Args {
     bool paused = true;
     bool realtime = true;
     bool follow = true;
+    std::string summary_json;
     bool udp_control = false;
     std::string udp_bind = "0.0.0.0";
     int udp_port = 15000;
     double udp_timeout_s = 0.35;
+    std::string push_body = "pelvis";
+    std::array<double, 3> push_force{0.0, 0.0, 0.0};
+    std::array<double, 3> push_impulse{0.0, 0.0, 0.0};
+    double push_start_s = 0.0;
+    double push_duration_s = 0.0;
+    double push_impulse_time_s = -1.0;
     bool camera_stream = false;
     bool camera_stream_set = false;
     std::string camera_name = "head_rgba_camera";
@@ -120,8 +130,21 @@ struct MouseState {
     bool left{false};
     bool middle{false};
     bool right{false};
+    bool perturb{false};
+    unsigned int perturb_button{0};
     int last_x{0};
     int last_y{0};
+};
+
+struct ViewerStats {
+    int push_force_steps{0};
+    bool push_impulse_applied{false};
+    int mouse_perturb_steps{0};
+    int last_perturb_body{0};
+    std::string last_perturb_body_name;
+    double min_base_height{std::numeric_limits<double>::infinity()};
+    double max_root_xy_drift{0.0};
+    double max_gravity_xy{0.0};
 };
 
 struct CameraStreamState {
@@ -429,12 +452,16 @@ void usage(const char* argv0)
         "Usage: %s [--config PATH] [--mujoco-yaml PATH] [--xml PATH]\n"
         "          [--initial-pose-yaml PATH] [--loco] [--paused|--unpaused]\n"
         "          [--duration SEC] [--width N] [--height N]\n"
+        "          [--summary-json PATH]\n"
         "          [--udp-control] [--udp-bind IP] [--udp-port N] [--udp-timeout-s SEC]\n"
+        "          [--push-body NAME] [--push-force X,Y,Z] [--push-start SEC] [--push-duration SEC]\n"
+        "          [--push-impulse X,Y,Z] [--push-impulse-time SEC]\n"
         "          [--camera-stream] [--camera-port N] [--camera-name NAME]\n"
         "          [--camera-ros2] [--ros2-topic-rgb TOPIC] [--ros2-topic-rgba TOPIC]\n"
         "\n"
         "Keys: L toggle loco, Space pause, R reset, F follow, X zero command,\n"
-        "      W/S vx, Q/E vy, A/D wz, Esc close. Mouse drags move camera.\n",
+        "      W/S vx, Q/E vy, A/D wz, Esc close. Mouse drags move camera;\n"
+        "      Shift+left/middle drag applies MuJoCo perturb force to the selected body.\n",
         argv0);
 }
 
@@ -445,6 +472,33 @@ std::string need_value(int& i, int argc, char** argv)
         std::exit(2);
     }
     return argv[++i];
+}
+
+std::array<double, 3> parse_vec3(std::string value)
+{
+    std::replace(value.begin(), value.end(), ',', ' ');
+    std::replace(value.begin(), value.end(), ';', ' ');
+    std::istringstream iss(value);
+    std::array<double, 3> out{0.0, 0.0, 0.0};
+    if (!(iss >> out[0] >> out[1] >> out[2])) {
+        throw std::runtime_error("expected vec3 formatted as x,y,z");
+    }
+    std::string extra;
+    if (iss >> extra) throw std::runtime_error("expected exactly three vec3 components");
+    for (double v : out) {
+        if (!std::isfinite(v)) throw std::runtime_error("vec3 components must be finite");
+    }
+    return out;
+}
+
+double vec3_norm(const std::array<double, 3>& value)
+{
+    return std::sqrt(value[0] * value[0] + value[1] * value[1] + value[2] * value[2]);
+}
+
+bool has_vec3(const std::array<double, 3>& value)
+{
+    return vec3_norm(value) > 0.0;
 }
 
 Args parse_args(int argc, char** argv)
@@ -482,6 +536,8 @@ Args parse_args(int argc, char** argv)
             args.realtime = false;
         } else if (arg == "--no-follow") {
             args.follow = false;
+        } else if (arg == "--summary-json") {
+            args.summary_json = need_value(i, argc, argv);
         } else if (arg == "--udp-control") {
             args.udp_control = true;
         } else if (arg == "--udp-bind") {
@@ -490,6 +546,18 @@ Args parse_args(int argc, char** argv)
             args.udp_port = std::atoi(need_value(i, argc, argv).c_str());
         } else if (arg == "--udp-timeout-s") {
             args.udp_timeout_s = std::atof(need_value(i, argc, argv).c_str());
+        } else if (arg == "--push-body") {
+            args.push_body = need_value(i, argc, argv);
+        } else if (arg == "--push-force") {
+            args.push_force = parse_vec3(need_value(i, argc, argv));
+        } else if (arg == "--push-start") {
+            args.push_start_s = std::atof(need_value(i, argc, argv).c_str());
+        } else if (arg == "--push-duration") {
+            args.push_duration_s = std::atof(need_value(i, argc, argv).c_str());
+        } else if (arg == "--push-impulse") {
+            args.push_impulse = parse_vec3(need_value(i, argc, argv));
+        } else if (arg == "--push-impulse-time") {
+            args.push_impulse_time_s = std::atof(need_value(i, argc, argv).c_str());
         } else if (arg == "--camera-stream") {
             args.camera_stream = true;
             args.camera_stream_set = true;
@@ -560,6 +628,12 @@ Args parse_args(int argc, char** argv)
     args.jpeg_quality = std::clamp(args.jpeg_quality, 1, 100);
     args.ros2_qos_depth = std::max(1, args.ros2_qos_depth);
     if (args.sim_dt <= 0.0) args.sim_dt = 0.002;
+    args.push_start_s = std::max(0.0, args.push_start_s);
+    args.push_duration_s = std::max(0.0, args.push_duration_s);
+    if (args.push_impulse_time_s < 0.0) args.push_impulse_time_s = args.push_start_s;
+    if (has_vec3(args.push_force) && args.push_duration_s <= 0.0) {
+        throw std::runtime_error("--push-duration must be > 0 when --push-force is nonzero");
+    }
     return args;
 }
 
@@ -789,6 +863,129 @@ void reset_sim(
     }
     for (int i = 0; i < model->nv; ++i) data->qvel[i] = 0.0;
     mj_forward(model, data);
+}
+
+const char* viewer_mode_label(bool loco, bool passive);
+
+std::string body_name(const mjModel* model, int body_id)
+{
+    if (body_id <= 0) return "";
+    const char* raw = mj_id2name(model, mjOBJ_BODY, body_id);
+    return raw ? std::string(raw) : std::string();
+}
+
+std::string json_escape(const std::string& value)
+{
+    std::ostringstream out;
+    for (char c : value) {
+        switch (c) {
+        case '\\':
+            out << "\\\\";
+            break;
+        case '"':
+            out << "\\\"";
+            break;
+        case '\n':
+            out << "\\n";
+            break;
+        case '\r':
+            out << "\\r";
+            break;
+        case '\t':
+            out << "\\t";
+            break;
+        default:
+            out << c;
+            break;
+        }
+    }
+    return out.str();
+}
+
+struct PushStepResult {
+    bool force_active{false};
+    bool impulse_applied{false};
+};
+
+PushStepResult apply_push_disturbance(
+    const Args& args,
+    mjModel* model,
+    mjData* data,
+    int push_body_id,
+    bool& impulse_done)
+{
+    PushStepResult result;
+    if (push_body_id < 0 || data->xfrc_applied == nullptr) return result;
+
+    const double sim_time = data->time;
+    const double dt = std::max(1e-9, model->opt.timestep);
+    double* xfrc = data->xfrc_applied + 6 * push_body_id;
+
+    const bool force_active =
+        has_vec3(args.push_force) &&
+        sim_time + 0.5 * dt >= args.push_start_s &&
+        sim_time < args.push_start_s + args.push_duration_s;
+    if (force_active) {
+        for (int i = 0; i < 3; ++i) xfrc[i] += args.push_force[static_cast<size_t>(i)];
+        result.force_active = true;
+    }
+
+    const bool impulse_active =
+        has_vec3(args.push_impulse) &&
+        !impulse_done &&
+        sim_time + 0.5 * dt >= args.push_impulse_time_s;
+    if (impulse_active) {
+        for (int i = 0; i < 3; ++i) xfrc[i] += args.push_impulse[static_cast<size_t>(i)] / dt;
+        impulse_done = true;
+        result.impulse_applied = true;
+    }
+    return result;
+}
+
+std::string viewer_summary_json(
+    const Args& args,
+    const mjModel* model,
+    const mjData* data,
+    const ViewerStats& stats,
+    int sim_step,
+    int policy_step,
+    bool loco_active,
+    bool passive_active,
+    bool paused,
+    double wall_s,
+    int push_body_id)
+{
+    std::ostringstream out;
+    out << std::fixed << std::setprecision(6)
+        << "{"
+        << "\"mode\":\"" << viewer_mode_label(loco_active, passive_active) << "\","
+        << "\"paused\":" << (paused ? "true" : "false") << ","
+        << "\"wall_s\":" << wall_s << ","
+        << "\"sim_time_s\":" << data->time << ","
+        << "\"sim_steps\":" << sim_step << ","
+        << "\"policy_steps\":" << policy_step << ","
+        << "\"base_x\":" << data->qpos[0] << ","
+        << "\"base_y\":" << data->qpos[1] << ","
+        << "\"base_z\":" << data->qpos[2] << ","
+        << "\"min_base_height\":" << (std::isfinite(stats.min_base_height) ? stats.min_base_height : data->qpos[2]) << ","
+        << "\"max_root_xy_drift\":" << stats.max_root_xy_drift << ","
+        << "\"max_gravity_xy\":" << stats.max_gravity_xy << ","
+        << "\"push_body\":\"" << json_escape(args.push_body) << "\","
+        << "\"push_body_id\":" << push_body_id << ","
+        << "\"push_body_resolved\":\"" << json_escape(body_name(model, push_body_id)) << "\","
+        << "\"push_enabled\":" << (has_vec3(args.push_force) || has_vec3(args.push_impulse) ? "true" : "false") << ","
+        << "\"push_start_s\":" << args.push_start_s << ","
+        << "\"push_duration_s\":" << args.push_duration_s << ","
+        << "\"push_impulse_time_s\":" << args.push_impulse_time_s << ","
+        << "\"push_force_norm\":" << vec3_norm(args.push_force) << ","
+        << "\"push_impulse_norm\":" << vec3_norm(args.push_impulse) << ","
+        << "\"push_force_steps\":" << stats.push_force_steps << ","
+        << "\"push_impulse_applied\":" << (stats.push_impulse_applied ? "true" : "false") << ","
+        << "\"mouse_perturb_steps\":" << stats.mouse_perturb_steps << ","
+        << "\"last_perturb_body\":" << stats.last_perturb_body << ","
+        << "\"last_perturb_body_name\":\"" << json_escape(stats.last_perturb_body_name) << "\""
+        << "}";
+    return out.str();
 }
 
 XGlWindow create_window(int width, int height)
@@ -1152,9 +1349,13 @@ void handle_key(
 void process_events(
     XGlWindow& win,
     mjModel* model,
+    mjData* data,
     mjvScene* scene,
+    mjvOption* opt,
+    mjvPerturb* perturb,
     mjvCamera* cam,
     MouseState& mouse,
+    ViewerStats& stats,
     bool& running,
     bool& loco_active,
     bool& passive_active,
@@ -1182,6 +1383,52 @@ void process_events(
         case ButtonPress:
             mouse.last_x = event.xbutton.x;
             mouse.last_y = event.xbutton.y;
+            if ((event.xbutton.state & ShiftMask) &&
+                (event.xbutton.button == Button1 || event.xbutton.button == Button2)) {
+                const mjtNum aspect = static_cast<mjtNum>(win.width) / std::max(1, win.height);
+                const mjtNum relx = static_cast<mjtNum>(event.xbutton.x) / std::max(1, win.width);
+                const mjtNum rely = static_cast<mjtNum>(win.height - event.xbutton.y) / std::max(1, win.height);
+                mjtNum selpnt[3] = {0, 0, 0};
+                int selgeom = -1;
+                int selflex = -1;
+                int selskin = -1;
+                const int selbody = mjv_select(
+                    model,
+                    data,
+                    opt,
+                    aspect,
+                    relx,
+                    rely,
+                    scene,
+                    selpnt,
+                    &selgeom,
+                    &selflex,
+                    &selskin);
+                if (selbody > 0) {
+                    perturb->select = selbody;
+                    perturb->flexselect = selflex;
+                    perturb->skinselect = selskin;
+                    mjtNum tmp[3];
+                    mju_sub3(tmp, selpnt, data->xpos + 3 * perturb->select);
+                    mju_mulMatTVec(perturb->localpos, data->xmat + 9 * perturb->select, tmp, 3, 3);
+                    mjv_initPerturb(model, data, scene, perturb);
+                    perturb->active = mjPERT_TRANSLATE;
+                    mouse.perturb = true;
+                    mouse.perturb_button = event.xbutton.button;
+                    stats.last_perturb_body = selbody;
+                    stats.last_perturb_body_name = body_name(model, selbody);
+                    std::printf("[ViewerPerturb] selected body=%d name=%s geom=%d\n",
+                                selbody,
+                                stats.last_perturb_body_name.c_str(),
+                                selgeom);
+                } else {
+                    perturb->select = 0;
+                    perturb->active = 0;
+                    mouse.perturb = false;
+                    mouse.perturb_button = 0;
+                }
+                break;
+            }
             if (event.xbutton.button == Button1) mouse.left = true;
             if (event.xbutton.button == Button2) mouse.middle = true;
             if (event.xbutton.button == Button3) mouse.right = true;
@@ -1193,6 +1440,12 @@ void process_events(
             }
             break;
         case ButtonRelease:
+            if (mouse.perturb && event.xbutton.button == mouse.perturb_button) {
+                perturb->active = 0;
+                mouse.perturb = false;
+                mouse.perturb_button = 0;
+                break;
+            }
             if (event.xbutton.button == Button1) mouse.left = false;
             if (event.xbutton.button == Button2) mouse.middle = false;
             if (event.xbutton.button == Button3) mouse.right = false;
@@ -1202,7 +1455,10 @@ void process_events(
             const double dy = static_cast<double>(event.xmotion.y - mouse.last_y) / std::max(1, win.height);
             mouse.last_x = event.xmotion.x;
             mouse.last_y = event.xmotion.y;
-            if (mouse.left) {
+            if (mouse.perturb && perturb->active) {
+                const int action = mouse.perturb_button == Button2 ? mjMOUSE_MOVE_V : mjMOUSE_MOVE_H;
+                mjv_movePerturb(model, data, action, dx, -dy, scene, perturb);
+            } else if (mouse.left) {
                 mjv_moveCamera(model, mjMOUSE_ROTATE_H, dx, dy, scene, cam);
             } else if (mouse.right) {
                 mjv_moveCamera(model, mjMOUSE_MOVE_H, dx, dy, scene, cam);
@@ -1339,6 +1595,10 @@ int main(int argc, char** argv)
 
         const auto qpos_idx = actuator_qpos_indices(model);
         const auto qvel_idx = actuator_qvel_indices(model);
+        const int push_body_id = mj_name2id(model, mjOBJ_BODY, args.push_body.c_str());
+        if ((has_vec3(args.push_force) || has_vec3(args.push_impulse)) && push_body_id < 0) {
+            throw std::runtime_error("push body not found in MuJoCo model: " + args.push_body);
+        }
         const int floor_geom_id = args.ground_correction
                                       ? mj_name2id(model, mjOBJ_GEOM, args.ground_floor_geom.c_str())
                                       : -1;
@@ -1360,11 +1620,13 @@ int main(int argc, char** argv)
         XGlWindow win = create_window(args.width, args.height);
         mjvCamera cam;
         mjvOption opt;
+        mjvPerturb perturb;
         mjvScene scene;
         mjvScene camera_scene;
         mjrContext context;
         mjv_defaultCamera(&cam);
         mjv_defaultOption(&opt);
+        mjv_defaultPerturb(&perturb);
         mjv_defaultScene(&scene);
         mjv_defaultScene(&camera_scene);
         mjr_defaultContext(&context);
@@ -1417,8 +1679,12 @@ int main(int argc, char** argv)
             udp_input = std::make_unique<ViewerUdpCommandInput>(args);
         }
         MouseState mouse;
+        ViewerStats stats;
         int sim_step = 0;
         int policy_step = 0;
+        bool push_impulse_done = false;
+        double root_x0 = data->qpos[0];
+        double root_y0 = data->qpos[1];
         const int steps_per_frame = std::max(1, static_cast<int>(std::round(1.0 / (args.render_fps * args.sim_dt))));
         const double camera_period =
             (args.camera_stream || args.camera_ros2) ? 1.0 / static_cast<double>(args.camera_fps) : 1.0;
@@ -1439,6 +1705,19 @@ int main(int argc, char** argv)
                 args.udp_port,
                 args.udp_timeout_s);
         }
+        if (has_vec3(args.push_force) || has_vec3(args.push_impulse)) {
+            std::printf(
+                "Push   : body=%s force_norm=%.2f start=%.2fs duration=%.2fs impulse_norm=%.2f impulse_time=%.2fs\n",
+                args.push_body.c_str(),
+                vec3_norm(args.push_force),
+                args.push_start_s,
+                args.push_duration_s,
+                vec3_norm(args.push_impulse),
+                args.push_impulse_time_s);
+        }
+        if (!args.summary_json.empty()) {
+            std::printf("Summary: %s\n", resolve_path(root, args.summary_json).string().c_str());
+        }
         print_cmd(cmd, loco_active, passive_active, paused);
 
         while (running) {
@@ -1446,9 +1725,13 @@ int main(int argc, char** argv)
             process_events(
                 win,
                 model,
+                data,
                 &scene,
+                &opt,
+                &perturb,
                 &cam,
                 mouse,
+                stats,
                 running,
                 loco_active,
                 passive_active,
@@ -1468,6 +1751,12 @@ int main(int argc, char** argv)
                 core.reset_policy();
                 sim_step = 0;
                 policy_step = 0;
+                push_impulse_done = false;
+                root_x0 = data->qpos[0];
+                root_y0 = data->qpos[1];
+                stats.min_base_height = std::numeric_limits<double>::infinity();
+                stats.max_root_xy_drift = 0.0;
+                stats.max_gravity_xy = 0.0;
                 reset_requested = false;
             }
 
@@ -1481,6 +1770,24 @@ int main(int argc, char** argv)
                     tick_input.publish_target = true;
                     const auto tick = runtime.tick(tick_input);
                     policy_step = tick.core.telemetry.policy_steps;
+                    const auto gravity = tick.core.telemetry.projected_gravity;
+                    stats.max_gravity_xy = std::max(
+                        stats.max_gravity_xy,
+                        std::sqrt(static_cast<double>(gravity[0]) * gravity[0] +
+                                  static_cast<double>(gravity[1]) * gravity[1]));
+                    if (model->nbody > 0 && data->xfrc_applied != nullptr) {
+                        mju_zero(data->xfrc_applied, 6 * model->nbody);
+                        if (perturb.active) {
+                            mjv_applyPerturbForce(model, data, &perturb);
+                            ++stats.mouse_perturb_steps;
+                            stats.last_perturb_body = perturb.select;
+                            stats.last_perturb_body_name = body_name(model, perturb.select);
+                        }
+                        const PushStepResult push =
+                            apply_push_disturbance(args, model, data, push_body_id, push_impulse_done);
+                        if (push.force_active) ++stats.push_force_steps;
+                        if (push.impulse_applied) stats.push_impulse_applied = true;
+                    }
                     mj_step(model, data);
                     if (args.ground_correction) {
                         (void)correct_ground_penetration(
@@ -1490,6 +1797,10 @@ int main(int argc, char** argv)
                             ground_contact_geom_ids,
                             args.ground_max_penetration);
                     }
+                    stats.min_base_height = std::min(stats.min_base_height, static_cast<double>(data->qpos[2]));
+                    stats.max_root_xy_drift = std::max(
+                        stats.max_root_xy_drift,
+                        std::hypot(data->qpos[0] - root_x0, data->qpos[1] - root_y0));
                     ++sim_step;
                 }
             } else {
@@ -1535,7 +1846,7 @@ int main(int argc, char** argv)
 
             mjrRect viewport{0, 0, win.width, win.height};
             mjr_setBuffer(mjFB_WINDOW, &context);
-            mjv_updateScene(model, data, &opt, nullptr, &cam, mjCAT_ALL, &scene);
+            mjv_updateScene(model, data, &opt, &perturb, &cam, mjCAT_ALL, &scene);
             mjr_render(viewport, &scene, &context);
 
             char left[512];
@@ -1555,10 +1866,13 @@ int main(int argc, char** argv)
             std::snprintf(
                 right,
                 sizeof(right),
-                "cmd vx %.2f\ncmd vy %.2f\ncmd wz %.2f\nL loco | Space pause\nR reset | F follow | X zero",
+                "cmd vx %.2f\ncmd vy %.2f\ncmd wz %.2f\npush steps %d impulse %s\nperturb %s\nL loco | Space pause\nR reset | F follow | X zero",
                 cmd[0],
                 cmd[1],
-                cmd[2]);
+                cmd[2],
+                stats.push_force_steps,
+                stats.push_impulse_applied ? "yes" : "no",
+                perturb.active ? body_name(model, perturb.select).c_str() : "off");
             mjr_overlay(mjFONT_NORMAL, mjGRID_TOPLEFT, viewport, left, "", &context);
             mjr_overlay(mjFONT_NORMAL, mjGRID_TOPRIGHT, viewport, right, "", &context);
             glXSwapBuffers(win.display, win.window);
@@ -1588,6 +1902,26 @@ int main(int argc, char** argv)
                     std::this_thread::sleep_for(std::chrono::duration<double>(frame_dt - elapsed));
                 }
             }
+        }
+
+        if (!args.summary_json.empty()) {
+            const double wall_s = std::chrono::duration<double>(Clock::now() - wall_start).count();
+            const std::string json = viewer_summary_json(
+                args,
+                model,
+                data,
+                stats,
+                sim_step,
+                policy_step,
+                loco_active,
+                passive_active,
+                paused,
+                wall_s,
+                push_body_id);
+            const fs::path summary_path = resolve_path(root, args.summary_json);
+            std::ofstream out(summary_path);
+            out << json << "\n";
+            std::printf("[Summary] %s\n", summary_path.string().c_str());
         }
 
         if (camera_server) camera_server->stop();

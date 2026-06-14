@@ -110,6 +110,10 @@ commands, pause/reset, camera streaming, rendering, and ground correction remain
 viewer responsibilities; ONNX inference, mode requests, target limiting, gains,
 and MuJoCo PD torque publication now use the shared runtime path. Viewer-specific
 initial-pose YAML overrides still feed the shared core default target and gains.
+The viewer can write a telemetry JSON summary with `--summary-json`, run the same
+scheduled push/impulse disturbance inputs as the rate smoke, and apply interactive
+MuJoCo perturb forces with `Shift+left` / `Shift+middle` mouse dragging on a
+selected body.
 
 The first `ControllerCore` implementation supports `PASSIVE`, `STAND`, `LOCO`,
 and `FINAL_DAMPING`. `DANCE` and `SKILL` are represented in the shared mode enum
@@ -137,6 +141,16 @@ scripts/run_dual_inference_rate_native.sh --mode pure-sim --duration 1.0 \
   --push-body pelvis --push-force 35,0,0 --push-start 0.30 \
   --push-duration 0.12 --push-impulse 0,1.0,0 --push-impulse-time 0.55 \
   --summary-json /tmp/dual_push_refactor_smoke.json
+```
+
+Viewer disturbance smoke:
+
+```bash
+controller_cpp/build_mujoco_viewer/mujoco_loco_viewer --duration 0.4 \
+  --unpaused --no-realtime --width 640 --height 480 \
+  --push-body pelvis --push-force 25,0,0 --push-start 0.05 \
+  --push-duration 0.08 --push-impulse 0,0.8,0 --push-impulse-time 0.18 \
+  --summary-json /tmp/viewer_push_summary.json
 ```
 
 ## Next cuts
