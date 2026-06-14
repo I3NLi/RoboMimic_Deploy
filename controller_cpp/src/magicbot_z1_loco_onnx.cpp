@@ -1181,7 +1181,10 @@ int input_check_only(const Args& args)
             mode = ml::mode_request_for_loco_toggle(mode).mode;
         }
         if (state.reset_stand_requested) {
-            mode = state.mode_request.requested ? state.mode_request.mode : ml::ControlMode::Stand;
+            if (!state.mode_request.requested) {
+                throw std::runtime_error("reset-stand input missing shared mode request");
+            }
+            mode = state.mode_request.mode;
         }
         if (state.mode_request.requested) {
             bool allowed = true;
@@ -1378,9 +1381,10 @@ int run_robot_with_finally(const Args& args, const ml::LocoConfig& cfg, ml::Cont
                     }
                     if (input.reset_stand_requested) {
                         std::cout << "[Input] Re-stand requested" << std::endl;
-                        const ml::ModeRequest reset_mode_request = input.mode_request.requested
-                            ? input.mode_request
-                            : ml::mode_request_for_control_mode(ml::ControlMode::Stand);
+                        if (!input.mode_request.requested) {
+                            throw std::runtime_error("reset-stand input missing shared mode request");
+                        }
+                        const ml::ModeRequest reset_mode_request = input.mode_request;
                         raw_cmd = {0.0f, 0.0f, 0.0f};
                         run_mode = reset_mode_request.mode;
                         run_external_policy_key = reset_mode_request.external_policy_key;

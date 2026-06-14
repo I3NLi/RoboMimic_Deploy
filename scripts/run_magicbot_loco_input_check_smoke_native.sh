@@ -125,6 +125,12 @@ if "mode_request_for_loco_toggle" not in source:
 if re.search(r"ControlMode::Loco\s*\?\s*ml::ControlMode::Stand", source):
     print("[Smoke][ERROR] real runner must not duplicate LOCO toggle mode mapping", file=sys.stderr)
     sys.exit(1)
+if "reset-stand input missing shared mode request" not in source:
+    print("[Smoke][ERROR] real runner must require reset-stand shared mode request", file=sys.stderr)
+    sys.exit(1)
+if "mode_request_for_control_mode(ml::ControlMode::Stand" in source:
+    print("[Smoke][ERROR] real runner reset branch must not rebuild stand requests locally", file=sys.stderr)
+    sys.exit(1)
 PY
 
 if [[ -z "${udp_port}" ]]; then
@@ -194,6 +200,7 @@ packets = [
     b"mode=beyond",
     b"mode=track_mimic",
     b"mode=passive",
+    b"mode=reset",
     b"mode=final_damping",
 ]
 
@@ -210,7 +217,7 @@ if ! wait "${runner_pid}"; then
 fi
 runner_pid=""
 
-for expected in 'mode=LOCO' 'mode=PASSIVE' 'mode=FINAL_DAMPING'; do
+for expected in 'mode=LOCO' 'mode=PASSIVE' 'reset-stand' 'mode=FINAL_DAMPING'; do
     if ! rg -q "${expected}" "${log_path}"; then
         echo "[Smoke][ERROR] missing expected input-check output: ${expected}" >&2
         sed -n '1,220p' "${log_path}" >&2
@@ -243,4 +250,4 @@ echo "[Smoke] PASSED real-runner UDP input-check"
 if [[ "${keep_log}" -eq 1 ]]; then
     echo "[Smoke] log=${log_path}"
 fi
-rg 'mode=(LOCO|PASSIVE|FINAL_DAMPING)|DANCE ignored|SKILL ignored' "${log_path}"
+rg 'mode=(LOCO|PASSIVE|FINAL_DAMPING)|reset-stand|DANCE ignored|SKILL ignored' "${log_path}"

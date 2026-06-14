@@ -216,6 +216,8 @@ semantics instead of directly mutating desired mode/reset fields.
 `ResetStand` now carries both the shared `STAND` mode request and the reset flag,
 so entrypoints can preserve re-stand interpolation/reset behavior without
 hard-coding the target mode locally.
+The real runner treats that shared reset mode request as required, rather than
+rebuilding a local stand request in the re-stand branch.
 Repeated viewer DANCE/SKILL keyboard requests fall back through the shared
 `Stand` text action instead of hand-writing local mode fields.
 The real runner keyboard LOCO toggle now uses the same `ToggleLoco` text action
