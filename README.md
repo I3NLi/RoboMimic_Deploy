@@ -97,6 +97,12 @@ entrypoints when their YAML files exist:
 scripts/run_mujoco_loco_viewer_native.sh --control-station
 ```
 
+Python-facing entrypoint for the same shared-runtime viewer:
+
+```bash
+scripts/run_python_mujoco_viewer.py --control-station
+```
+
 Endpoints:
 
 ```text

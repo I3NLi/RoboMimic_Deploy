@@ -148,6 +148,9 @@ The `scripts/run_mujoco_loco_viewer_native.sh --control-station` preset now
 auto-registers both default YAML files when they are present, so the remote
 operation station starts with camera streaming, HTTP control, UDP control,
 DANCE/BeyondMimic, and SKILL/TrackMimic trajectory entrypoints together.
+`scripts/run_python_mujoco_viewer.py` is the Python-facing compatibility
+entrypoint for that same native shared-runtime viewer; it does not reimplement
+MuJoCo stepping, policy execution, mode switching, or safety logic in Python.
 Viewer UDP and the real runner UDP input now share `text_control_command.h` for
 text command tokenization and mode aliases (`loco`, `stand`, `passive`,
 `final_damping`, `beyond`, `track_mimic`, `pause`, `resume`, `stop`, and
@@ -362,6 +365,17 @@ explicit `--beyond-yaml` or `--track-mimic-yaml`, then uses the HTTP control API
 to enter `DANCE/BeyondMimic` and `SKILL/TrackMimic` trajectory, verifying that
 the preset mounts the same shared external-policy adapters used by direct viewer
 launches.
+
+Python viewer entrypoint smoke:
+
+```bash
+scripts/run_viewer_control_station_smoke_native.sh \
+  --runner scripts/run_python_mujoco_viewer.py --duration 1.4 --keep-summary
+```
+
+This repeats the same control-station external-policy checks through the Python
+compatibility launcher, proving the Python-facing viewer command still delegates
+to the shared native runtime instead of a separate control brain.
 
 Viewer HTTP remote perturb smoke:
 

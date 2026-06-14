@@ -22,6 +22,7 @@ SKILL/TrackMimic trajectory.
 
 Options:
   --duration S       Viewer wall-clock duration, default ${duration}
+  --runner P         Viewer runner, default ${RUNNER}
   --camera-port N    HTTP control port, default: choose a free local port
   --udp-port N       UDP control port, default: choose a free local port
   --summary-json P   Summary JSON path, default: temp file under /tmp
@@ -34,6 +35,10 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --duration)
             duration="$2"
+            shift 2
+            ;;
+        --runner)
+            RUNNER="$2"
             shift 2
             ;;
         --camera-port)
@@ -111,7 +116,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-echo "[Smoke] Starting viewer control-station smoke on HTTP 127.0.0.1:${camera_port}, UDP 127.0.0.1:${udp_port}"
+echo "[Smoke] Starting viewer control-station smoke via ${RUNNER} on HTTP 127.0.0.1:${camera_port}, UDP 127.0.0.1:${udp_port}"
 "${RUNNER}" \
     --control-station \
     --duration "${duration}" \
