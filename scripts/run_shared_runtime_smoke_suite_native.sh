@@ -212,6 +212,7 @@ fi
 if [[ "${RUN_REAL_NO_ROBOT}" -eq 1 ]]; then
     run_step "${SCRIPT_DIR}/run_magicbot_loco_safety_gate_smoke_native.sh"
     run_step "${SCRIPT_DIR}/run_magicbot_loco_input_check_smoke_native.sh"
+    run_step "${SCRIPT_DIR}/run_magicbot_loco_gamepad_input_smoke_native.sh"
     run_step "${SCRIPT_DIR}/run_magicbot_loco_external_policy_smoke_native.sh"
 fi
 

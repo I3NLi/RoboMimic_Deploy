@@ -346,6 +346,19 @@ live-input helper applies `TextControlIntentState` semantics for zero-command,
 pause/resume, stop, and reset requests instead of reimplementing those mutations
 inside each input source.
 
+Real-runner gamepad input smoke (no robot connection):
+
+```bash
+scripts/run_magicbot_loco_gamepad_input_smoke_native.sh
+```
+
+This starts `magicbot_z1_loco_onnx --input-check --gamepad-control` with a
+FIFO-backed fake Linux joystick device, writes `js_event` packets for deadman,
+LOCO, axis, and pause buttons, then checks the no-robot log for LOCO with the
+expected axis-derived command and pause-zero. It also statically guards that the
+real gamepad input code routes buttons through shared `TextControlAction`
+handling and does not own mode/runtime logic.
+
 Real-runner safety-gate smoke (no robot connection):
 
 ```bash
