@@ -1,4 +1,7 @@
+#include "controller_core.h"
+#include "controller_runtime.h"
 #include "magicbot_loco_core.h"
+#include "magicbot_real_adapter.h"
 #include "magicbot_loco_sdk_adapter.h"
 
 #include <algorithm>
@@ -9,18 +12,23 @@
 #include <csignal>
 #include <cstring>
 #include <cstdlib>
+#include <cctype>
 #include <filesystem>
 #include <fcntl.h>
 #include <iomanip>
 #include <iostream>
 #include <linux/joystick.h>
 #include <memory>
+#include <netinet/in.h>
 #include <sstream>
 #include <string>
+#include <sys/socket.h>
 #include <thread>
 #include <termios.h>
 #include <unistd.h>
 #include <vector>
+
+#include <arpa/inet.h>
 
 namespace ml = magicbot_loco;
 
@@ -61,7 +69,11 @@ struct Args {
     bool allow_loco{false};
     bool keyboard_control{false};
     bool gamepad_control{false};
+    bool udp_control{false};
     std::string gamepad_device{"/dev/input/js0"};
+    std::string udp_bind{"0.0.0.0"};
+    int udp_port{15000};
+    double udp_timeout_s{0.35};
     float input_step{0.05f};
     float input_deadzone{0.08f};
     int gamepad_axis_vx{1};
@@ -131,6 +143,10 @@ void print_usage(const char* argv0)
         << "                                   X zero, Space/P pause-zero, Esc stop\n"
         << "  --gamepad-control                Live Linux joystick input in run loop\n"
         << "  --gamepad-device PATH            Joystick device, default /dev/input/js0\n"
+        << "  --udp-control                    Live UDP command input in run loop\n"
+        << "  --udp-bind IP                    UDP bind address, default 0.0.0.0\n"
+        << "  --udp-port N                     UDP command port, default 15000\n"
+        << "  --udp-timeout-s S                Zero command after no UDP packet, default 0.35\n"
         << "  --input-step V                   Keyboard normalized command step, default 0.05\n"
         << "  --input-deadzone V               Gamepad axis deadzone, default 0.08\n"
         << "  --gamepad-axis-vx N              Axis index for vx, default 1\n"
@@ -220,8 +236,16 @@ Args parse_args(int argc, char** argv)
             args.keyboard_control = true;
         } else if (a == "--gamepad-control") {
             args.gamepad_control = true;
+        } else if (a == "--udp-control") {
+            args.udp_control = true;
         } else if (a == "--gamepad-device") {
             args.gamepad_device = take_value(i, argc, argv);
+        } else if (a == "--udp-bind") {
+            args.udp_bind = take_value(i, argc, argv);
+        } else if (a == "--udp-port") {
+            args.udp_port = std::stoi(take_value(i, argc, argv));
+        } else if (a == "--udp-timeout-s") {
+            args.udp_timeout_s = std::stod(take_value(i, argc, argv));
         } else if (a == "--input-step") {
             args.input_step = std::stof(take_value(i, argc, argv));
         } else if (a == "--input-deadzone") {
@@ -330,11 +354,15 @@ Args parse_args(int argc, char** argv)
     if (args.safety.joint_scope != "body" && args.safety.joint_scope != "legs" && args.safety.joint_scope != "all") {
         throw std::runtime_error("--motion-safety-joint-scope must be body, legs or all");
     }
-    if (args.keyboard_control && args.gamepad_control) {
-        throw std::runtime_error("use only one of --keyboard-control or --gamepad-control");
+    const int live_inputs = static_cast<int>(args.keyboard_control) + static_cast<int>(args.gamepad_control) +
+                            static_cast<int>(args.udp_control);
+    if (live_inputs > 1) {
+        throw std::runtime_error("use only one of --keyboard-control, --gamepad-control or --udp-control");
     }
     args.input_step = std::clamp(args.input_step, 0.001f, 1.0f);
     args.input_deadzone = std::clamp(args.input_deadzone, 0.0f, 0.95f);
+    args.udp_port = std::clamp(args.udp_port, 1, 65535);
+    args.udp_timeout_s = std::clamp(args.udp_timeout_s, 0.02, 10.0);
     return args;
 }
 
@@ -629,6 +657,173 @@ private:
     bool paused_{false};
 };
 
+std::string lower_copy(std::string value)
+{
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+    return value;
+}
+
+bool parse_float_token(const std::string& token, float& value)
+{
+    char* end = nullptr;
+    errno = 0;
+    const float parsed = std::strtof(token.c_str(), &end);
+    if (end == token.c_str() || *end != '\0' || errno == ERANGE) return false;
+    value = parsed;
+    return true;
+}
+
+class UdpCommandInput {
+public:
+    UdpCommandInput(const Args& args, std::array<float, 3> initial_command)
+        : args_(args), command_(initial_command)
+    {
+        fd_ = socket(AF_INET, SOCK_DGRAM, 0);
+        if (fd_ < 0) throw std::runtime_error(std::string("udp socket failed: ") + std::strerror(errno));
+
+        const int flags = fcntl(fd_, F_GETFL, 0);
+        if (flags < 0 || fcntl(fd_, F_SETFL, flags | O_NONBLOCK) != 0) {
+            throw std::runtime_error(std::string("udp fcntl failed: ") + std::strerror(errno));
+        }
+
+        sockaddr_in addr{};
+        addr.sin_family = AF_INET;
+        addr.sin_port = htons(static_cast<uint16_t>(args_.udp_port));
+        if (args_.udp_bind.empty() || args_.udp_bind == "0.0.0.0") {
+            addr.sin_addr.s_addr = htonl(INADDR_ANY);
+        } else if (inet_pton(AF_INET, args_.udp_bind.c_str(), &addr.sin_addr) != 1) {
+            throw std::runtime_error("invalid --udp-bind address: " + args_.udp_bind);
+        }
+
+        if (bind(fd_, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0) {
+            throw std::runtime_error(
+                "udp bind " + args_.udp_bind + ":" + std::to_string(args_.udp_port) +
+                " failed: " + std::strerror(errno));
+        }
+        last_packet_t_ = std::chrono::steady_clock::now();
+    }
+
+    ~UdpCommandInput()
+    {
+        if (fd_ >= 0) close(fd_);
+    }
+
+    LiveInputState poll()
+    {
+        LiveInputState out;
+        char buffer[256];
+        while (true) {
+            sockaddr_in src{};
+            socklen_t src_len = sizeof(src);
+            const ssize_t n = recvfrom(fd_, buffer, sizeof(buffer) - 1, 0, reinterpret_cast<sockaddr*>(&src), &src_len);
+            if (n > 0) {
+                buffer[n] = '\0';
+                handle_message(std::string(buffer, static_cast<size_t>(n)), out);
+                continue;
+            }
+            if (n < 0 && errno != EAGAIN && errno != EWOULDBLOCK) {
+                throw std::runtime_error(std::string("udp recvfrom failed: ") + std::strerror(errno));
+            }
+            break;
+        }
+
+        const auto now = std::chrono::steady_clock::now();
+        const bool timed_out = have_packet_ &&
+                               std::chrono::duration<double>(now - last_packet_t_).count() > args_.udp_timeout_s;
+        if (timed_out && command_ != std::array<float, 3>{0.0f, 0.0f, 0.0f}) {
+            command_ = {0.0f, 0.0f, 0.0f};
+            out.changed = true;
+            out.status = "udp timeout";
+        }
+
+        out.command = paused_ || timed_out ? std::array<float, 3>{0.0f, 0.0f, 0.0f} : command_;
+        out.pause_zero = paused_;
+        if (out.status.empty()) out.status = timed_out ? "udp timeout" : "udp";
+        return out;
+    }
+
+private:
+    void handle_message(std::string message, LiveInputState& out)
+    {
+        for (char& ch : message) {
+            if (ch == ',' || ch == ';' || ch == '\n' || ch == '\r' || ch == '\t') ch = ' ';
+        }
+
+        std::array<float, 3> cmd = command_;
+        int numeric_index = 0;
+        std::istringstream iss(message);
+        std::string token;
+        while (iss >> token) {
+            const auto eq = token.find('=');
+            if (eq != std::string::npos) {
+                const std::string key = lower_copy(token.substr(0, eq));
+                const std::string val = lower_copy(token.substr(eq + 1));
+                float parsed = 0.0f;
+                if ((key == "vx" || key == "x") && parse_float_token(val, parsed)) {
+                    cmd[0] = clamp_command(parsed);
+                } else if ((key == "vy" || key == "y") && parse_float_token(val, parsed)) {
+                    cmd[1] = clamp_command(parsed);
+                } else if ((key == "wz" || key == "yaw") && parse_float_token(val, parsed)) {
+                    cmd[2] = clamp_command(parsed);
+                } else if (key == "mode") {
+                    handle_word(val, out, cmd);
+                }
+                continue;
+            }
+
+            float parsed = 0.0f;
+            if (numeric_index < 3 && parse_float_token(token, parsed)) {
+                cmd[static_cast<size_t>(numeric_index)] = clamp_command(parsed);
+                ++numeric_index;
+                continue;
+            }
+            handle_word(lower_copy(token), out, cmd);
+        }
+
+        command_ = cmd;
+        have_packet_ = true;
+        last_packet_t_ = std::chrono::steady_clock::now();
+        out.changed = true;
+        out.status = "udp packet";
+    }
+
+    void handle_word(const std::string& word, LiveInputState& out, std::array<float, 3>& cmd)
+    {
+        if (word == "loco" || word == "run") {
+            paused_ = false;
+            out.loco_requested = true;
+        } else if (word == "stand") {
+            cmd = {0.0f, 0.0f, 0.0f};
+            paused_ = false;
+            out.stand_requested = true;
+        } else if (word == "toggle") {
+            paused_ = false;
+            out.toggle_loco_requested = true;
+        } else if (word == "reset" || word == "restand") {
+            cmd = {0.0f, 0.0f, 0.0f};
+            paused_ = false;
+            out.reset_stand_requested = true;
+        } else if (word == "zero" || word == "x") {
+            cmd = {0.0f, 0.0f, 0.0f};
+        } else if (word == "pause") {
+            paused_ = true;
+        } else if (word == "resume") {
+            paused_ = false;
+        } else if (word == "stop" || word == "exit") {
+            out.stop_requested = true;
+        }
+    }
+
+    const Args& args_;
+    std::array<float, 3> command_{0.0f, 0.0f, 0.0f};
+    int fd_{-1};
+    bool paused_{false};
+    bool have_packet_{false};
+    std::chrono::steady_clock::time_point last_packet_t_{};
+};
+
 class OperatorInput {
 public:
     OperatorInput(const Args& args, std::array<float, 3> initial_command)
@@ -651,20 +846,29 @@ public:
                       << " pause_button=" << args.gamepad_pause_button
                       << " reset_button=" << args.gamepad_reset_button << std::endl;
         }
+        if (args.udp_control) {
+            udp_ = std::make_unique<UdpCommandInput>(args, initial_command);
+            std::cout << "[Input] UDP command enabled: bind=" << args.udp_bind << ":" << args.udp_port
+                      << " timeout_s=" << args.udp_timeout_s
+                      << " format='vx vy wz [loco|stand|stop]' or 'vx=... vy=... wz=... mode=loco'"
+                      << std::endl;
+        }
     }
 
-    bool enabled() const { return keyboard_ != nullptr || gamepad_ != nullptr; }
+    bool enabled() const { return keyboard_ != nullptr || gamepad_ != nullptr || udp_ != nullptr; }
 
     LiveInputState poll()
     {
         if (keyboard_) return keyboard_->poll();
         if (gamepad_) return gamepad_->poll();
+        if (udp_) return udp_->poll();
         return {};
     }
 
 private:
     std::unique_ptr<TerminalKeyboardInput> keyboard_;
     std::unique_ptr<GamepadInput> gamepad_;
+    std::unique_ptr<UdpCommandInput> udp_;
 };
 
 void dry_run(const ml::LocoConfig& cfg, ml::OnnxLocoPolicy& policy)
@@ -840,8 +1044,8 @@ int read_state_only(const Args& args)
 
 int input_check_only(const Args& args)
 {
-    if (!args.keyboard_control && !args.gamepad_control) {
-        throw std::runtime_error("--input-check requires --keyboard-control or --gamepad-control");
+    if (!args.keyboard_control && !args.gamepad_control && !args.udp_control) {
+        throw std::runtime_error("--input-check requires --keyboard-control, --gamepad-control or --udp-control");
     }
     std::array<float, 3> initial_cmd{args.vx, args.vy, args.wz};
     OperatorInput input(args, initial_cmd);
@@ -881,7 +1085,7 @@ int input_check_only(const Args& args)
     return 0;
 }
 
-int run_robot_with_finally(const Args& args, const ml::LocoConfig& cfg, ml::OnnxLocoPolicy& policy)
+int run_robot_with_finally(const Args& args, const ml::LocoConfig& cfg, ml::ControllerCore& core)
 {
     check_network_preflight(args);
     ml::SdkRobotState state;
@@ -905,7 +1109,7 @@ int run_robot_with_finally(const Args& args, const ml::LocoConfig& cfg, ml::Onnx
     try {
         if (!args.pd_stand_only && !args.debug_entry_only) {
             const auto start = std::chrono::steady_clock::now();
-            policy.warmup(3);
+            core.warmup(3);
             const auto elapsed_ms =
                 std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
             std::cout << "[Policy] Warm-up complete: 3 runs in " << elapsed_ms << "ms" << std::endl;
@@ -974,14 +1178,6 @@ int run_robot_with_finally(const Args& args, const ml::LocoConfig& cfg, ml::Onnx
             "pre-stand",
             false);
 
-        ml::JointArray kp_motor = cfg.kps_motor();
-        ml::JointArray kd_motor = cfg.kds_motor();
-        ml::JointArray tau_limit = cfg.tau_limit_motor();
-        for (int i = 0; i < ml::kNumJoints; ++i) {
-            kp_motor[i] *= args.kp_scale;
-            kd_motor[i] *= args.kd_scale;
-        }
-
         if (args.pd_stand_only) {
             command_target = hold_default_stand(
                 robot,
@@ -998,24 +1194,23 @@ int run_robot_with_finally(const Args& args, const ml::LocoConfig& cfg, ml::Onnx
             std::array<float, 3> raw_cmd{args.vx, args.vy, args.wz};
             OperatorInput operator_input(args, raw_cmd);
             RunMode run_mode = operator_input.enabled() ? RunMode::Stand : RunMode::Loco;
+            ml::MagicbotRealAdapter real_adapter(robot, state);
+            ml::ControllerRuntime runtime(core, real_adapter);
+            core.seed_target(command_target);
+            core.reset_policy();
+            ml::ModeRequest pending_mode_request = ml::ModeRequest::enter(
+                run_mode == RunMode::Loco ? ml::ControlMode::Loco : ml::ControlMode::Stand);
             std::cout << "[Mode] Starting operator loop: mode=" << mode_name(run_mode)
                       << " command=[" << args.vx << " " << args.vy << " " << args.wz << "]" << std::endl;
             if (operator_input.enabled()) {
-                std::cout << "[Mode] Live input starts in STAND; request LOCO explicitly from keyboard/gamepad"
+                std::cout << "[Mode] Live input starts in STAND; request LOCO explicitly from keyboard/gamepad/udp"
                           << std::endl;
             }
             const auto loop_start = std::chrono::steady_clock::now();
             auto next_control_t = std::chrono::steady_clock::now();
-            auto next_policy_t = next_control_t;
             auto last_log = next_control_t - std::chrono::seconds(60);
             const auto control_period = std::chrono::duration_cast<std::chrono::steady_clock::duration>(
                 std::chrono::duration<double>(ml::kControlDt));
-            const auto policy_period = std::chrono::duration_cast<std::chrono::steady_clock::duration>(
-                std::chrono::duration<double>(cfg.policy_dt));
-            int policy_counter = 0;
-            ml::JointArray previous_raw_target{};
-            bool have_previous_raw_target = false;
-            const ml::JointArray target_default = cfg.default_motor();
 
             while (g_running.load()) {
                 const auto now = std::chrono::steady_clock::now();
@@ -1051,20 +1246,19 @@ int run_robot_with_finally(const Args& args, const ml::LocoConfig& cfg, ml::Onnx
                         std::cout << "[Input] Re-stand requested" << std::endl;
                         raw_cmd = {0.0f, 0.0f, 0.0f};
                         run_mode = RunMode::Stand;
-                        policy.reset();
-                        have_previous_raw_target = false;
                         command_target = stand_interpolation(robot, state, cfg, args, rate_watchdog);
+                        core.seed_target(command_target);
+                        core.reset_policy();
+                        pending_mode_request = ml::ModeRequest::enter(ml::ControlMode::Stand);
                         next_control_t = std::chrono::steady_clock::now();
-                        next_policy_t = next_control_t;
                         last_log = next_control_t - std::chrono::seconds(60);
                         continue;
                     }
                     if (mode_requested && requested_mode != run_mode) {
                         run_mode = requested_mode;
-                        policy.reset();
-                        have_previous_raw_target = false;
-                        next_policy_t = now;
                         if (run_mode == RunMode::Stand) raw_cmd = {0.0f, 0.0f, 0.0f};
+                        pending_mode_request = ml::ModeRequest::enter(
+                            run_mode == RunMode::Loco ? ml::ControlMode::Loco : ml::ControlMode::Stand);
                         std::cout << "[Input] Mode -> " << mode_name(run_mode) << std::endl;
                     }
                     if (input.changed && std::chrono::duration<double>(now - last_log).count() < args.log_interval) {
@@ -1076,49 +1270,20 @@ int run_robot_with_finally(const Args& args, const ml::LocoConfig& cfg, ml::Onnx
                     }
                 }
 
-                if (run_mode == RunMode::Stand) {
-                    const auto limited = ml::torque_limited_target(
-                        target_default, snap.q, snap.dq, kp_motor, kd_motor, tau_limit, cfg.tau_limit_scale);
-                    command_target = ml::clamp_and_rate_limit(
-                        limited,
-                        command_target,
-                        args.max_target_rate,
-                        static_cast<float>(ml::kControlDt),
-                        args.joint_limit_margin);
-                    safety.check(snap, &command_target, &target_default, nullptr);
-                } else if (now >= next_policy_t) {
-                    const auto projected_gravity = ml::gravity_orientation(snap.quat);
-                    const auto result = policy.infer(snap.q, snap.dq, snap.ang_vel, projected_gravity, raw_cmd);
-                    safety.check(
-                        snap,
-                        nullptr,
-                        &result.target_motor,
-                        have_previous_raw_target ? &previous_raw_target : nullptr);
-                    const auto limited = ml::torque_limited_target(
-                        result.target_motor, snap.q, snap.dq, kp_motor, kd_motor, tau_limit, cfg.tau_limit_scale);
-                    command_target = ml::clamp_and_rate_limit(
-                        limited,
-                        command_target,
-                        args.max_target_rate,
-                        cfg.policy_dt,
-                        args.joint_limit_margin);
-                    safety.check(
-                        snap,
-                        &command_target,
-                        &result.target_motor,
-                        have_previous_raw_target ? &previous_raw_target : nullptr);
-                    previous_raw_target = result.target_motor;
-                    have_previous_raw_target = true;
-                    ++policy_counter;
-                    next_policy_t += policy_period;
-                }
-                robot.publish_sdk24_command(snap.counts, command_target, kp_motor, kd_motor, false, args.damping_kd);
+                ml::RuntimeTickInput tick_input;
+                tick_input.command.velocity = raw_cmd;
+                tick_input.mode_request = pending_mode_request;
+                tick_input.control_dt_s = static_cast<float>(ml::kControlDt);
+                const ml::RuntimeTickOutput tick = runtime.tick(tick_input);
+                pending_mode_request = ml::ModeRequest::none();
+                command_target = tick.core.target.q;
                 if (std::chrono::duration<double>(now - last_log).count() >= args.log_interval) {
-                    std::cout << "[" << mode_name(run_mode) << "] policy=" << policy_counter
-                              << " q=" << range_string(snap.q)
+                    std::cout << "[" << ml::control_mode_name(tick.core.telemetry.mode) << "] policy="
+                              << tick.core.telemetry.policy_steps
+                              << " q=" << range_string(tick.snapshot.q)
                               << " target=" << range_string(command_target)
                               << " cmd=[" << raw_cmd[0] << " " << raw_cmd[1] << " " << raw_cmd[2] << "]"
-                              << " counts=" << ml::counts_string(snap.counts) << std::endl;
+                              << " counts=" << ml::counts_string(tick.snapshot.counts) << std::endl;
                     last_log = now;
                 }
                 next_control_t += control_period;
@@ -1171,16 +1336,24 @@ int main(int argc, char** argv)
             throw std::runtime_error("config not found: " + args.config.string());
         }
         ml::LocoConfig cfg = ml::load_loco_config(args.config);
-        ml::OnnxLocoPolicy policy(cfg);
 
         if (args.dry_run) {
+            ml::OnnxLocoPolicy policy(cfg);
             dry_run(cfg, policy);
             return 0;
         }
         if (args.connect_check) return connect_check(args);
         if (args.read_state) return read_state_only(args);
         if (args.input_check) return input_check_only(args);
-        return run_robot_with_finally(args, cfg, policy);
+        ml::ControllerCoreOptions core_options;
+        core_options.safety = args.safety;
+        core_options.kp_scale = args.kp_scale;
+        core_options.kd_scale = args.kd_scale;
+        core_options.max_target_rate = args.max_target_rate;
+        core_options.joint_limit_margin = args.joint_limit_margin;
+        core_options.damping_kd = args.damping_kd;
+        ml::ControllerCore core(cfg, core_options);
+        return run_robot_with_finally(args, cfg, core);
     } catch (const std::exception& exc) {
         std::cerr << "[Error] " << exc.what() << std::endl;
         return 1;

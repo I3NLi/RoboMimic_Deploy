@@ -80,6 +80,12 @@ publishes commands to the real robot.
 `RobotAdapter::write_target()`. It is glue around the shared control brain, not
 a second place for policy, mode, or safety logic.
 
+`magicbot_z1_loco_onnx.cpp` now routes the real-robot STAND/LOCO runtime loop
+through `ControllerRuntime` and `MagicbotRealAdapter`. The existing staged safety
+flow is preserved: dry-run, connect-check, read-state, debug/passive damping,
+stand interpolation, and PD stand-only remain outside high-risk LOCO execution.
+LOCO still requires the explicit `--allow-loco` gate.
+
 The first `ControllerCore` implementation supports `PASSIVE`, `STAND`, `LOCO`,
 and `FINAL_DAMPING`. `DANCE` and `SKILL` are represented in the shared mode enum
 but intentionally reject requests until the skill policy adapter is wired.
@@ -90,9 +96,8 @@ state/command I/O.
 
 ## Next cuts
 
-1. Route `magicbot_z1_loco_onnx` LOCO loop through `ControllerCore`.
-2. Route MuJoCo viewer closed-loop code through `MujocoSimAdapter` and the same
+1. Route MuJoCo viewer closed-loop code through `MujocoSimAdapter` and the same
    `ControllerCore` API.
-3. Wrap existing Dance/BeyondMimic policies behind `ExternalPolicyAdapter`.
-4. Move viewer mode/control API code to send requests only; it must not duplicate
+2. Wrap existing Dance/BeyondMimic policies behind `ExternalPolicyAdapter`.
+3. Move viewer mode/control API code to send requests only; it must not duplicate
    core policy or safety logic.
