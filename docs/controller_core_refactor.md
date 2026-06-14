@@ -96,9 +96,10 @@ policy logic.
 `MujocoSimAdapter`, and routes real-state-sim through the same runtime with a
 read-only replay adapter and `publish_target=false`. The replay adapter rejects
 any accidental target/damping write, so this path remains a validation tool only
-and still never publishes commands to the real robot. Pure-sim validation also
-supports configurable world-frame push tests with `--push-body`, `--push-force`,
-`--push-start`, `--push-duration`, `--push-impulse`, and
+and still never publishes commands to the real robot. Pure-sim command
+publication is through `MujocoSimAdapter`, not a local PD writer. Pure-sim
+validation also supports configurable world-frame push tests with `--push-body`,
+`--push-force`, `--push-start`, `--push-duration`, `--push-impulse`, and
 `--push-impulse-time`; `RATE_SUMMARY` JSON records whether force/impulse
 disturbance was applied.
 

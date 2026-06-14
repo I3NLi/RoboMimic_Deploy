@@ -599,37 +599,6 @@ void set_sim_state(
     }
 }
 
-double apply_pd(
-    const Args& args,
-    const mjModel* model,
-    mjData* data,
-    const std::vector<int>& qpos_idx,
-    const std::vector<int>& qvel_idx,
-    const ml::JointArray& target,
-    const ml::JointArray& kp,
-    const ml::JointArray& kd,
-    const ml::JointArray& tau_limit)
-{
-    double max_abs_tau = 0.0;
-    for (int i = 0; i < model->nu && i < ml::kNumJoints; ++i) {
-        const double q = data->qpos[7 + qpos_idx[i]];
-        const double dq = data->qvel[6 + qvel_idx[i]];
-        const double target_q = static_cast<double>(target[i]);
-        double tau = (target_q - q) * kp[i] - dq * kd[i];
-        if (!std::isfinite(tau)) tau = -args.damping_kd * dq;
-        double lo = -std::max(1.0f, tau_limit[i]);
-        double hi = std::max(1.0f, tau_limit[i]);
-        if (model->actuator_ctrllimited && model->actuator_ctrllimited[i]) {
-            lo = std::max(lo, model->actuator_ctrlrange[2 * i + 0]);
-            hi = std::min(hi, model->actuator_ctrlrange[2 * i + 1]);
-        }
-        tau = std::clamp(tau, lo, hi);
-        data->ctrl[i] = tau;
-        max_abs_tau = std::max(max_abs_tau, std::fabs(tau));
-    }
-    return max_abs_tau;
-}
-
 double max_abs_ctrl(const mjModel* model, const mjData* data)
 {
     double out = 0.0;
@@ -879,6 +848,10 @@ Summary run_rate_loop(
     ml::ControllerRuntime sim_runtime(core, sim_adapter);
     ReplaySnapshotAdapter real_state_adapter;
     ml::ControllerRuntime real_state_runtime(core, real_state_adapter);
+    ml::JointTarget local_sim_target;
+    local_sim_target.q = policy_target;
+    local_sim_target.gains = core.gains();
+    local_sim_target.damping_kd = static_cast<float>(args.damping_kd);
     std::vector<double> infer_ms;
     std::vector<double> state_age_ms;
     int missed_deadline = 0;
@@ -991,24 +964,15 @@ Summary run_rate_loop(
                     ++control_steps;
                 }
                 policy_target = tick.core.target.q;
+                local_sim_target = tick.core.target;
                 max_abs_q = std::max(max_abs_q, max_abs(tick.snapshot.q));
                 max_abs_dq = std::max(max_abs_dq, max_abs(tick.snapshot.dq));
             }
 
             if (!(real && args.real_forward_only)) {
                 if (real) {
-                    max_abs_tau = std::max(
-                        max_abs_tau,
-                        apply_pd(
-                            args,
-                            sim.model,
-                            sim.data,
-                            sim.qpos_idx,
-                            sim.qvel_idx,
-                            policy_target,
-                            core.gains().kp,
-                            core.gains().kd,
-                            core.gains().tau_limit));
+                    sim_adapter.write_target(local_sim_target);
+                    max_abs_tau = std::max(max_abs_tau, max_abs_ctrl(sim.model, sim.data));
                 } else {
                     max_abs_tau = std::max(max_abs_tau, max_abs_ctrl(sim.model, sim.data));
                 }
