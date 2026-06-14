@@ -128,6 +128,7 @@ echo "[Smoke] Starting viewer HTTP perturb smoke via ${RUNNER} on 127.0.0.1:${ca
 viewer_pid=$!
 
 health_url="http://127.0.0.1:${camera_port}/health"
+status_url="http://127.0.0.1:${camera_port}/status"
 event_url="http://127.0.0.1:${camera_port}/viewer-event"
 
 ready=0
@@ -165,6 +166,21 @@ post_ok() {
 post_ok "${event_url}?type=down&x=0&y=0&width=640&height=480&button=0" "drag down"
 post_ok "${event_url}?type=move&dx=80&dy=0&width=640&height=480&button=0" "drag move"
 sleep 0.4
+post_ok "${status_url}" "live perturb status"
+if ! jq -e '
+    .push_enabled == true
+    and .push_force == [35,0,0]
+    and .push_impulse == [0,1,0]
+    and .push_start_s == 0.25
+    and .push_duration_s == 0.12
+    and .push_impulse_time_s == 0.55
+    and .push_force_steps > 0
+    and .push_impulse_applied == true
+' "${status_body}" >/dev/null; then
+    echo "[Smoke][ERROR] live /status did not report scheduled push telemetry" >&2
+    cat "${status_body}" >&2
+    exit 1
+fi
 post_ok "${event_url}?type=up&width=640&height=480&button=0" "drag up"
 
 if ! wait "${viewer_pid}"; then

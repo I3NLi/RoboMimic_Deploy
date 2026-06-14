@@ -635,11 +635,11 @@ scripts/run_viewer_http_perturb_smoke_native.sh --duration 1.5 --keep-summary
 
 The script posts `type=down`, `type=move`, and `type=up` to `/viewer-event`,
 keeps the drag active for a short wall-clock interval, also schedules a
-world-frame push force plus impulse through the viewer CLI, and checks the
-summary for `mouse_perturb_steps > 0`, resolved perturb and push body metadata,
-the configured force/impulse vectors and timing, nonzero `push_force_steps`,
-`push_impulse_applied == true`, nonzero force and impulse norms, and advancing
-`sim_steps`.
+world-frame push force plus impulse through the viewer CLI, and checks live
+`/status` telemetry plus the summary for `mouse_perturb_steps > 0`, resolved
+perturb and push body metadata, the configured force/impulse vectors and
+timing, nonzero `push_force_steps`, `push_impulse_applied == true`, nonzero
+force and impulse norms, and advancing `sim_steps`.
 
 Python viewer remote perturb smoke:
 

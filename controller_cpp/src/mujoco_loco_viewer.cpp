@@ -225,6 +225,12 @@ struct CameraStreamState {
     uint64_t seq{0};
     int sim_steps{0};
     int policy_steps{0};
+    bool push_enabled{false};
+    std::array<double, 3> push_force{0.0, 0.0, 0.0};
+    std::array<double, 3> push_impulse{0.0, 0.0, 0.0};
+    double push_start_s{0.0};
+    double push_duration_s{0.0};
+    double push_impulse_time_s{0.0};
     int push_force_steps{0};
     int mouse_perturb_steps{0};
     int http_reset_requests{0};
@@ -238,11 +244,22 @@ struct CameraStreamState {
 
 class CameraStreamServer {
 public:
-    CameraStreamServer(std::string host, int port)
+    CameraStreamServer(std::string host, int port, const Args& args)
         : host_(std::move(host)),
           port_(port),
           state_(std::make_shared<CameraStreamState>())
     {
+        auto has_nonzero_vec3 = [](const std::array<double, 3>& value) {
+            return std::any_of(value.begin(), value.end(), [](double v) {
+                return std::abs(v) > 1e-12;
+            });
+        };
+        state_->push_enabled = has_nonzero_vec3(args.push_force) || has_nonzero_vec3(args.push_impulse);
+        state_->push_force = args.push_force;
+        state_->push_impulse = args.push_impulse;
+        state_->push_start_s = args.push_start_s;
+        state_->push_duration_s = args.push_duration_s;
+        state_->push_impulse_time_s = args.push_impulse_time_s;
     }
 
     ~CameraStreamServer() { stop(); }
@@ -576,6 +593,14 @@ private:
                  << "\"http_reset_requests\":" << state->http_reset_requests << ","
                  << "\"http_viewer_events\":" << state->http_viewer_events << ","
                  << "\"http_control_commands\":" << state->http_control_commands << ","
+                 << "\"push_enabled\":" << (state->push_enabled ? "true" : "false") << ","
+                 << "\"push_force\":["
+                 << state->push_force[0] << "," << state->push_force[1] << "," << state->push_force[2] << "],"
+                 << "\"push_impulse\":["
+                 << state->push_impulse[0] << "," << state->push_impulse[1] << "," << state->push_impulse[2] << "],"
+                 << "\"push_start_s\":" << state->push_start_s << ","
+                 << "\"push_duration_s\":" << state->push_duration_s << ","
+                 << "\"push_impulse_time_s\":" << state->push_impulse_time_s << ","
                  << "\"push_force_steps\":" << state->push_force_steps << ","
                  << "\"push_impulse_applied\":" << (state->push_impulse_applied ? "true" : "false") << ","
                  << "\"mouse_perturb_steps\":" << state->mouse_perturb_steps
@@ -2530,7 +2555,7 @@ int main(int argc, char** argv)
 
         std::unique_ptr<CameraStreamServer> camera_server;
         if (args.camera_stream) {
-            camera_server = std::make_unique<CameraStreamServer>(args.camera_host, args.camera_port);
+            camera_server = std::make_unique<CameraStreamServer>(args.camera_host, args.camera_port, args);
             camera_server->start();
             std::printf("[CameraStream] %s/health\n", camera_server->url().c_str());
             std::printf("[CameraStream] %s/frame.jpg\n", camera_server->url().c_str());
