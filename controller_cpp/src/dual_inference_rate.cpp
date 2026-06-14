@@ -108,6 +108,37 @@ struct SimContext {
     bool have_init_q{false};
 };
 
+class ReplaySnapshotAdapter final : public ml::RobotAdapter {
+public:
+    const char* name() const override { return "real-state-sim"; }
+
+    void set_snapshot(ml::RobotSnapshot snapshot, double state_age_ms)
+    {
+        snapshot_ = snapshot;
+        state_age_ms_ = state_age_ms;
+    }
+
+    ml::RobotSnapshot read_snapshot() override { return snapshot_; }
+
+    void write_target(const ml::JointTarget&) override { command_published_ = true; }
+
+    void write_damping(float) override { command_published_ = true; }
+
+    ml::AdapterTelemetry telemetry() const override
+    {
+        ml::AdapterTelemetry out;
+        out.backend = name();
+        out.state_age_ms = state_age_ms_;
+        out.command_published = command_published_;
+        return out;
+    }
+
+private:
+    ml::RobotSnapshot snapshot_{};
+    double state_age_ms_{-1.0};
+    bool command_published_{false};
+};
+
 struct Summary {
     std::string mode;
     bool real_forward_only{false};
@@ -836,6 +867,8 @@ Summary run_rate_loop(
     sim_adapter_options.qvel_idx = sim.qvel_idx;
     ml::MujocoSimAdapter sim_adapter(sim.model, sim.data, sim_adapter_options);
     ml::ControllerRuntime sim_runtime(core, sim_adapter);
+    ReplaySnapshotAdapter real_state_adapter;
+    ml::ControllerRuntime real_state_runtime(core, real_state_adapter);
     std::vector<double> infer_ms;
     std::vector<double> state_age_ms;
     int missed_deadline = 0;
@@ -893,14 +926,17 @@ Summary run_rate_loop(
                     mj_forward(sim.model, sim.data);
                     const double age = robot_state.state_age_ms();
                     if (age >= 0.0) state_age_ms.push_back(age);
-                    const auto t0 = std::chrono::steady_clock::now();
-                    const auto mode_request = ml::mode_request_for_desired_control_mode(
+                    real_state_adapter.set_snapshot(snap, age);
+                    ml::RuntimeTickInput tick_input;
+                    tick_input.command = command;
+                    tick_input.mode_request = ml::mode_request_for_desired_control_mode(
                         ml::ControlMode::Loco,
                         {},
                         core.mode());
-                    tick.snapshot = snap;
-                    tick.core = core.step(snap, command, mode_request, static_cast<float>(control_dt));
-                    tick.adapter.backend = "real-state-sim";
+                    tick_input.control_dt_s = static_cast<float>(control_dt);
+                    tick_input.publish_target = false;
+                    const auto t0 = std::chrono::steady_clock::now();
+                    tick = real_state_runtime.tick(tick_input);
                     const auto t1 = std::chrono::steady_clock::now();
                     if (tick.core.telemetry.policy_evaluated) {
                         infer_ms.push_back(std::chrono::duration<double, std::milli>(t1 - t0).count());

@@ -93,9 +93,10 @@ range clamping. It does not step the simulation, handle viewer input, or run
 policy logic.
 
 `dual_inference_rate.cpp` now routes pure-sim through `ControllerRuntime` and
-`MujocoSimAdapter`, and routes real-state-sim policy stepping through
-`ControllerCore`. It remains a validation tool only and still never publishes
-commands to the real robot. Pure-sim validation also supports configurable
+`MujocoSimAdapter`, and routes real-state-sim through the same runtime with a
+read-only replay adapter and `publish_target=false`. It remains a validation
+tool only and still never publishes commands to the real robot. Pure-sim
+validation also supports configurable
 world-frame push tests with `--push-body`, `--push-force`, `--push-start`,
 `--push-duration`, `--push-impulse`, and `--push-impulse-time`; `RATE_SUMMARY`
 JSON records whether force/impulse disturbance was applied.
