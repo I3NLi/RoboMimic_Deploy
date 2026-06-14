@@ -60,9 +60,23 @@ public:
     explicit ModeManager(ControlMode initial_mode = ControlMode::Stand)
         : mode_(initial_mode)
     {
+        enabled_[mode_index(ControlMode::Passive)] = true;
+        enabled_[mode_index(ControlMode::Stand)] = true;
+        enabled_[mode_index(ControlMode::Loco)] = true;
+        enabled_[mode_index(ControlMode::FinalDamping)] = true;
     }
 
     ControlMode mode() const { return mode_; }
+
+    void set_enabled(ControlMode mode, bool enabled)
+    {
+        enabled_[mode_index(mode)] = enabled;
+    }
+
+    bool is_enabled(ControlMode mode) const
+    {
+        return enabled_[mode_index(mode)];
+    }
 
     ModeTransition apply(ModeRequest request)
     {
@@ -86,16 +100,22 @@ public:
     }
 
 private:
-    static void validate_request(ControlMode requested)
+    void validate_request(ControlMode requested) const
     {
-        if (requested == ControlMode::Dance || requested == ControlMode::Skill) {
+        if (!is_enabled(requested)) {
             throw std::runtime_error(
-                std::string("ModeManager requires a skill policy adapter before entering ") +
+                std::string("ModeManager mode is not enabled: ") +
                 control_mode_name(requested));
         }
     }
 
+    static constexpr int mode_index(ControlMode mode)
+    {
+        return static_cast<int>(mode);
+    }
+
     ControlMode mode_{ControlMode::Stand};
+    bool enabled_[6]{};
 };
 
 }  // namespace magicbot_loco

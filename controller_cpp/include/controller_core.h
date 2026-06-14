@@ -2,10 +2,12 @@
 
 #include "magicbot_loco_core.h"
 #include "mode_manager.h"
+#include "policy_adapter.h"
 
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <map>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -93,6 +95,18 @@ public:
 
     const JointGains& gains() const { return gains_; }
 
+    void register_external_policy(ExternalPolicyAdapter& policy)
+    {
+        const ControlMode policy_mode = policy.mode();
+        if (policy_mode != ControlMode::Dance && policy_mode != ControlMode::Skill) {
+            throw std::runtime_error(
+                std::string("external policy mode must be DANCE or SKILL, got ") +
+                control_mode_name(policy_mode));
+        }
+        external_policies_[policy_mode] = &policy;
+        mode_manager_.set_enabled(policy_mode, true);
+    }
+
     ControllerCoreOutput step(
         const RobotSnapshot& snapshot,
         const Command& command,
@@ -105,6 +119,9 @@ public:
         }
         if (transition.seed_target_from_state) {
             command_target_ = snapshot.q;
+        }
+        if (transition.reset_policy_history) {
+            reset_external_policy(mode_manager_.mode(), snapshot);
         }
 
         const float dt = std::max(control_dt_s, 1e-6f);
@@ -121,6 +138,9 @@ public:
         }
         if (active_mode == ControlMode::Loco) {
             return step_loco(snapshot, transition.zero_command ? Command{} : command);
+        }
+        if (active_mode == ControlMode::Dance || active_mode == ControlMode::Skill) {
+            return step_external_policy(snapshot, transition.zero_command ? Command{} : command);
         }
 
         throw std::runtime_error(
@@ -197,6 +217,74 @@ private:
         return make_output(false);
     }
 
+    ControllerCoreOutput step_external_policy(const RobotSnapshot& snapshot, const Command& command)
+    {
+        ExternalPolicyAdapter* policy = external_policy(mode_manager_.mode());
+        if (policy == nullptr) {
+            throw std::runtime_error(
+                std::string("no external policy registered for ") + control_mode_name(mode_manager_.mode()));
+        }
+
+        if (policy_elapsed_s_ + 1e-6f < cfg_.policy_dt) {
+            projected_gravity_ = gravity_orientation(snapshot.quat);
+            safety_.check(
+                snapshot,
+                &command_target_,
+                have_previous_raw_policy_target_ ? &raw_policy_target_ : nullptr,
+                nullptr);
+            return make_output(false);
+        }
+
+        ExternalPolicyInput input;
+        input.snapshot = snapshot;
+        input.velocity_command = command.velocity;
+        input.dt_s = cfg_.policy_dt;
+        const ExternalPolicyOutput policy_output = policy->step(input);
+
+        safety_.check(
+            snapshot,
+            nullptr,
+            &policy_output.target_motor,
+            have_previous_raw_policy_target_ ? &raw_policy_target_ : nullptr);
+        const auto limited = torque_limited_target(
+            policy_output.target_motor,
+            snapshot.q,
+            snapshot.dq,
+            gains_.kp,
+            gains_.kd,
+            gains_.tau_limit,
+            cfg_.tau_limit_scale);
+        command_target_ = clamp_and_rate_limit(
+            limited,
+            command_target_,
+            options_.max_target_rate,
+            cfg_.policy_dt,
+            options_.joint_limit_margin);
+        safety_.check(
+            snapshot,
+            &command_target_,
+            &policy_output.target_motor,
+            have_previous_raw_policy_target_ ? &raw_policy_target_ : nullptr);
+
+        raw_policy_target_ = policy_output.target_motor;
+        have_previous_raw_policy_target_ = true;
+        projected_gravity_ = gravity_orientation(snapshot.quat);
+        policy_elapsed_s_ = 0.0f;
+        ++policy_steps_;
+
+        if (policy_output.complete) {
+            const ModeTransition transition = mode_manager_.apply(ModeRequest::enter(policy_output.next_mode));
+            if (transition.reset_policy_history) {
+                reset_policy();
+                reset_external_policy(mode_manager_.mode(), snapshot);
+            }
+            if (transition.seed_target_from_state) {
+                command_target_ = snapshot.q;
+            }
+        }
+        return make_output(true);
+    }
+
     ControllerCoreOutput make_output(bool policy_evaluated) const
     {
         ControllerCoreOutput out;
@@ -214,6 +302,20 @@ private:
         return out;
     }
 
+    ExternalPolicyAdapter* external_policy(ControlMode mode) const
+    {
+        const auto it = external_policies_.find(mode);
+        return it == external_policies_.end() ? nullptr : it->second;
+    }
+
+    void reset_external_policy(ControlMode mode, const RobotSnapshot& snapshot)
+    {
+        ExternalPolicyAdapter* policy = external_policy(mode);
+        if (policy != nullptr) {
+            policy->reset(snapshot);
+        }
+    }
+
     LocoConfig cfg_;
     ControllerCoreOptions options_;
     OnnxLocoPolicy loco_policy_;
@@ -224,6 +326,7 @@ private:
     JointArray raw_policy_target_{};
     std::array<float, 3> projected_gravity_{0.0f, 0.0f, -1.0f};
     ModeManager mode_manager_{ControlMode::Stand};
+    std::map<ControlMode, ExternalPolicyAdapter*> external_policies_;
     float policy_elapsed_s_{kDefaultPolicyDt};
     bool have_previous_raw_policy_target_{false};
     int policy_steps_{0};

@@ -45,6 +45,11 @@ reset policy history, zero commands, or seed targets from the current robot
 state. `DANCE` and `SKILL` remain explicit modes but are rejected until a skill
 policy adapter is installed.
 
+`policy_adapter.h` defines the external policy contract for `DANCE` / `SKILL`.
+Adapters only return a raw motor-space target and completion hint. `ControllerCore`
+still owns policy-history reset, motion safety, torque limiting, rate limiting,
+and final `JointTarget` generation.
+
 `robot_adapter.h` introduces the backend boundary:
 
 - `RobotAdapter::read_snapshot()`
@@ -88,6 +93,6 @@ state/command I/O.
 1. Route `magicbot_z1_loco_onnx` LOCO loop through `ControllerCore`.
 2. Route MuJoCo viewer closed-loop code through `MujocoSimAdapter` and the same
    `ControllerCore` API.
-3. Add policy adapters for `DANCE` / `SKILL`.
+3. Wrap existing Dance/BeyondMimic policies behind `ExternalPolicyAdapter`.
 4. Move viewer mode/control API code to send requests only; it must not duplicate
    core policy or safety logic.
