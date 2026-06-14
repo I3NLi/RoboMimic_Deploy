@@ -230,6 +230,18 @@ This verifies explicit dry-run policy loading, the default dry-run mode, and
 that `--run` is rejected before any robot connection path unless
 `--allow-loco` is present.
 
+Real-runner external-policy gate smoke (no robot connection):
+
+```bash
+scripts/run_magicbot_loco_external_policy_smoke_native.sh
+```
+
+This dry-runs BeyondMimic and TrackMimic-as-BeyondMimic YAML loading, then runs
+`--input-check` with explicit `--allow-dance` and `--allow-skill` gates. It sends
+UDP `mode=beyond`, `mode=track_mimic`, and `mode=final_damping`, verifying that
+the real-runner input path accepts DANCE/SKILL only when the matching gates and
+YAML paths are present, without connecting to the robot.
+
 Baseline closed-loop smoke:
 
 ```bash
