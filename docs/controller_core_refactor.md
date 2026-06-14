@@ -46,7 +46,8 @@ state. `DANCE` and `SKILL` remain explicit modes but are rejected until a skill
 policy adapter is installed. The shared mode helper also owns the default
 external-policy request mapping, including `DANCE -> BeyondMimic` and
 `SKILL -> TrackMimic`, so entrypoints do not each encode different external
-policy request keys.
+policy request keys. `TrackMimic` is a key for the BeyondMimic-trained
+trajectory-conditioned path, not a separate control architecture.
 
 `policy_adapter.h` defines the external policy contract for `DANCE` / `SKILL`.
 Adapters return a raw motor-space target, an optional gains override, and a
@@ -182,9 +183,9 @@ and intentionally reject requests until a matching external policy adapter is
 registered.
 
 This keeps the real-robot safety ladder intact: high-risk LOCO and DANCE require
-the existing CLI `--allow-loco` and `--allow-dance` gates, SKILL/TrackMimic
-requires `--allow-skill`, and adapters remain responsible only for
-state/command I/O.
+the existing CLI `--allow-loco` and `--allow-dance` gates, while the
+SKILL/TrackMimic trajectory path requires `--allow-skill`; adapters remain
+responsible only for state/command I/O.
 
 ## Validation commands
 
@@ -237,7 +238,7 @@ Real-runner external-policy gate smoke (no robot connection):
 scripts/run_magicbot_loco_external_policy_smoke_native.sh
 ```
 
-This dry-runs BeyondMimic and TrackMimic-as-BeyondMimic YAML loading, then runs
+This dry-runs BeyondMimic and BeyondMimic trajectory/TrackMimic YAML loading, then runs
 `--input-check` with explicit `--allow-dance` and `--allow-skill` gates. It sends
 UDP `mode=beyond`, `mode=track_mimic`, and `mode=final_damping`, verifying that
 the real-runner input path accepts DANCE/SKILL only when the matching gates and
@@ -342,7 +343,7 @@ scripts/run_viewer_udp_external_policy_smoke_native.sh --duration 1.8 --keep-sum
 
 The script starts the viewer with UDP control and HTTP status enabled, sends UDP
 text controls for `mode=beyond` and `mode=track_mimic`, checks live `/status`
-for `DANCE/BeyondMimic` and `SKILL/TrackMimic`, then checks the summary for a
+for `DANCE/BeyondMimic` and `SKILL/TrackMimic` trajectory, then checks the summary for a
 final `SKILL` state with active `external_policy == TrackMimic`,
 `adapter_backend == mujoco-sim`, and `adapter_command_published == true`.
 

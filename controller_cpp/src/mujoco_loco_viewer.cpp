@@ -2291,7 +2291,9 @@ int main(int argc, char** argv)
         if (!args.track_mimic_yaml.empty()) {
             const fs::path track_yaml_path = resolve_path(root, args.track_mimic_yaml);
             if (!fs::exists(track_yaml_path)) {
-                throw std::runtime_error("TrackMimic config not found: " + track_yaml_path.string());
+                throw std::runtime_error(
+                    "BeyondMimic trajectory/TrackMimic config not found: " +
+                    track_yaml_path.string());
             }
             track_mimic_policy = std::make_unique<BeyondMimicPolicy>(
                 skill_external_state,
@@ -2464,7 +2466,7 @@ int main(int argc, char** argv)
             std::printf("Beyond : %s\n", resolve_path(root, args.beyond_yaml).string().c_str());
         }
         if (skill_enabled) {
-            std::printf("Track  : %s (BeyondMimic trajectory mode)\n", resolve_path(root, args.track_mimic_yaml).string().c_str());
+            std::printf("Track  : %s (BeyondMimic trajectory-conditioned mode)\n", resolve_path(root, args.track_mimic_yaml).string().c_str());
         }
         std::printf(
             "Keys   : L loco, M passive, N final damping, B beyond/dance, T track/skill, Space pause, R reset, "

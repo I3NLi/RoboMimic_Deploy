@@ -16,6 +16,7 @@ enum class ControlMode {
 };
 
 inline constexpr const char kBeyondMimicPolicyKey[] = "BeyondMimic";
+// TrackMimic selects a BeyondMimic-trained, trajectory-conditioned config.
 inline constexpr const char kTrackMimicPolicyKey[] = "TrackMimic";
 
 struct ModeRequest {

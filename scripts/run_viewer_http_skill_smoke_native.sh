@@ -15,7 +15,7 @@ usage() {
     cat <<EOF
 Usage: $0 [options] [-- extra mujoco_loco_viewer args]
 
-Smoke-test the viewer HTTP control path for SKILL/TrackMimic. The script starts
+Smoke-test the viewer HTTP control path for SKILL/TrackMimic trajectory. The script starts
 the native viewer with the BeyondMimic trajectory variant registered as a shared
 ControllerCore external policy, posts mode=track_mimic to /control, then
 validates live /status and the summary JSON.
@@ -190,6 +190,6 @@ if ! jq -e '.mode == "SKILL" and .external_policy == "TrackMimic" and .adapter_b
     exit 1
 fi
 
-echo "[Smoke] PASSED viewer HTTP SKILL/TrackMimic control"
+echo "[Smoke] PASSED viewer HTTP SKILL/TrackMimic trajectory control"
 echo "[Smoke] summary=${summary_json}"
 jq '{mode, external_policy, adapter_backend, adapter_command_published, paused, sim_steps, policy_steps, http_control_commands}' "${summary_json}"

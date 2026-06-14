@@ -19,7 +19,7 @@ Usage: $0 [options] [-- extra mujoco_loco_viewer args]
 
 Smoke-test the MuJoCo viewer UDP external-policy path. The script starts the
 native viewer with UDP control and HTTP status enabled, sends text-control UDP
-packets for DANCE/BeyondMimic and SKILL/TrackMimic, then validates live /status
+packets for DANCE/BeyondMimic and SKILL/TrackMimic trajectory, then validates live /status
 and the summary JSON.
 
 Options:
@@ -218,7 +218,7 @@ for _ in $(seq 1 80); do
 done
 
 if [[ "${skill_ready}" -ne 1 ]]; then
-    echo "[Smoke][ERROR] viewer /status did not report UDP SKILL/TrackMimic" >&2
+    echo "[Smoke][ERROR] viewer /status did not report UDP SKILL/TrackMimic trajectory" >&2
     cat "${status_body}" >&2 || true
     sed -n '1,260p' "${viewer_log}" >&2
     exit 1
@@ -238,7 +238,7 @@ if [[ ! -s "${summary_json}" ]]; then
 fi
 
 if ! jq -e '.mode == "SKILL" and .external_policy == "TrackMimic" and .adapter_backend == "mujoco-sim" and .adapter_command_published == true and .paused == false and .policy_steps > 0 and .sim_steps > 0' "${summary_json}" >/dev/null; then
-    echo "[Smoke][ERROR] summary did not report final UDP SKILL/TrackMimic" >&2
+    echo "[Smoke][ERROR] summary did not report final UDP SKILL/TrackMimic trajectory" >&2
     cat "${summary_json}" >&2
     exit 1
 fi

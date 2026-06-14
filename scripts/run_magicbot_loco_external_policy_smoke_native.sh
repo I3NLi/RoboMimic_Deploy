@@ -16,15 +16,16 @@ usage() {
 Usage: $0 [options]
 
 Smoke-test the real runner external-policy entry path without connecting to a
-robot. The script dry-runs BeyondMimic and TrackMimic YAML loading, then starts
+robot. The script dry-runs BeyondMimic and the BeyondMimic trajectory/TrackMimic
+YAML loading path, then starts
 magicbot_z1_loco_onnx in --input-check mode with explicit allow gates and sends
-UDP text controls for DANCE/BeyondMimic and SKILL/TrackMimic.
+UDP text controls for DANCE/BeyondMimic and SKILL/TrackMimic trajectory.
 
 Options:
   --duration S          Input-check duration, default ${duration}
   --udp-port N          UDP port, default: choose a free local port
   --beyond-yaml P       BeyondMimic YAML, default ${beyond_yaml}
-  --track-mimic-yaml P  TrackMimic-as-BeyondMimic YAML, default ${track_mimic_yaml}
+  --track-mimic-yaml P  BeyondMimic trajectory/TrackMimic YAML, default ${track_mimic_yaml}
   --keep-log            Print and keep temp log paths
   -h, --help            Show this help
 EOF
@@ -76,7 +77,7 @@ if [[ ! -f "${beyond_yaml}" ]]; then
     exit 1
 fi
 if [[ ! -f "${track_mimic_yaml}" ]]; then
-    echo "[Smoke][ERROR] TrackMimic YAML not found: ${track_mimic_yaml}" >&2
+    echo "[Smoke][ERROR] BeyondMimic trajectory/TrackMimic YAML not found: ${track_mimic_yaml}" >&2
     exit 1
 fi
 
@@ -113,7 +114,7 @@ echo "[Smoke] Checking dry-run external policy YAML loading"
     --track-mimic-yaml "${track_mimic_yaml}" \
     >"${dry_log}" 2>&1
 
-for expected in '[DryRun] BeyondMimic loaded' '[DryRun] BeyondMimic TrackMimic loaded'; do
+for expected in '[DryRun] BeyondMimic loaded' '[DryRun] BeyondMimic TrackMimic trajectory loaded'; do
     if ! rg -F -q "${expected}" "${dry_log}"; then
         echo "[Smoke][ERROR] dry-run output missing: ${expected}" >&2
         sed -n '1,220p' "${dry_log}" >&2

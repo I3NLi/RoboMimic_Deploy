@@ -140,7 +140,7 @@ void print_usage(const char* argv0)
         << "  --pd-stand-only                  With --run, hold default PD stand and never run ONNX\n"
         << "  --allow-loco                     Required before ONNX loco is allowed\n"
         << "  --allow-dance                    Required before DANCE/BeyondMimic is allowed on real robot\n"
-        << "  --allow-skill                    Required before SKILL/TrackMimic is allowed on real robot\n"
+        << "  --allow-skill                    Required before BeyondMimic trajectory/TrackMimic is allowed on real robot\n"
         << "\n"
         << "Motion:\n"
         << "  --vx V --vy V --wz V             Normalized command inputs; YAML cmd_range maps physical speed\n"
@@ -177,7 +177,7 @@ void print_usage(const char* argv0)
         << "  --gamepad-pause-button N         Button that toggles pause-zero, default 7\n"
         << "  --gamepad-reset-button N         Button that re-interpolates to STAND, default 6\n"
         << "  --gamepad-dance-button N         Optional button that enters DANCE/BeyondMimic, default disabled\n"
-        << "  --gamepad-skill-button N         Optional button that enters SKILL/TrackMimic, default disabled\n"
+        << "  --gamepad-skill-button N         Optional button that enters BeyondMimic trajectory/TrackMimic, default disabled\n"
         << "\n"
         << "Debug entry:\n"
         << "  --debug-entry                    TTS, wait, then LowLevel passive damping before run\n"
@@ -1539,7 +1539,9 @@ int main(int argc, char** argv)
             }
             if (!args.track_mimic_yaml.empty()) {
                 if (!std::filesystem::exists(args.track_mimic_yaml)) {
-                    throw std::runtime_error("TrackMimic config not found: " + args.track_mimic_yaml.string());
+                    throw std::runtime_error(
+                        "BeyondMimic trajectory/TrackMimic config not found: " +
+                        args.track_mimic_yaml.string());
                 }
                 StateAndCmd external_state(ml::kNumJoints);
                 PolicyOutput external_output(ml::kNumJoints);
@@ -1552,7 +1554,8 @@ int main(int argc, char** argv)
                     "TrackMimic",
                     false);
                 track_policy.enter();
-                std::cout << "[DryRun] BeyondMimic TrackMimic loaded: " << args.track_mimic_yaml << std::endl;
+                std::cout << "[DryRun] BeyondMimic TrackMimic trajectory loaded: "
+                          << args.track_mimic_yaml << std::endl;
             }
             return 0;
         }
@@ -1599,7 +1602,9 @@ int main(int argc, char** argv)
         }
         if (!args.track_mimic_yaml.empty()) {
             if (!std::filesystem::exists(args.track_mimic_yaml)) {
-                throw std::runtime_error("TrackMimic config not found: " + args.track_mimic_yaml.string());
+                throw std::runtime_error(
+                    "BeyondMimic trajectory/TrackMimic config not found: " +
+                    args.track_mimic_yaml.string());
             }
             track_mimic_policy = std::make_unique<BeyondMimicPolicy>(
                 skill_external_state,
@@ -1618,7 +1623,8 @@ int main(int argc, char** argv)
                 *track_mimic_policy,
                 control_mode_for_fsm_state);
             core.register_external_policy(ml::kTrackMimicPolicyKey, *track_mimic_adapter, true);
-            std::cout << "[ExternalPolicy] SKILL -> BeyondMimic TrackMimic: " << args.track_mimic_yaml << std::endl;
+            std::cout << "[ExternalPolicy] SKILL -> BeyondMimic trajectory/TrackMimic: "
+                      << args.track_mimic_yaml << std::endl;
         }
         return run_robot_with_finally(args, cfg, core);
     } catch (const std::exception& exc) {
