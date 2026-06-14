@@ -114,6 +114,25 @@ if ! compgen -G "${MUJOCO_ROOT}/libmujoco.so*" > /dev/null; then
     exit 1
 fi
 
+needs_build() {
+    [[ ! -x "${NATIVE_BIN}" ]] && return 0
+
+    local dep
+    for dep in \
+        "${CPP_DIR}/CMakeLists.txt" \
+        "${CPP_DIR}/src/dual_inference_rate.cpp" \
+        "${CPP_DIR}/src/magicbot_loco_core.cpp" \
+        "${CPP_DIR}/src/magicbot_loco_sdk_adapter.cpp"; do
+        [[ "${dep}" -nt "${NATIVE_BIN}" ]] && return 0
+    done
+
+    while IFS= read -r dep; do
+        [[ "${dep}" -nt "${NATIVE_BIN}" ]] && return 0
+    done < <(find "${CPP_DIR}/include" -maxdepth 1 -type f \( -name '*.h' -o -name '*.hpp' \))
+
+    return 1
+}
+
 mkdir -p "${BUILD_DIR}/onnxruntime"
 ORT_LINK_LIB="${BUILD_DIR}/onnxruntime/libonnxruntime.so.1"
 ln -sf "${ONNXRUNTIME_LIB}" "${ORT_LINK_LIB}"
@@ -121,7 +140,7 @@ ONNXRUNTIME_LIB="${ORT_LINK_LIB}"
 
 export LD_LIBRARY_PATH="${BUILD_DIR}/onnxruntime:${MUJOCO_ROOT}:${LD_LIBRARY_PATH:-}"
 
-if [[ "${DUAL_RATE_SKIP_BUILD:-0}" != "1" || ! -x "${NATIVE_BIN}" ]]; then
+if [[ "${DUAL_RATE_SKIP_BUILD:-0}" != "1" ]] || needs_build; then
     cmake -S "${CPP_DIR}" -B "${BUILD_DIR}" \
         -DCMAKE_BUILD_TYPE=Release \
         -Dyaml-cpp_DIR=/usr/lib/x86_64-linux-gnu/cmake/yaml-cpp \

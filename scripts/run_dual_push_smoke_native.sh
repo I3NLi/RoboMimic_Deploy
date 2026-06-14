@@ -4,6 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 RUNNER="${SCRIPT_DIR}/run_dual_inference_rate_native.sh"
 DUAL_SOURCE="${SCRIPT_DIR}/../controller_cpp/src/dual_inference_rate.cpp"
+RUNNER_WRAPPER="${SCRIPT_DIR}/run_dual_inference_rate_native.sh"
 
 duration="1.0"
 summary_json=""
@@ -113,6 +114,32 @@ if rg -n 'sim_adapter\.write_target' "${DUAL_SOURCE}"; then
     echo "[Smoke][ERROR] dual_inference_rate.cpp should publish held sim targets through ControllerRuntime" >&2
     exit 1
 fi
+
+echo "[Smoke] Checking dual-rate wrapper rebuilds on shared headers"
+python3 - "${RUNNER_WRAPPER}" <<'PY'
+import sys
+from pathlib import Path
+
+wrapper = Path(sys.argv[1]).read_text(encoding="utf-8")
+required = [
+    "needs_build()",
+    'find "${CPP_DIR}/include"',
+    "-name '*.h'",
+    "-name '*.hpp'",
+    "src/dual_inference_rate.cpp",
+    "src/magicbot_loco_core.cpp",
+    "src/magicbot_loco_sdk_adapter.cpp",
+    '[[ "${DUAL_RATE_SKIP_BUILD:-0}" != "1" ]] || needs_build',
+]
+missing = [item for item in required if item not in wrapper]
+if missing:
+    print(
+        "[Smoke][ERROR] dual-rate wrapper must rebuild when shared headers or target sources change; missing: "
+        + ", ".join(missing),
+        file=sys.stderr,
+    )
+    sys.exit(1)
+PY
 
 if [[ -z "${summary_json}" ]]; then
     summary_json="$(mktemp /tmp/magicbot_dual_push_XXXXXX.json)"

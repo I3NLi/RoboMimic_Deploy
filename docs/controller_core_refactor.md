@@ -410,7 +410,9 @@ scheduled force and an impulse to `pelvis`, and checks the summary for
 `push_impulse_applied == true`. It also guards the validation tool against
 direct MuJoCo `data->ctrl` writes outside `MujocoSimAdapter`, and against
 duplicating policy inference, motion safety, or target limiting outside
-`ControllerCore`.
+`ControllerCore`. It also guards that `run_dual_inference_rate_native.sh`
+rebuilds when shared controller headers or target source files change, even when
+`DUAL_RATE_SKIP_BUILD=1` is set.
 
 Viewer disturbance smoke:
 
