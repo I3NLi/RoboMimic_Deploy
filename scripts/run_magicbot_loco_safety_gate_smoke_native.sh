@@ -50,6 +50,10 @@ if rg -n 'publish_(sdk24_command|damping)\(' "${RUNNER_SOURCE}"; then
     echo "[Smoke][ERROR] magicbot_z1_loco_onnx.cpp must not publish robot commands directly; use MagicbotRealAdapter" >&2
     exit 1
 fi
+if rg -n 'OnnxLocoPolicy[[:space:]]+[A-Za-z_]|\.infer\(' "${RUNNER_SOURCE}"; then
+    echo "[Smoke][ERROR] magicbot_z1_loco_onnx.cpp must run policy inference through ControllerCore" >&2
+    exit 1
+fi
 
 echo "[Smoke] Checking safety-wall final damping path"
 python3 - "${RUNNER_SOURCE}" <<'PY'
@@ -169,7 +173,7 @@ assert_no_robot_path() {
 
 echo "[Smoke] Checking explicit dry-run"
 "${RUNNER}" --dry-run >"${dry_log}" 2>&1
-for expected in 'Config:' 'ONNX input/output:' 'Action sample range:' 'Target sample range:'; do
+for expected in 'Config:' 'ONNX input/output:' 'Raw target sample range:' 'Command target sample range:'; do
     if ! rg -q "${expected}" "${dry_log}"; then
         echo "[Smoke][ERROR] dry-run output missing: ${expected}" >&2
         sed -n '1,180p' "${dry_log}" >&2

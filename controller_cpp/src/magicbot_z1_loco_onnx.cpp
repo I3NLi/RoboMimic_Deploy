@@ -936,21 +936,6 @@ private:
     std::unique_ptr<UdpCommandInput> udp_;
 };
 
-void dry_run(const ml::LocoConfig& cfg, ml::OnnxLocoPolicy& policy)
-{
-    ml::JointArray q = cfg.default_motor();
-    ml::JointArray dq{};
-    std::array<float, 3> zero3{0.0f, 0.0f, 0.0f};
-    std::array<float, 3> gravity{0.0f, 0.0f, -1.0f};
-    auto result = policy.infer(q, dq, zero3, gravity, zero3);
-    auto [min_a, max_a] = std::minmax_element(result.action_lab.begin(), result.action_lab.end());
-    std::cout << "Config: " << cfg.config_path << "\n"
-              << "ONNX: " << cfg.policy_path << "\n"
-              << "ONNX input/output: " << cfg.num_obs << " -> " << cfg.num_actions << "\n"
-              << "Action sample range: " << *min_a << " .. " << *max_a << "\n"
-              << "Target sample range: " << range_string(result.target_motor) << std::endl;
-}
-
 ml::RobotSnapshot dry_run_snapshot(const ml::LocoConfig& cfg)
 {
     ml::RobotSnapshot snapshot;
@@ -958,6 +943,23 @@ ml::RobotSnapshot dry_run_snapshot(const ml::LocoConfig& cfg)
     snapshot.quat = {1.0f, 0.0f, 0.0f, 0.0f};
     snapshot.counts = {12, 8, 1, 1};
     return snapshot;
+}
+
+void dry_run(const ml::LocoConfig& cfg, ml::ControllerCore& core)
+{
+    const auto output = core.step(
+        dry_run_snapshot(cfg),
+        ml::Command{},
+        ml::mode_request_for_control_mode(ml::ControlMode::Loco),
+        static_cast<float>(cfg.policy_dt));
+    if (output.telemetry.mode != ml::ControlMode::Loco || !output.telemetry.policy_evaluated) {
+        throw std::runtime_error("LOCO dry-run did not evaluate through ControllerCore");
+    }
+    std::cout << "Config: " << cfg.config_path << "\n"
+              << "ONNX: " << cfg.policy_path << "\n"
+              << "ONNX input/output: " << cfg.num_obs << " -> " << cfg.num_actions << "\n"
+              << "Raw target sample range: " << range_string(output.telemetry.raw_policy_target) << "\n"
+              << "Command target sample range: " << range_string(output.telemetry.command_target) << std::endl;
 }
 
 void dry_run_external_policy(
@@ -1487,24 +1489,18 @@ int main(int argc, char** argv)
         ml::LocoConfig cfg = ml::load_loco_config(args.config);
 
         if (args.dry_run) {
-            ml::OnnxLocoPolicy policy(cfg);
-            dry_run(cfg, policy);
-            std::unique_ptr<ml::ControllerCore> dry_core;
-            std::unique_ptr<ml::NativeBeyondMimicExternalPolicyRegistry> external_policies;
-            if (!args.beyond_yaml.empty() || !args.track_mimic_yaml.empty()) {
-                ml::ControllerCoreOptions dry_core_options;
-                dry_core_options.safety.enabled = false;
-                dry_core = std::make_unique<ml::ControllerCore>(cfg, dry_core_options);
-                external_policies = std::make_unique<ml::NativeBeyondMimicExternalPolicyRegistry>(
-                    static_cast<float>(cfg.policy_dt));
-            }
+            ml::ControllerCoreOptions dry_core_options;
+            dry_core_options.safety.enabled = false;
+            ml::ControllerCore dry_core(cfg, dry_core_options);
+            ml::NativeBeyondMimicExternalPolicyRegistry external_policies(static_cast<float>(cfg.policy_dt));
+            dry_run(cfg, dry_core);
             if (!args.beyond_yaml.empty()) {
                 if (!std::filesystem::exists(args.beyond_yaml)) {
                     throw std::runtime_error("BeyondMimic config not found: " + args.beyond_yaml.string());
                 }
-                external_policies->register_dance(*dry_core, args.beyond_yaml.string());
+                external_policies.register_dance(dry_core, args.beyond_yaml.string());
                 dry_run_external_policy(
-                    *dry_core,
+                    dry_core,
                     cfg,
                     ml::ControlMode::Dance,
                     ml::kBeyondMimicPolicyKey,
@@ -1517,9 +1513,9 @@ int main(int argc, char** argv)
                         "BeyondMimic trajectory/TrackMimic config not found: " +
                         args.track_mimic_yaml.string());
                 }
-                external_policies->register_track_mimic(*dry_core, args.track_mimic_yaml.string());
+                external_policies.register_track_mimic(dry_core, args.track_mimic_yaml.string());
                 dry_run_external_policy(
-                    *dry_core,
+                    dry_core,
                     cfg,
                     ml::ControlMode::Skill,
                     ml::kTrackMimicPolicyKey,

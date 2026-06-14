@@ -119,6 +119,8 @@ limiting, gains, and motion safety stay shared even in the lower-risk
 stand-only path. The existing staged safety flow is preserved: dry-run,
 connect-check, read-state, debug/passive damping, stand interpolation, and
 PD stand-only remain outside high-risk LOCO execution.
+The standard dry-run also evaluates LOCO through `ControllerCore` rather than
+instantiating or stepping `OnnxLocoPolicy` in the real-runner entrypoint.
 LOCO still requires the explicit `--allow-loco` gate; real-runner DANCE requests
 are ignored unless `--allow-dance` is also set with `--beyond-yaml PATH`. When
 `--beyond-yaml PATH` is supplied, the runner registers BeyondMimic as the keyed
