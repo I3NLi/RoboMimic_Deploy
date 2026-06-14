@@ -1193,7 +1193,9 @@ int run_robot_with_finally(const Args& args, const ml::LocoConfig& cfg, ml::Cont
         if (!entered_lowlevel) return;
         try {
             std::cout << "[Final] Publishing final damping command" << std::endl;
-            robot.publish_damping(state.snapshot().counts, args.damping_kd);
+            ml::MagicbotRealAdapter real_adapter(robot, state);
+            ml::ControllerRuntime runtime(core, real_adapter);
+            runtime.write_damping(args.damping_kd);
             std::cout << "[Final] Final damping command published" << std::endl;
             std::this_thread::sleep_for(std::chrono::milliseconds(50));
         } catch (const std::exception& exc) {
