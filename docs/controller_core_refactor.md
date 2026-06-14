@@ -181,7 +181,10 @@ scripts/run_controller_core_check_native.sh
 
 This loads the loco YAML and ONNX policy, then verifies that shared
 `ControllerCore` STAND stays position-targeted while PASSIVE and FINAL_DAMPING
-produce damping-only targets seeded from the current robot state.
+produce damping-only targets seeded from the current robot state. It also runs
+`ControllerRuntime` with a fake adapter to verify the shared
+`read_snapshot -> core.step -> write_target` flow and `publish_target=false`
+behavior.
 
 Real-runner UDP input smoke (no robot connection):
 

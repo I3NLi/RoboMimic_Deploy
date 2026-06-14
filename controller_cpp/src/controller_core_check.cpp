@@ -1,4 +1,4 @@
-#include "controller_core.h"
+#include "controller_runtime.h"
 
 #include <cmath>
 #include <filesystem>
@@ -9,6 +9,51 @@
 namespace ml = magicbot_loco;
 
 namespace {
+
+class FakeAdapter : public ml::RobotAdapter {
+public:
+    explicit FakeAdapter(ml::RobotSnapshot snapshot)
+        : snapshot_(snapshot)
+    {
+    }
+
+    const char* name() const override { return "fake"; }
+
+    ml::RobotSnapshot read_snapshot() override
+    {
+        ++reads;
+        return snapshot_;
+    }
+
+    void write_target(const ml::JointTarget& target) override
+    {
+        ++writes;
+        last_target = target;
+    }
+
+    void write_damping(float damping_kd) override
+    {
+        ++damping_writes;
+        last_damping_kd = damping_kd;
+    }
+
+    ml::AdapterTelemetry telemetry() const override
+    {
+        ml::AdapterTelemetry out;
+        out.backend = name();
+        out.command_published = writes > 0;
+        return out;
+    }
+
+    int reads{0};
+    int writes{0};
+    int damping_writes{0};
+    float last_damping_kd{0.0f};
+    ml::JointTarget last_target{};
+
+private:
+    ml::RobotSnapshot snapshot_;
+};
 
 void require(bool condition, const std::string& message)
 {
@@ -94,6 +139,40 @@ void check_stand_passive_final_modes(const std::filesystem::path& config_path)
     require_joint_array_near(final_damping.target.q, final_q, "final damping target should seed from state");
 }
 
+void check_runtime_adapter_flow(const std::filesystem::path& config_path)
+{
+    ml::LocoConfig cfg = ml::load_loco_config(config_path);
+    ml::ControllerCoreOptions options;
+    options.safety.enabled = false;
+    ml::ControllerCore core(cfg, options);
+
+    const ml::JointArray q = offset_target(cfg.default_motor(), 0.006f);
+    FakeAdapter adapter(make_snapshot(q));
+    ml::ControllerRuntime runtime(core, adapter);
+
+    ml::RuntimeTickInput tick_input;
+    tick_input.mode_request = ml::mode_request_for_control_mode(ml::ControlMode::Passive);
+    tick_input.control_dt_s = static_cast<float>(ml::kControlDt);
+    const auto tick = runtime.tick(tick_input);
+    require(adapter.reads == 1, "runtime should read adapter once");
+    require(adapter.writes == 1, "runtime should write target when publish_target=true");
+    require(tick.adapter.backend == "fake", "runtime should return adapter telemetry");
+    require(tick.adapter.command_published, "adapter telemetry should report command published");
+    require(tick.core.telemetry.mode == ml::ControlMode::Passive, "runtime core mode telemetry");
+    require(adapter.last_target.damping_only, "runtime should publish damping-only passive target");
+    require_joint_array_near(adapter.last_target.q, q, "runtime published target should come from snapshot");
+
+    tick_input.mode_request = ml::ModeRequest::none();
+    tick_input.publish_target = false;
+    (void)runtime.tick(tick_input);
+    require(adapter.reads == 2, "runtime should still read when publish_target=false");
+    require(adapter.writes == 1, "runtime should not write when publish_target=false");
+
+    runtime.write_damping(4.5f);
+    require(adapter.damping_writes == 1, "runtime write_damping should call adapter");
+    require(near(adapter.last_damping_kd, 4.5f), "runtime write_damping kd");
+}
+
 }  // namespace
 
 int main(int argc, char** argv)
@@ -105,6 +184,7 @@ int main(int argc, char** argv)
 
     try {
         check_stand_passive_final_modes(argv[1]);
+        check_runtime_adapter_flow(argv[1]);
     } catch (const std::exception& error) {
         std::cerr << "[controller_core_check][FAIL] " << error.what() << "\n";
         return 1;
