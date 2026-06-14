@@ -167,7 +167,10 @@ requests, maps mode aliases through the same shared action parser used by UDP,
 and then still routes each tick through the shared runtime. The viewer now
 builds a `ModeRequest` only when the operator-desired mode differs from
 `ControllerCore::mode()`; steady ticks pass `ModeRequest::none()` so the viewer
-does not continuously re-command the mode manager.
+does not continuously re-command the mode manager. The viewer stores that
+operator intent as the shared `ControlMode` enum instead of parallel
+`loco/passive/dance/skill/final_damping` booleans; keyboard, HTTP, and UDP
+inputs only update the desired mode/key before the shared runtime consumes it.
 The same HTTP server exposes `GET /status` for control-station telemetry:
 current `ControllerCore` mode, active external policy key/name, pause state,
 adapter backend/command-published telemetry from `ControllerRuntime`, velocity
