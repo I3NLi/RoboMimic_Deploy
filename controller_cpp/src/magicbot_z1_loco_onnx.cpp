@@ -480,11 +480,7 @@ ml::ControlMode control_mode_for(RunMode mode)
 
 ml::ModeRequest mode_request_for(RunMode mode)
 {
-    const ml::ControlMode control_mode = control_mode_for(mode);
-    if (control_mode == ml::ControlMode::Dance) {
-        return ml::ModeRequest::enter_external(control_mode, "BeyondMimic");
-    }
-    return ml::ModeRequest::enter(control_mode);
+    return ml::mode_request_for_control_mode(control_mode_for(mode));
 }
 
 bool dance_request_allowed(const Args& args, const char* prefix)
@@ -1508,13 +1504,13 @@ int main(int argc, char** argv)
                 static_cast<float>(cfg.policy_dt));
             beyond_adapter = std::make_unique<BeyondAdapter>(
                 ml::ControlMode::Dance,
-                "BeyondMimic",
+                ml::kBeyondMimicPolicyKey,
                 FSMStateName::SKILL_BEYOND_MIMIC,
                 external_state,
                 external_output,
                 *beyond_policy,
                 control_mode_for_fsm_state);
-            core.register_external_policy("BeyondMimic", *beyond_adapter, true);
+            core.register_external_policy(ml::kBeyondMimicPolicyKey, *beyond_adapter, true);
             std::cout << "[ExternalPolicy] DANCE -> BeyondMimic: " << args.beyond_yaml << std::endl;
         }
         return run_robot_with_finally(args, cfg, core);

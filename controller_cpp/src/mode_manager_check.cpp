@@ -115,7 +115,9 @@ void check_external_policy_modes()
     ml::ModeManager manager;
     bool threw = false;
     try {
-        (void)manager.apply(ml::ModeRequest::enter_external(ml::ControlMode::Dance, "BeyondMimic"));
+        (void)manager.apply(ml::ModeRequest::enter_external(
+            ml::ControlMode::Dance,
+            ml::kBeyondMimicPolicyKey));
     } catch (const std::runtime_error&) {
         threw = true;
     }
@@ -123,7 +125,9 @@ void check_external_policy_modes()
 
     manager.set_enabled(ml::ControlMode::Dance, true);
     expect_transition(
-        manager.apply(ml::ModeRequest::enter_external(ml::ControlMode::Dance, "BeyondMimic")),
+        manager.apply(ml::ModeRequest::enter_external(
+            ml::ControlMode::Dance,
+            ml::kBeyondMimicPolicyKey)),
         ml::ControlMode::Stand,
         ml::ControlMode::Dance,
         true,

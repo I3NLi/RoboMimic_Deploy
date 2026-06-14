@@ -1585,11 +1585,8 @@ magicbot_loco::ControlMode viewer_control_mode(bool loco, bool passive, bool dan
 
 magicbot_loco::ModeRequest viewer_mode_request(bool loco, bool passive, bool dance, bool final_damping)
 {
-    const magicbot_loco::ControlMode mode = viewer_control_mode(loco, passive, dance, final_damping);
-    if (mode == magicbot_loco::ControlMode::Dance) {
-        return magicbot_loco::ModeRequest::enter_external(mode, "BeyondMimic");
-    }
-    return magicbot_loco::ModeRequest::enter(mode);
+    return magicbot_loco::mode_request_for_control_mode(
+        viewer_control_mode(loco, passive, dance, final_damping));
 }
 
 void sync_viewer_mode_flags(
@@ -2105,13 +2102,13 @@ int main(int argc, char** argv)
                 static_cast<float>(loco_cfg.policy_dt));
             beyond_adapter = std::make_unique<BeyondAdapter>(
                 magicbot_loco::ControlMode::Dance,
-                "BeyondMimic",
+                magicbot_loco::kBeyondMimicPolicyKey,
                 FSMStateName::SKILL_BEYOND_MIMIC,
                 external_state,
                 external_output,
                 *beyond_policy,
                 control_mode_for_fsm_state);
-            core.register_external_policy("BeyondMimic", *beyond_adapter, true);
+            core.register_external_policy(magicbot_loco::kBeyondMimicPolicyKey, *beyond_adapter, true);
             dance_enabled = true;
         }
 
