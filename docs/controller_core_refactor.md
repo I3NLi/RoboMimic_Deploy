@@ -94,12 +94,13 @@ policy logic.
 
 `dual_inference_rate.cpp` now routes pure-sim through `ControllerRuntime` and
 `MujocoSimAdapter`, and routes real-state-sim through the same runtime with a
-read-only replay adapter and `publish_target=false`. It remains a validation
-tool only and still never publishes commands to the real robot. Pure-sim
-validation also supports configurable
-world-frame push tests with `--push-body`, `--push-force`, `--push-start`,
-`--push-duration`, `--push-impulse`, and `--push-impulse-time`; `RATE_SUMMARY`
-JSON records whether force/impulse disturbance was applied.
+read-only replay adapter and `publish_target=false`. The replay adapter rejects
+any accidental target/damping write, so this path remains a validation tool only
+and still never publishes commands to the real robot. Pure-sim validation also
+supports configurable world-frame push tests with `--push-body`, `--push-force`,
+`--push-start`, `--push-duration`, `--push-impulse`, and
+`--push-impulse-time`; `RATE_SUMMARY` JSON records whether force/impulse
+disturbance was applied.
 
 `controller_runtime.h` adds the shared one-tick runtime flow:
 `RobotAdapter::read_snapshot()` -> `ControllerCore::step()` ->

@@ -33,6 +33,7 @@
 #include <limits>
 #include <numeric>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <vector>
@@ -120,23 +121,32 @@ public:
 
     ml::RobotSnapshot read_snapshot() override { return snapshot_; }
 
-    void write_target(const ml::JointTarget&) override { command_published_ = true; }
+    void write_target(const ml::JointTarget&) override
+    {
+        throw std::logic_error(
+            "real-state-sim replay adapter is read-only; "
+            "joint target publishing is forbidden");
+    }
 
-    void write_damping(float) override { command_published_ = true; }
+    void write_damping(float) override
+    {
+        throw std::logic_error(
+            "real-state-sim replay adapter is read-only; "
+            "damping publishing is forbidden");
+    }
 
     ml::AdapterTelemetry telemetry() const override
     {
         ml::AdapterTelemetry out;
         out.backend = name();
         out.state_age_ms = state_age_ms_;
-        out.command_published = command_published_;
+        out.command_published = false;
         return out;
     }
 
 private:
     ml::RobotSnapshot snapshot_{};
     double state_age_ms_{-1.0};
-    bool command_published_{false};
 };
 
 struct Summary {
