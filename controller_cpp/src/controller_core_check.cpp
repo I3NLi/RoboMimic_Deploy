@@ -272,6 +272,30 @@ void check_shared_target_rate_limit(const std::filesystem::path& config_path)
     }
 }
 
+void check_shared_motion_safety(const std::filesystem::path& config_path)
+{
+    ml::LocoConfig cfg = ml::load_loco_config(config_path);
+    ml::ControllerCoreOptions options;
+    options.safety.enabled = true;
+    options.safety.max_gravity_xy = 0.01f;
+    ml::ControllerCore core(cfg, options);
+
+    ml::RobotSnapshot unsafe = make_snapshot(cfg.default_motor());
+    unsafe.quat = {0.7071068f, 0.0f, 0.7071068f, 0.0f};
+
+    bool threw = false;
+    try {
+        (void)core.step(
+            unsafe,
+            ml::Command{},
+            ml::mode_request_for_control_mode(ml::ControlMode::Stand),
+            static_cast<float>(ml::kControlDt));
+    } catch (const std::runtime_error& error) {
+        threw = std::string(error.what()).find("motion safety: projected gravity xy") != std::string::npos;
+    }
+    require(threw, "ControllerCore should run shared motion safety checks");
+}
+
 void check_external_policy_flow(const std::filesystem::path& config_path)
 {
     ml::LocoConfig cfg = ml::load_loco_config(config_path);
@@ -430,6 +454,7 @@ int main(int argc, char** argv)
         check_stand_passive_final_modes(argv[1]);
         check_runtime_adapter_flow(argv[1]);
         check_shared_target_rate_limit(argv[1]);
+        check_shared_motion_safety(argv[1]);
         check_external_policy_flow(argv[1]);
     } catch (const std::exception& error) {
         std::cerr << "[controller_core_check][FAIL] " << error.what() << "\n";

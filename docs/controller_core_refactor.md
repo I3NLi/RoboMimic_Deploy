@@ -301,10 +301,10 @@ This loads the loco YAML and ONNX policy, then verifies that shared
 produce damping-only targets seeded from the current robot state. It also runs
 `ControllerRuntime` with a fake adapter to verify the shared
 `read_snapshot -> core.step -> write_target` flow and `publish_target=false`
-behavior, explicit held-target forwarding, and STAND plus external-policy
-target-rate clamp checks inside `ControllerCore`. It registers fake DANCE/SKILL
-external policies to verify keyed policy selection, reset/step calls, entry
-command zeroing, and completion back to a damping mode.
+behavior, explicit held-target forwarding, shared motion-safety triggering, and
+STAND plus external-policy target-rate clamp checks inside `ControllerCore`. It
+registers fake DANCE/SKILL external policies to verify keyed policy selection,
+reset/step calls, entry command zeroing, and completion back to a damping mode.
 
 Real-runner UDP input smoke (no robot connection):
 
