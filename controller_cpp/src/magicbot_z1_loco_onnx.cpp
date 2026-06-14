@@ -450,58 +450,6 @@ struct LiveInputState {
     std::string status;
 };
 
-enum class RunMode {
-    Passive,
-    Stand,
-    Loco,
-    Dance,
-    Skill,
-    FinalDamping,
-};
-
-const char* mode_name(RunMode mode)
-{
-    switch (mode) {
-    case RunMode::Passive:
-        return "PASSIVE";
-    case RunMode::Stand:
-        return "STAND";
-    case RunMode::Loco:
-        return "LOCO";
-    case RunMode::Dance:
-        return "DANCE";
-    case RunMode::Skill:
-        return "SKILL";
-    case RunMode::FinalDamping:
-        return "FINAL_DAMPING";
-    }
-    return "UNKNOWN";
-}
-
-ml::ControlMode control_mode_for(RunMode mode)
-{
-    switch (mode) {
-    case RunMode::Passive:
-        return ml::ControlMode::Passive;
-    case RunMode::Stand:
-        return ml::ControlMode::Stand;
-    case RunMode::Loco:
-        return ml::ControlMode::Loco;
-    case RunMode::Dance:
-        return ml::ControlMode::Dance;
-    case RunMode::Skill:
-        return ml::ControlMode::Skill;
-    case RunMode::FinalDamping:
-        return ml::ControlMode::FinalDamping;
-    }
-    return ml::ControlMode::Stand;
-}
-
-ml::ModeRequest mode_request_for(RunMode mode, const std::string& external_policy_key = {})
-{
-    return ml::mode_request_for_control_mode(control_mode_for(mode), external_policy_key);
-}
-
 bool dance_request_allowed(const Args& args, const char* prefix)
 {
     if (!args.allow_dance) {
@@ -1189,7 +1137,7 @@ int input_check_only(const Args& args)
     OperatorInput input(args, initial_cmd);
     std::cout << "[InputCheck] No robot connection. Press Esc/stop button or wait for duration." << std::endl;
 
-    RunMode mode = RunMode::Stand;
+    ml::ControlMode mode = ml::ControlMode::Stand;
     const auto start = std::chrono::steady_clock::now();
     auto last_log = start - std::chrono::seconds(60);
     while (g_running.load()) {
@@ -1201,28 +1149,28 @@ int input_check_only(const Args& args)
             break;
         }
         if (state.toggle_loco_requested) {
-            mode = mode == RunMode::Loco ? RunMode::Stand : RunMode::Loco;
+            mode = mode == ml::ControlMode::Loco ? ml::ControlMode::Stand : ml::ControlMode::Loco;
         }
         if (state.passive_requested) {
-            mode = RunMode::Passive;
+            mode = ml::ControlMode::Passive;
         }
         if (state.stand_requested || state.reset_stand_requested) {
-            mode = RunMode::Stand;
+            mode = ml::ControlMode::Stand;
         }
         if (state.loco_requested) {
-            mode = RunMode::Loco;
+            mode = ml::ControlMode::Loco;
         }
         if (state.dance_requested && dance_request_allowed(args, "[InputCheck]")) {
-            mode = RunMode::Dance;
+            mode = ml::ControlMode::Dance;
         }
         if (state.skill_requested && skill_request_allowed(args, "[InputCheck]")) {
-            mode = RunMode::Skill;
+            mode = ml::ControlMode::Skill;
         }
         if (state.final_damping_requested) {
-            mode = RunMode::FinalDamping;
+            mode = ml::ControlMode::FinalDamping;
         }
         if (state.changed || std::chrono::duration<double>(now - last_log).count() >= args.log_interval) {
-            std::cout << "[InputCheck] " << state.status << " mode=" << mode_name(mode)
+            std::cout << "[InputCheck] " << state.status << " mode=" << ml::control_mode_name(mode)
                       << " cmd=[" << state.command[0] << " " << state.command[1] << " " << state.command[2] << "]";
             if (state.zeroed_by_deadman) std::cout << " deadman=open";
             if (state.pause_zero) std::cout << " pause-zero";
@@ -1347,14 +1295,15 @@ int run_robot_with_finally(const Args& args, const ml::LocoConfig& cfg, ml::Cont
         } else {
             std::array<float, 3> raw_cmd{args.vx, args.vy, args.wz};
             OperatorInput operator_input(args, raw_cmd);
-            RunMode run_mode = operator_input.enabled() ? RunMode::Stand : RunMode::Loco;
+            ml::ControlMode run_mode =
+                operator_input.enabled() ? ml::ControlMode::Stand : ml::ControlMode::Loco;
             ml::MagicbotRealAdapter real_adapter(robot, state);
             ml::ControllerRuntime runtime(core, real_adapter);
             core.seed_target(command_target);
             core.reset_policy();
             std::string run_external_policy_key;
-            ml::ModeRequest pending_mode_request = mode_request_for(run_mode);
-            std::cout << "[Mode] Starting operator loop: mode=" << mode_name(run_mode)
+            ml::ModeRequest pending_mode_request = ml::mode_request_for_control_mode(run_mode);
+            std::cout << "[Mode] Starting operator loop: mode=" << ml::control_mode_name(run_mode)
                       << " command=[" << args.vx << " " << args.vy << " " << args.wz << "]" << std::endl;
             if (operator_input.enabled()) {
                 std::cout << "[Mode] Live input starts in STAND; request LOCO explicitly from keyboard/gamepad/udp"
@@ -1382,44 +1331,45 @@ int run_robot_with_finally(const Args& args, const ml::LocoConfig& cfg, ml::Cont
                         break;
                     }
                     raw_cmd = input.command;
-                    RunMode requested_mode = run_mode;
+                    ml::ControlMode requested_mode = run_mode;
                     bool mode_requested = false;
                     if (input.toggle_loco_requested) {
-                        requested_mode = run_mode == RunMode::Loco ? RunMode::Stand : RunMode::Loco;
+                        requested_mode =
+                            run_mode == ml::ControlMode::Loco ? ml::ControlMode::Stand : ml::ControlMode::Loco;
                         mode_requested = true;
                     }
                     if (input.passive_requested) {
-                        requested_mode = RunMode::Passive;
+                        requested_mode = ml::ControlMode::Passive;
                         mode_requested = true;
                     }
                     if (input.stand_requested) {
-                        requested_mode = RunMode::Stand;
+                        requested_mode = ml::ControlMode::Stand;
                         mode_requested = true;
                     }
                     if (input.loco_requested) {
-                        requested_mode = RunMode::Loco;
+                        requested_mode = ml::ControlMode::Loco;
                         mode_requested = true;
                     }
                     if (input.dance_requested) {
                         if (dance_request_allowed(args, "[Input]")) {
-                            requested_mode = RunMode::Dance;
+                            requested_mode = ml::ControlMode::Dance;
                             mode_requested = true;
                         }
                     }
                     if (input.skill_requested) {
                         if (skill_request_allowed(args, "[Input]")) {
-                            requested_mode = RunMode::Skill;
+                            requested_mode = ml::ControlMode::Skill;
                             mode_requested = true;
                         }
                     }
                     if (input.final_damping_requested) {
-                        requested_mode = RunMode::FinalDamping;
+                        requested_mode = ml::ControlMode::FinalDamping;
                         mode_requested = true;
                     }
                     if (input.reset_stand_requested) {
                         std::cout << "[Input] Re-stand requested" << std::endl;
                         raw_cmd = {0.0f, 0.0f, 0.0f};
-                        run_mode = RunMode::Stand;
+                        run_mode = ml::ControlMode::Stand;
                         run_external_policy_key.clear();
                         command_target = stand_interpolation(robot, state, cfg, args, rate_watchdog);
                         core.seed_target(command_target);
@@ -1435,13 +1385,14 @@ int run_robot_with_finally(const Args& args, const ml::LocoConfig& cfg, ml::Cont
                         requested_external_policy_key != run_external_policy_key;
                     if (mode_requested && (requested_mode != run_mode || external_key_changed)) {
                         run_mode = requested_mode;
-                        if (run_mode != RunMode::Loco) raw_cmd = {0.0f, 0.0f, 0.0f};
+                        if (run_mode != ml::ControlMode::Loco) raw_cmd = {0.0f, 0.0f, 0.0f};
                         run_external_policy_key = requested_external_policy_key;
-                        pending_mode_request = mode_request_for(run_mode, run_external_policy_key);
-                        std::cout << "[Input] Mode -> " << mode_name(run_mode) << std::endl;
+                        pending_mode_request =
+                            ml::mode_request_for_control_mode(run_mode, run_external_policy_key);
+                        std::cout << "[Input] Mode -> " << ml::control_mode_name(run_mode) << std::endl;
                     }
                     if (input.changed && std::chrono::duration<double>(now - last_log).count() < args.log_interval) {
-                        std::cout << "[Input] " << input.status << " mode=" << mode_name(run_mode)
+                        std::cout << "[Input] " << input.status << " mode=" << ml::control_mode_name(run_mode)
                                   << " cmd=[" << raw_cmd[0] << " " << raw_cmd[1] << " " << raw_cmd[2] << "]";
                         if (input.zeroed_by_deadman) std::cout << " deadman=open";
                         if (input.pause_zero) std::cout << " pause-zero";
