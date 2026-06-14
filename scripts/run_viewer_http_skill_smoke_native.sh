@@ -23,6 +23,7 @@ validates live /status and the summary JSON.
 
 Options:
   --duration S            Viewer wall-clock duration, default ${duration}
+  --runner P              Viewer runner, default ${RUNNER}
   --camera-port N         HTTP control port, default: choose a free local port
   --summary-json P        Summary JSON path, default: temp file under /tmp
   --track-mimic-yaml P    BeyondMimic trajectory YAML, default ${track_mimic_yaml}
@@ -35,6 +36,10 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --duration)
             duration="$2"
+            shift 2
+            ;;
+        --runner)
+            RUNNER="$2"
             shift 2
             ;;
         --camera-port)
@@ -124,7 +129,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-echo "[Smoke] Starting viewer HTTP SKILL smoke on 127.0.0.1:${camera_port}"
+echo "[Smoke] Starting viewer HTTP SKILL smoke via ${RUNNER} on 127.0.0.1:${camera_port}"
 "${RUNNER}" \
     --duration "${duration}" \
     --paused \

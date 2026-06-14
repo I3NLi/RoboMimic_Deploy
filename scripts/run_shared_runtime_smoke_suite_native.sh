@@ -200,6 +200,9 @@ if [[ "${RUN_PYTHON}" -eq 1 ]]; then
     run_step python3 -m py_compile "${PYTHON_VIEWER}"
     run_step "${SCRIPT_DIR}/run_viewer_http_control_smoke_native.sh" --runner "${PYTHON_VIEWER}" --duration 1.5
     run_step "${SCRIPT_DIR}/run_viewer_udp_control_smoke_native.sh" --runner "${PYTHON_VIEWER}" --duration 1.5
+    run_step "${SCRIPT_DIR}/run_viewer_http_dance_smoke_native.sh" --runner "${PYTHON_VIEWER}" --duration 0.8
+    run_step "${SCRIPT_DIR}/run_viewer_http_skill_smoke_native.sh" --runner "${PYTHON_VIEWER}" --duration 0.8
+    run_step "${SCRIPT_DIR}/run_viewer_udp_external_policy_smoke_native.sh" --runner "${PYTHON_VIEWER}" --duration 1.8
     run_step "${SCRIPT_DIR}/run_viewer_control_station_smoke_native.sh" --runner "${PYTHON_VIEWER}" --duration 1.4
     run_step "${SCRIPT_DIR}/run_viewer_http_perturb_smoke_native.sh" --runner "${PYTHON_VIEWER}" --duration 1.5
 fi

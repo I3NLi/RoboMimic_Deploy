@@ -495,6 +495,18 @@ active `external_policy == TrackMimic`,
 least one HTTP control command. This is an entry-path smoke, not a stability
 acceptance test.
 
+Python viewer HTTP external-policy smokes:
+
+```bash
+scripts/run_viewer_http_dance_smoke_native.sh \
+  --runner scripts/run_python_mujoco_viewer.py --duration 0.8 --keep-summary
+scripts/run_viewer_http_skill_smoke_native.sh \
+  --runner scripts/run_python_mujoco_viewer.py --duration 0.8 --keep-summary
+```
+
+These repeat direct `DANCE/BeyondMimic` and `SKILL/TrackMimic` trajectory
+entry-path checks through the Python-facing viewer launcher.
+
 Viewer UDP control smoke:
 
 ```bash
@@ -529,6 +541,16 @@ text controls for `mode=beyond` and `mode=track_mimic`, checks live `/status`
 for `DANCE/BeyondMimic` and `SKILL/TrackMimic` trajectory, then checks the summary for a
 final `SKILL` state with active `external_policy == TrackMimic`,
 `adapter_backend == mujoco-sim`, and `adapter_command_published == true`.
+
+Python viewer UDP external-policy smoke:
+
+```bash
+scripts/run_viewer_udp_external_policy_smoke_native.sh \
+  --runner scripts/run_python_mujoco_viewer.py --duration 1.8 --keep-summary
+```
+
+This repeats the UDP `DANCE/BeyondMimic` and `SKILL/TrackMimic` trajectory
+checks through the Python-facing viewer launcher.
 
 Viewer control-station preset smoke:
 
