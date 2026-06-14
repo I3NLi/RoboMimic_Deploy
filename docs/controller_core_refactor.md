@@ -284,6 +284,11 @@ Real-runner UDP input smoke (no robot connection):
 scripts/run_magicbot_loco_input_check_smoke_native.sh
 ```
 
+This sends UDP text-control packets through `--input-check`, verifies LOCO,
+PASSIVE, and FINAL_DAMPING are observed, verifies DANCE/SKILL stay gated by
+default, and guards keyboard/gamepad/UDP absolute mode inputs against bypassing
+the shared text-control action helpers.
+
 Real-runner safety-gate smoke (no robot connection):
 
 ```bash

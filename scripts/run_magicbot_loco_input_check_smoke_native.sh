@@ -4,6 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 PROJECT_ROOT="$( cd "${SCRIPT_DIR}/.." &> /dev/null && pwd )"
 RUNNER="${SCRIPT_DIR}/run_magicbot_loco_native.sh"
+RUNNER_SOURCE="${PROJECT_ROOT}/controller_cpp/src/magicbot_z1_loco_onnx.cpp"
 
 duration="2.2"
 udp_port=""
@@ -64,6 +65,12 @@ for tool in python3 ss rg; do
         exit 1
     fi
 done
+
+echo "[Smoke] Checking real input mode requests use shared text actions"
+if rg -n 'set_live_input_mode_request\(out, ml::mode_request_for_control_mode' "${RUNNER_SOURCE}"; then
+    echo "[Smoke][ERROR] real input mode requests must go through text_control_action_effect helpers" >&2
+    exit 1
+fi
 
 if [[ -z "${udp_port}" ]]; then
     udp_port="$(python3 - <<'PY'
