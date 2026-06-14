@@ -432,10 +432,11 @@ scripts/run_dual_push_smoke_native.sh --duration 1.0 --keep-summary
 This wraps the native dual-rate runner in pure-sim mode, applies both a
 scheduled force and an impulse to `pelvis`, and checks the summary for
 `pass == true`, advancing sim/control steps, configured force/impulse vectors
-and timing, non-zero `push_force_steps`, and `push_impulse_applied == true`. It
-also guards the validation tool against direct MuJoCo `data->ctrl` writes
-outside `MujocoSimAdapter`, and against duplicating policy inference, motion
-safety, or target limiting outside `ControllerCore`. It also guards that
+and timing, resolved push body metadata, non-zero `push_force_steps`, and
+`push_impulse_applied == true`. It also guards the validation tool against
+direct MuJoCo `data->ctrl` writes outside `MujocoSimAdapter`, and against
+duplicating policy inference, motion safety, or target limiting outside
+`ControllerCore`. It also guards that
 `run_dual_inference_rate_native.sh`
 rebuilds when shared controller headers or target source files change, even when
 `DUAL_RATE_SKIP_BUILD=1` is set.

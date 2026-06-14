@@ -177,6 +177,8 @@ struct Summary {
     double max_root_xy_drift{0.0};
     double max_policy_target_jump{0.0};
     std::string push_body;
+    int push_body_id{-1};
+    std::string push_body_resolved;
     bool push_enabled{false};
     double push_start_s{0.0};
     double push_duration_s{0.0};
@@ -522,6 +524,13 @@ std::vector<int> resolve_contact_geom_ids(const mjModel* model, const std::vecto
     return geom_ids;
 }
 
+std::string body_name(const mjModel* model, int body_id)
+{
+    if (body_id < 0) return {};
+    const char* raw = mj_id2name(model, mjOBJ_BODY, body_id);
+    return raw ? std::string(raw) : std::string();
+}
+
 double correct_ground_penetration(
     mjModel* model,
     mjData* data,
@@ -704,6 +713,8 @@ std::string summary_json(const Summary& s)
         << "\"max_root_xy_drift\":" << s.max_root_xy_drift << ","
         << "\"max_policy_target_jump\":" << s.max_policy_target_jump << ","
         << "\"push_body\":\"" << json_escape(s.push_body) << "\","
+        << "\"push_body_id\":" << s.push_body_id << ","
+        << "\"push_body_resolved\":\"" << json_escape(s.push_body_resolved) << "\","
         << "\"push_enabled\":" << (s.push_enabled ? "true" : "false") << ","
         << "\"push_start_s\":" << s.push_start_s << ","
         << "\"push_duration_s\":" << s.push_duration_s << ","
@@ -1055,6 +1066,8 @@ Summary run_rate_loop(
     s.max_root_xy_drift = max_root_xy_drift;
     s.max_policy_target_jump = max_policy_target_jump;
     s.push_body = args.push_body;
+    s.push_body_id = sim.push_body_id;
+    s.push_body_resolved = body_name(sim.model, sim.push_body_id);
     s.push_enabled = has_vec3(args.push_force) || has_vec3(args.push_impulse);
     s.push_start_s = args.push_start_s;
     s.push_duration_s = args.push_duration_s;

@@ -225,12 +225,16 @@ if ! jq -e '.push_force_norm > 0 and .push_impulse_norm > 0' "${summary_json}" >
     exit 1
 fi
 if ! jq -e \
+    --arg expected_body "${push_body}" \
     --argjson expected_force "${expected_force_json}" \
     --argjson expected_impulse "${expected_impulse_json}" \
     --argjson expected_start "${push_start}" \
     --argjson expected_duration "${push_duration}" \
     --argjson expected_impulse_time "${push_impulse_time}" \
-    '.push_force == $expected_force
+    '.push_body == $expected_body
+     and .push_body_id >= 0
+     and .push_body_resolved == $expected_body
+     and .push_force == $expected_force
      and .push_impulse == $expected_impulse
      and .push_start_s == $expected_start
      and .push_duration_s == $expected_duration
@@ -243,4 +247,4 @@ fi
 
 echo "[Smoke] PASSED dual-rate scheduled push"
 echo "[Smoke] summary=${summary_json}"
-jq '{pass, sim_steps, control_steps, push_body, push_enabled, push_force, push_impulse, push_start_s, push_duration_s, push_impulse_time_s, push_force_steps, push_impulse_applied, push_force_norm, push_impulse_norm}' "${summary_json}"
+jq '{pass, sim_steps, control_steps, push_body, push_body_id, push_body_resolved, push_enabled, push_force, push_impulse, push_start_s, push_duration_s, push_impulse_time_s, push_force_steps, push_impulse_applied, push_force_norm, push_impulse_norm}' "${summary_json}"
