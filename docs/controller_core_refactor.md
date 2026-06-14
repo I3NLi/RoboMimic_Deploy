@@ -316,6 +316,17 @@ HTTP 400, checks live `/status` for `mode == FINAL_DAMPING`, `paused == false`,
 `http_reset_requests >= 1`, published adapter commands, and advancing
 `sim_steps`.
 
+Python viewer HTTP control smoke:
+
+```bash
+scripts/run_viewer_http_control_smoke_native.sh \
+  --runner scripts/run_python_mujoco_viewer.py --duration 1.5 --keep-summary
+```
+
+This repeats the reset, `passive -> stand -> loco -> pause -> resume ->
+final_damping`, invalid-mode, `/status`, and summary assertions through the
+Python-facing viewer entrypoint.
+
 Viewer HTTP SKILL / TrackMimic smoke:
 
 ```bash
@@ -341,6 +352,17 @@ The script sends viewer UDP text-control packets for
 summary for `mode == FINAL_DAMPING`, `paused == false`,
 `adapter_backend == mujoco-sim`, `adapter_command_published == true`, and
 advancing `sim_steps`.
+
+Python viewer UDP control smoke:
+
+```bash
+scripts/run_viewer_udp_control_smoke_native.sh \
+  --runner scripts/run_python_mujoco_viewer.py --duration 1.5 --keep-summary
+```
+
+This sends the same UDP text-control sequence through the Python-facing viewer
+launcher, verifying that the compatibility command still reaches the shared
+viewer UDP parser and shared runtime.
 
 Viewer UDP external-policy smoke:
 

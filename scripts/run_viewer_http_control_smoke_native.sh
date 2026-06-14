@@ -13,14 +13,15 @@ extra_args=()
 
 usage() {
     cat <<EOF
-Usage: $0 [options] [-- extra mujoco_loco_viewer args]
+Usage: $0 [options] [-- extra viewer runner args]
 
-Smoke-test the MuJoCo viewer HTTP control API. The script starts the native
-viewer with camera/control streaming, posts reset and mode/velocity commands,
+Smoke-test the MuJoCo viewer HTTP control API. The script starts the viewer
+runner with camera/control streaming, posts reset and mode/velocity commands,
 then validates the JSON summary.
 
 Options:
   --duration S       Viewer wall-clock duration, default ${duration}
+  --runner P         Viewer runner, default ${RUNNER}
   --camera-port N    HTTP control port, default: choose a free local port
   --summary-json P   Summary JSON path, default: temp file under /tmp
   --keep-summary     Keep the temp summary path printed at the end
@@ -32,6 +33,10 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --duration)
             duration="$2"
+            shift 2
+            ;;
+        --runner)
+            RUNNER="$2"
             shift 2
             ;;
         --camera-port)
@@ -101,7 +106,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-echo "[Smoke] Starting viewer HTTP control smoke on 127.0.0.1:${camera_port}"
+echo "[Smoke] Starting viewer HTTP control smoke via ${RUNNER} on 127.0.0.1:${camera_port}"
 "${RUNNER}" \
     --duration "${duration}" \
     --paused \
