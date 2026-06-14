@@ -295,9 +295,9 @@ This covers mode aliases, velocity tokens, shared action effects, and their
 conversion into `ModeRequest` objects for LOCO/STAND/PASSIVE/DANCE/SKILL and
 FINAL_DAMPING. It also verifies the shared UI/input intent semantics for
 zero-command, pause/resume, stop, reset-stand, final damping, DANCE/BeyondMimic,
-SKILL/TrackMimic, and shared walk/run-forward velocity presets so entrypoints
-can reuse one action interpretation instead of each keeping local command/mode
-mutations.
+SKILL/TrackMimic, shared walk/run-forward velocity presets, and shared non-LOCO
+command sanitizing so entrypoints can reuse one action interpretation instead of
+each keeping local command/mode mutations.
 
 Shared mode transition check:
 
@@ -472,14 +472,15 @@ scripts/run_viewer_http_control_smoke_native.sh --duration 1.5 --keep-summary
 ```
 
 The script starts the viewer HTTP server, posts reset plus
-`passive -> stand -> walk -> run_forward -> loco -> reset -> pause -> resume -> final_damping`,
+`passive -> stand -> stand velocity-only -> walk -> run_forward -> loco -> reset -> pause -> resume -> final_damping`,
 verifies an invalid mode returns
 HTTP 400, checks live `/status` for `mode == FINAL_DAMPING`, `paused == false`,
 `adapter_backend == mujoco-sim`, `adapter_command_published == true`, and
-`http_control_commands >= 9`, then checks the summary for
-`mode == FINAL_DAMPING`, `http_control_commands >= 9`,
+`http_control_commands >= 10`, then checks the summary for
+`mode == FINAL_DAMPING`, `http_control_commands >= 10`,
 `http_reset_requests >= 1`, published adapter commands, and advancing
-`sim_steps`. The live `/status` checks also verify the shared walk and
+`sim_steps`. The live `/status` checks also verify a velocity-only request while
+still in STAND is sanitized back to zero, and that the shared walk and
 run-forward presets publish the expected LOCO command vectors before the final
 damping sequence. With the default duration it also checks periodic viewer stdout for
 `mode=FINAL_DAMPING`, covering the display/log path that reports

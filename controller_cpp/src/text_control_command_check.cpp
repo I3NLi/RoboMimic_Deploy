@@ -321,6 +321,34 @@ void check_intent_application()
     require(intent.desired_mode == before_disabled.desired_mode, "disabled skill should not change mode");
 }
 
+void check_command_sanitizer()
+{
+    const std::array<float, 3> command{0.4f, -0.2f, 0.1f};
+    require(
+        ml::command_for_control_mode(command, ml::ControlMode::Loco) == command,
+        "LOCO command sanitizer should preserve command");
+    require(
+        ml::command_for_control_mode(command, ml::ControlMode::Stand) ==
+            std::array<float, 3>{0.0f, 0.0f, 0.0f},
+        "STAND command sanitizer should zero command");
+    require(
+        ml::command_for_control_mode(command, ml::ControlMode::Passive) ==
+            std::array<float, 3>{0.0f, 0.0f, 0.0f},
+        "PASSIVE command sanitizer should zero command");
+    require(
+        ml::command_for_control_mode(command, ml::ControlMode::Dance) ==
+            std::array<float, 3>{0.0f, 0.0f, 0.0f},
+        "DANCE command sanitizer should zero command");
+    require(
+        ml::command_for_control_mode(command, ml::ControlMode::Skill) ==
+            std::array<float, 3>{0.0f, 0.0f, 0.0f},
+        "SKILL command sanitizer should zero command");
+    require(
+        ml::command_for_control_mode(command, ml::ControlMode::FinalDamping) ==
+            std::array<float, 3>{0.0f, 0.0f, 0.0f},
+        "FINAL_DAMPING command sanitizer should zero command");
+}
+
 }  // namespace
 
 int main()
@@ -333,6 +361,7 @@ int main()
         check_invalid_tokens_are_ignored();
         check_action_effects();
         check_intent_application();
+        check_command_sanitizer();
     } catch (const std::exception& error) {
         std::cerr << "[text_control_command_check][FAIL] " << error.what() << "\n";
         return 1;

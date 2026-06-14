@@ -100,8 +100,8 @@ for forbidden in (
 if re.search(r"out\\.mode_request\\s*=", body):
     print("[Smoke][ERROR] real gamepad must not set mode_request directly", file=sys.stderr)
     sys.exit(1)
-if "command_for_live_mode" not in source:
-    print("[Smoke][ERROR] real runner must sanitize live commands by current mode", file=sys.stderr)
+if "command_for_control_mode" not in source:
+    print("[Smoke][ERROR] real runner must sanitize live commands by current mode through the shared helper", file=sys.stderr)
     sys.exit(1)
 PY
 

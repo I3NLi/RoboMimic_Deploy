@@ -2724,6 +2724,7 @@ int main(int argc, char** argv)
                     reset_requested)) {
                 print_cmd(cmd, desired_mode, paused);
             }
+            cmd = magicbot_loco::command_for_control_mode(cmd, desired_mode);
             if (!running) break;
 
             if (reset_requested) {
@@ -2744,7 +2745,7 @@ int main(int argc, char** argv)
             if (!paused) {
                 for (int i = 0; i < steps_per_frame; ++i) {
                     magicbot_loco::RuntimeTickInput tick_input;
-                    tick_input.command.velocity = cmd;
+                    tick_input.command.velocity = magicbot_loco::command_for_control_mode(cmd, desired_mode);
                     tick_input.mode_request = magicbot_loco::mode_request_for_desired_control_mode(
                         desired_mode,
                         desired_external_policy_key,

@@ -132,6 +132,9 @@ if re.search(r"(desired_mode\s*=(?!=)|desired_external_policy_key\.clear\(\))", 
 if "apply_text_control_action_to_intent" not in source:
     print("[Smoke][ERROR] viewer text actions must apply through the shared text-control intent helper", file=sys.stderr)
     sys.exit(1)
+if "command_for_control_mode" not in source:
+    print("[Smoke][ERROR] viewer must sanitize non-LOCO commands through the shared command helper", file=sys.stderr)
+    sys.exit(1)
 for local_helper in ("mode_request_for_loco_toggle", "mode_request_for_text_control_effect"):
     if local_helper in source:
         print(
@@ -235,6 +238,24 @@ post_status() {
 post_ok "${reset_url}" "reset"
 post_ok "${control_url}?mode=passive" "passive"
 post_ok "${control_url}?mode=stand" "stand"
+post_ok "${control_url}?vx=0.40&vy=-0.20&wz=0.10" "stand velocity should sanitize"
+
+stand_zero_ready=0
+for _ in $(seq 1 40); do
+    if curl -sf "${status_url}" -o "${status_body}" &&
+       jq -e '.mode == "STAND" and .paused == false and .cmd[0] == 0 and .cmd[1] == 0 and .cmd[2] == 0 and .adapter_backend == "mujoco-sim" and .adapter_command_published == true' "${status_body}" >/dev/null; then
+        stand_zero_ready=1
+        break
+    fi
+    sleep 0.1
+done
+
+if [[ "${stand_zero_ready}" -ne 1 ]]; then
+    echo "[Smoke][ERROR] viewer /status did not sanitize STAND velocity-only command" >&2
+    cat "${status_body}" >&2 || true
+    exit 1
+fi
+
 post_ok "${control_url}?mode=walk" "walk preset"
 
 walk_ready=0
@@ -280,7 +301,7 @@ post_ok "${control_url}?mode=final_damping" "final_damping"
 status_ready=0
 for _ in $(seq 1 40); do
     if curl -sf "${status_url}" -o "${status_body}" &&
-       jq -e '.mode == "FINAL_DAMPING" and .paused == false and .adapter_backend == "mujoco-sim" and .adapter_command_published == true and .http_control_commands >= 9 and .sim_steps > 0 and (.cmd | length) == 3' "${status_body}" >/dev/null; then
+       jq -e '.mode == "FINAL_DAMPING" and .paused == false and .adapter_backend == "mujoco-sim" and .adapter_command_published == true and .http_control_commands >= 10 and .sim_steps > 0 and (.cmd | length) == 3' "${status_body}" >/dev/null; then
         status_ready=1
         break
     fi
@@ -325,8 +346,8 @@ if [[ "${mode}" != "FINAL_DAMPING" ]]; then
     cat "${summary_json}" >&2
     exit 1
 fi
-if [[ "${http_control_commands}" -lt 9 ]]; then
-    echo "[Smoke][ERROR] expected at least 9 HTTP control commands, got ${http_control_commands}" >&2
+if [[ "${http_control_commands}" -lt 10 ]]; then
+    echo "[Smoke][ERROR] expected at least 10 HTTP control commands, got ${http_control_commands}" >&2
     cat "${summary_json}" >&2
     exit 1
 fi

@@ -490,14 +490,6 @@ bool live_input_requested_mode(const LiveInputState& input, ml::ControlMode mode
     return input.mode_request.requested && input.mode_request.mode == mode;
 }
 
-std::array<float, 3> command_for_live_mode(std::array<float, 3> command, ml::ControlMode mode)
-{
-    if (mode != ml::ControlMode::Loco) {
-        return {0.0f, 0.0f, 0.0f};
-    }
-    return command;
-}
-
 bool dance_request_allowed(const Args& args, const char* prefix)
 {
     if (!args.allow_dance) {
@@ -1204,7 +1196,7 @@ int input_check_only(const Args& args)
             }
         }
         if (state.changed || std::chrono::duration<double>(now - last_log).count() >= args.log_interval) {
-            const std::array<float, 3> display_cmd = command_for_live_mode(state.command, mode);
+            const std::array<float, 3> display_cmd = ml::command_for_control_mode(state.command, mode);
             std::cout << "[InputCheck] " << state.status << " mode=" << ml::control_mode_name(mode)
                       << " cmd=[" << display_cmd[0] << " " << display_cmd[1] << " " << display_cmd[2] << "]";
             if (state.zeroed_by_deadman) std::cout << " deadman=open";
@@ -1413,7 +1405,7 @@ int run_robot_with_finally(const Args& args, const ml::LocoConfig& cfg, ml::Cont
                         pending_mode_request = requested_mode_change;
                         std::cout << "[Input] Mode -> " << ml::control_mode_name(run_mode) << std::endl;
                     }
-                    raw_cmd = command_for_live_mode(raw_cmd, run_mode);
+                    raw_cmd = ml::command_for_control_mode(raw_cmd, run_mode);
                     if (input.changed && std::chrono::duration<double>(now - last_log).count() < args.log_interval) {
                         std::cout << "[Input] " << input.status << " mode=" << ml::control_mode_name(run_mode)
                                   << " cmd=[" << raw_cmd[0] << " " << raw_cmd[1] << " " << raw_cmd[2] << "]";

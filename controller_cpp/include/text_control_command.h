@@ -62,6 +62,14 @@ struct TextControlIntentOptions {
 inline constexpr float kTextControlWalkVx = 0.25f;
 inline constexpr float kTextControlRunVx = 0.65f;
 
+inline std::array<float, 3> command_for_control_mode(std::array<float, 3> command, ControlMode mode)
+{
+    if (mode != ControlMode::Loco) {
+        return {0.0f, 0.0f, 0.0f};
+    }
+    return command;
+}
+
 enum class TextControlIntentRejectReason {
     None,
     DanceDisabled,
