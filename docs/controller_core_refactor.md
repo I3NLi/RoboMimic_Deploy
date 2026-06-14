@@ -328,8 +328,9 @@ scripts/run_viewer_udp_control_smoke_native.sh --duration 1.5 --keep-summary
 
 The script sends viewer UDP text-control packets for
 `loco -> pause -> resume -> passive -> stand -> final_damping`, then checks the
-summary for `mode == FINAL_DAMPING`, `paused == false`, and advancing
-`sim_steps`.
+summary for `mode == FINAL_DAMPING`, `paused == false`,
+`adapter_backend == mujoco-sim`, `adapter_command_published == true`, and
+advancing `sim_steps`.
 
 Viewer UDP external-policy smoke:
 
