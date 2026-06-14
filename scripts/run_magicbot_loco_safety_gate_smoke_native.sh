@@ -150,7 +150,34 @@ def function_extent(name):
     print(f"[Smoke][ERROR] could not parse {name}", file=sys.stderr)
     sys.exit(1)
 
+def require_allow_gate(body, state_name, prefix, label):
+    dance_pattern = (
+        rf"if \({state_name}\.mode_request\.mode == ml::ControlMode::Dance\) \{{\s*"
+        rf"allowed = dance_request_allowed\(args, \"{re.escape(prefix)}\"\);"
+    )
+    skill_pattern = (
+        rf"else if \({state_name}\.mode_request\.mode == ml::ControlMode::Skill\) \{{\s*"
+        rf"allowed = skill_request_allowed\(args, \"{re.escape(prefix)}\"\);"
+    )
+    allowed_pattern = (
+        rf"if \(allowed\) \{{\s*"
+        rf".*?= {state_name}\.mode_request\.mode;"
+    )
+    if not re.search(dance_pattern, body):
+        print(f"[Smoke][ERROR] {label} must gate DANCE through dance_request_allowed", file=sys.stderr)
+        sys.exit(1)
+    if not re.search(skill_pattern, body):
+        print(f"[Smoke][ERROR] {label} must gate SKILL through skill_request_allowed", file=sys.stderr)
+        sys.exit(1)
+    if not re.search(allowed_pattern, body, re.S):
+        print(f"[Smoke][ERROR] {label} must apply DANCE/SKILL mode requests only inside if (allowed)", file=sys.stderr)
+        sys.exit(1)
+
 body = function_extent("run_robot_with_finally")
+input_check_body = function_extent("input_check_only")
+require_allow_gate(input_check_body, "state", "[InputCheck]", "input-check path")
+require_allow_gate(body, "input", "[Input]", "real run input path")
+
 lambda_match = re.search(r"auto final_damping = \[&\]\(\).*?;\n\n    try", body, re.S)
 if not lambda_match:
     print("[Smoke][ERROR] could not locate final_damping lambda", file=sys.stderr)

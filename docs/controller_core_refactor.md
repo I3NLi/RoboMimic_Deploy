@@ -386,7 +386,10 @@ through `ControllerRuntime.write_damping()` before disconnect. It also guards
 that direct real-runner target limiting/writes remain confined to the staged
 stand-interpolation ramp; STAND hold and runtime execution must publish through
 `ControllerRuntime` / `ControllerCore`. It also guards that policy inference and
-motion safety are not run directly in the real-runner entrypoint. It also verifies
+motion safety are not run directly in the real-runner entrypoint. It also
+statically verifies that DANCE/SKILL requests in both no-robot input-check and
+the real run loop must pass through the explicit `--allow-dance` /
+`--allow-skill` gates before the requested mode is applied. It also verifies
 several no-robot CLI safety gates: only one main mode may be selected,
 `--input-check` requires an input source, and live keyboard/gamepad/UDP inputs
 remain mutually exclusive before any robot connection path starts.
