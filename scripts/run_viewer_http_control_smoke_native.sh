@@ -68,7 +68,7 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-for tool in curl jq python3; do
+for tool in curl jq python3 rg; do
     if ! command -v "${tool}" >/dev/null 2>&1; then
         echo "[Smoke][ERROR] required tool not found: ${tool}" >&2
         exit 1
@@ -243,6 +243,21 @@ if [[ "${adapter_command_published}" != "true" ]]; then
     echo "[Smoke][ERROR] expected adapter_command_published=true, got ${adapter_command_published}" >&2
     cat "${summary_json}" >&2
     exit 1
+fi
+if python3 - <<PY
+import sys
+try:
+    duration = float("${duration}")
+except ValueError:
+    sys.exit(1)
+sys.exit(0 if duration >= 1.1 else 1)
+PY
+then
+    if ! rg -q '\[Viewer\].*mode=FINAL_DAMPING' "${viewer_log}"; then
+        echo "[Smoke][ERROR] viewer stdout did not report core mode FINAL_DAMPING" >&2
+        sed -n '1,220p' "${viewer_log}" >&2
+        exit 1
+    fi
 fi
 
 echo "[Smoke] PASSED viewer HTTP control API"

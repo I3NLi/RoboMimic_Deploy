@@ -329,7 +329,9 @@ HTTP 400, checks live `/status` for `mode == FINAL_DAMPING`, `paused == false`,
 `http_control_commands >= 6`, then checks the summary for
 `mode == FINAL_DAMPING`, `http_control_commands >= 6`,
 `http_reset_requests >= 1`, published adapter commands, and advancing
-`sim_steps`.
+`sim_steps`. With the default duration it also checks periodic viewer stdout for
+`mode=FINAL_DAMPING`, covering the display/log path that reports
+`ControllerCore` telemetry.
 
 Python viewer HTTP control smoke:
 
