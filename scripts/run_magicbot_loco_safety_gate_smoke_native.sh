@@ -38,7 +38,7 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-for tool in rg; do
+for tool in python3 rg; do
     if ! command -v "${tool}" >/dev/null 2>&1; then
         echo "[Smoke][ERROR] required tool not found: ${tool}" >&2
         exit 1
@@ -50,6 +50,59 @@ if rg -n 'publish_(sdk24_command|damping)\(' "${RUNNER_SOURCE}"; then
     echo "[Smoke][ERROR] magicbot_z1_loco_onnx.cpp must not publish robot commands directly; use MagicbotRealAdapter" >&2
     exit 1
 fi
+
+echo "[Smoke] Checking safety-wall final damping path"
+python3 - "${RUNNER_SOURCE}" <<'PY'
+import re
+import sys
+
+source = open(sys.argv[1], encoding="utf-8").read()
+
+def function_extent(name):
+    marker = f"int {name}"
+    start = source.find(marker)
+    if start < 0:
+        print(f"[Smoke][ERROR] could not locate {name}", file=sys.stderr)
+        sys.exit(1)
+    brace = source.find("{", start)
+    depth = 0
+    for index in range(brace, len(source)):
+        if source[index] == "{":
+            depth += 1
+        elif source[index] == "}":
+            depth -= 1
+            if depth == 0:
+                return source[start : index + 1]
+    print(f"[Smoke][ERROR] could not parse {name}", file=sys.stderr)
+    sys.exit(1)
+
+body = function_extent("run_robot_with_finally")
+lambda_match = re.search(r"auto final_damping = \[&\]\(\).*?;\n\n    try", body, re.S)
+if not lambda_match:
+    print("[Smoke][ERROR] could not locate final_damping lambda", file=sys.stderr)
+    sys.exit(1)
+lambda_body = lambda_match.group(0)
+if "ControllerRuntime runtime(core, real_adapter)" not in lambda_body or "runtime.write_damping(args.damping_kd)" not in lambda_body:
+    print("[Smoke][ERROR] final damping must publish through ControllerRuntime.write_damping", file=sys.stderr)
+    sys.exit(1)
+if re.search(r"real_adapter\.write_damping|robot\.publish_damping|robot\.publish_sdk24_command", lambda_body):
+    print("[Smoke][ERROR] final damping must not bypass runtime/adapter boundary", file=sys.stderr)
+    sys.exit(1)
+
+catch_pos = body.find("} catch (const std::exception& exc)")
+if catch_pos < 0 or "[SafetyWall]" not in body[catch_pos:]:
+    print("[Smoke][ERROR] run_robot_with_finally must keep a SafetyWall catch", file=sys.stderr)
+    sys.exit(1)
+tail = body[catch_pos:]
+final_pos = tail.find("final_damping();")
+disconnect_pos = tail.find("robot.disconnect")
+if final_pos < 0:
+    print("[Smoke][ERROR] SafetyWall path must call final_damping()", file=sys.stderr)
+    sys.exit(1)
+if disconnect_pos < 0 or final_pos > disconnect_pos:
+    print("[Smoke][ERROR] final_damping() must run before robot.disconnect()", file=sys.stderr)
+    sys.exit(1)
+PY
 
 dry_log="$(mktemp /tmp/magicbot_loco_safety_dry_XXXXXX.log)"
 default_log="$(mktemp /tmp/magicbot_loco_safety_default_XXXXXX.log)"

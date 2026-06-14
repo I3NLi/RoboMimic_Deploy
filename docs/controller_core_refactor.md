@@ -330,10 +330,12 @@ blocked by the high-risk LOCO gate, but still stops at local-IP preflight before
 any SDK connection when the local IP is not assigned. It also checks that the
 real runner does not publish robot commands directly from the main entrypoint;
 SDK writes must stay behind `MagicbotRealAdapter`, independent of the local
-variable name used for the SDK object. It also verifies several no-robot CLI
-safety gates: only one main mode may be selected, `--input-check` requires an
-input source, and live keyboard/gamepad/UDP inputs remain mutually exclusive
-before any robot connection path starts.
+variable name used for the SDK object. A static safety-wall guard verifies that
+`run_robot_with_finally()` keeps its exception catch and publishes final damping
+through `ControllerRuntime.write_damping()` before disconnect. It also verifies
+several no-robot CLI safety gates: only one main mode may be selected,
+`--input-check` requires an input source, and live keyboard/gamepad/UDP inputs
+remain mutually exclusive before any robot connection path starts.
 
 Real-runner external-policy gate smoke (no robot connection):
 
