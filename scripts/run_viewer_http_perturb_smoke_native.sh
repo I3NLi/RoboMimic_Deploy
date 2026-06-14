@@ -12,14 +12,16 @@ extra_args=()
 
 usage() {
     cat <<EOF
-Usage: $0 [options] [-- extra mujoco_loco_viewer args]
+Usage: $0 [options] [-- extra viewer runner args]
 
 Smoke-test remote viewer perturb events over the HTTP control API. The script
-starts the native viewer with camera/control streaming, posts a drag gesture to
-/viewer-event, then validates that MuJoCo perturb forces were applied.
+starts the viewer runner with camera/control streaming, posts a drag gesture to
+/viewer-event, then validates that MuJoCo perturb forces were applied. Use
+--runner to cover compatibility launchers such as run_python_mujoco_viewer.py.
 
 Options:
   --duration S       Viewer wall-clock duration, default ${duration}
+  --runner P         Viewer runner, default ${RUNNER}
   --camera-port N    HTTP control port, default: choose a free local port
   --summary-json P   Summary JSON path, default: temp file under /tmp
   --keep-summary     Keep the temp summary path printed at the end
@@ -31,6 +33,10 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --duration)
             duration="$2"
+            shift 2
+            ;;
+        --runner)
+            RUNNER="$2"
             shift 2
             ;;
         --camera-port)
@@ -100,7 +106,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-echo "[Smoke] Starting viewer HTTP perturb smoke on 127.0.0.1:${camera_port}"
+echo "[Smoke] Starting viewer HTTP perturb smoke via ${RUNNER} on 127.0.0.1:${camera_port}"
 "${RUNNER}" \
     --duration "${duration}" \
     --unpaused \

@@ -388,6 +388,16 @@ keeps the drag active for a short wall-clock interval, and checks the summary
 for `mouse_perturb_steps > 0`, resolved perturb body metadata, and advancing
 `sim_steps`.
 
+Python viewer remote perturb smoke:
+
+```bash
+scripts/run_viewer_http_perturb_smoke_native.sh \
+  --runner scripts/run_python_mujoco_viewer.py --duration 1.5 --keep-summary
+```
+
+This runs the same HTTP drag/perturb assertions through the Python-facing viewer
+entrypoint, keeping the Python command aligned with the native shared runtime.
+
 ## Next cuts
 
 1. Register additional concrete BeyondMimic skill/trajectory variants through
