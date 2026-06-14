@@ -3,6 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 RUNNER="${SCRIPT_DIR}/run_magicbot_loco_native.sh"
+RUNNER_SOURCE="${SCRIPT_DIR}/../controller_cpp/src/magicbot_z1_loco_onnx.cpp"
 
 keep_log=0
 
@@ -40,6 +41,12 @@ for tool in rg; do
         exit 1
     fi
 done
+
+echo "[Smoke] Checking real runner writes through adapter boundary"
+if rg -n '\brobot\.publish_(sdk24_command|damping)\(' "${RUNNER_SOURCE}"; then
+    echo "[Smoke][ERROR] magicbot_z1_loco_onnx.cpp must not publish robot commands directly; use MagicbotRealAdapter" >&2
+    exit 1
+fi
 
 dry_log="$(mktemp /tmp/magicbot_loco_safety_dry_XXXXXX.log)"
 default_log="$(mktemp /tmp/magicbot_loco_safety_default_XXXXXX.log)"
