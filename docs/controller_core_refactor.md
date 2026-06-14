@@ -220,12 +220,13 @@ scripts/run_dual_inference_rate_native.sh --mode pure-sim --duration 1.0 \
 Disturbance closed-loop smoke:
 
 ```bash
-scripts/run_dual_inference_rate_native.sh --mode pure-sim --duration 1.0 \
-  --no-realtime --closed-loop-check \
-  --push-body pelvis --push-force 35,0,0 --push-start 0.30 \
-  --push-duration 0.12 --push-impulse 0,1.0,0 --push-impulse-time 0.55 \
-  --summary-json /tmp/dual_push_refactor_smoke.json
+scripts/run_dual_push_smoke_native.sh --duration 1.0 --keep-summary
 ```
+
+This wraps the native dual-rate runner in pure-sim mode, applies both a
+scheduled force and an impulse to `pelvis`, and checks the summary for
+`pass == true`, advancing sim/control steps, non-zero `push_force_steps`, and
+`push_impulse_applied == true`.
 
 Viewer disturbance smoke:
 
