@@ -146,6 +146,10 @@ parameters, for example `POST /control?mode=final_damping` or
 `POST /control?mode=loco&vx=0.2&wz=-0.1`; the main viewer loop consumes those
 requests, maps mode aliases through the same shared action parser used by UDP,
 and then still routes each tick through the shared runtime.
+The same HTTP server exposes `GET /status` for control-station telemetry:
+current mode, pause state, velocity command, sim/policy steps, base pose, queue
+depths, and disturbance/control counters. This is display/telemetry only; it
+does not move policy or safety logic out of `ControllerCore`.
 Both the viewer and real runner now build `ModeRequest` objects through the
 shared mode helper, including the default `DANCE -> BeyondMimic` external policy
 key, so entrypoints no longer duplicate that mapping. The dual-rate validation
@@ -240,9 +244,10 @@ scripts/run_viewer_http_control_smoke_native.sh --duration 1.5 --keep-summary
 
 The script starts the viewer HTTP server, posts reset plus
 `passive -> stand -> loco -> pause -> resume -> final_damping`, verifies an invalid mode returns
-HTTP 400, and checks the summary for `mode == FINAL_DAMPING`,
-`http_control_commands >= 6`, `http_reset_requests >= 1`, and advancing
-`sim_steps`.
+HTTP 400, checks live `/status` for `mode == FINAL_DAMPING`, `paused == false`,
+and `http_control_commands >= 6`, then checks the summary for
+`mode == FINAL_DAMPING`, `http_control_commands >= 6`,
+`http_reset_requests >= 1`, and advancing `sim_steps`.
 
 Viewer UDP control smoke:
 

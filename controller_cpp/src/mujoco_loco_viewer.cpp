@@ -189,9 +189,24 @@ struct CameraStreamState {
     std::vector<unsigned char> latest_png;
     std::vector<ViewerHttpEvent> viewer_events;
     std::vector<ViewerControlCommand> control_commands;
+    std::string mode{"STAND"};
+    std::array<float, 3> command{0.0f, 0.0f, 0.0f};
     double timestamp{0.0};
+    double sim_time_s{0.0};
+    double base_x{0.0};
+    double base_y{0.0};
+    double base_z{0.0};
     uint64_t seq{0};
+    int sim_steps{0};
+    int policy_steps{0};
+    int push_force_steps{0};
+    int mouse_perturb_steps{0};
+    int http_reset_requests{0};
+    int http_viewer_events{0};
+    int http_control_commands{0};
     bool reset_requested{false};
+    bool paused{true};
+    bool push_impulse_applied{false};
     bool running{true};
 };
 
@@ -232,6 +247,36 @@ public:
         state_->latest_png = std::move(png);
         state_->timestamp = timestamp;
         state_->seq++;
+    }
+
+    void update_status(
+        std::string mode,
+        bool paused,
+        const std::array<float, 3>& command,
+        int sim_steps,
+        int policy_steps,
+        double sim_time_s,
+        double base_x,
+        double base_y,
+        double base_z,
+        const ViewerStats& stats)
+    {
+        std::lock_guard<std::mutex> lock(state_->mutex);
+        state_->mode = std::move(mode);
+        state_->paused = paused;
+        state_->command = command;
+        state_->sim_steps = sim_steps;
+        state_->policy_steps = policy_steps;
+        state_->sim_time_s = sim_time_s;
+        state_->base_x = base_x;
+        state_->base_y = base_y;
+        state_->base_z = base_z;
+        state_->push_force_steps = stats.push_force_steps;
+        state_->push_impulse_applied = stats.push_impulse_applied;
+        state_->mouse_perturb_steps = stats.mouse_perturb_steps;
+        state_->http_reset_requests = stats.http_reset_requests;
+        state_->http_viewer_events = stats.http_viewer_events;
+        state_->http_control_commands = stats.http_control_commands;
     }
 
     bool take_reset_request()
@@ -473,6 +518,32 @@ private:
                                ",\"control_queue\":" + std::to_string(state->control_commands.size()) +
                                ",\"viewer_event_queue\":" + std::to_string(state->viewer_events.size()) + "}\n";
             send_text(fd, 200, "OK", body, "application/json");
+        } else if (path == "/status") {
+            std::lock_guard<std::mutex> lock(state->mutex);
+            std::ostringstream body;
+            body << std::fixed << std::setprecision(6)
+                 << "{"
+                 << "\"ok\":true,"
+                 << "\"seq\":" << state->seq << ","
+                 << "\"timestamp\":" << state->timestamp << ","
+                 << "\"mode\":\"" << state->mode << "\","
+                 << "\"paused\":" << (state->paused ? "true" : "false") << ","
+                 << "\"cmd\":[" << state->command[0] << "," << state->command[1] << "," << state->command[2] << "],"
+                 << "\"sim_time_s\":" << state->sim_time_s << ","
+                 << "\"sim_steps\":" << state->sim_steps << ","
+                 << "\"policy_steps\":" << state->policy_steps << ","
+                 << "\"base\":[" << state->base_x << "," << state->base_y << "," << state->base_z << "],"
+                 << "\"reset_pending\":" << (state->reset_requested ? "true" : "false") << ","
+                 << "\"control_queue\":" << state->control_commands.size() << ","
+                 << "\"viewer_event_queue\":" << state->viewer_events.size() << ","
+                 << "\"http_reset_requests\":" << state->http_reset_requests << ","
+                 << "\"http_viewer_events\":" << state->http_viewer_events << ","
+                 << "\"http_control_commands\":" << state->http_control_commands << ","
+                 << "\"push_force_steps\":" << state->push_force_steps << ","
+                 << "\"push_impulse_applied\":" << (state->push_impulse_applied ? "true" : "false") << ","
+                 << "\"mouse_perturb_steps\":" << state->mouse_perturb_steps
+                 << "}\n";
+            send_text(fd, 200, "OK", body.str(), "application/json");
         } else if (path == "/reset") {
             {
                 std::lock_guard<std::mutex> lock(state->mutex);
@@ -2402,6 +2473,20 @@ int main(int argc, char** argv)
                 cam.lookat[0] = data->qpos[0];
                 cam.lookat[1] = data->qpos[1];
                 cam.lookat[2] = std::max<mjtNum>(0.45, data->qpos[2]);
+            }
+
+            if (camera_server) {
+                camera_server->update_status(
+                    viewer_mode_label(loco_active, passive_active, dance_active, final_damping_active),
+                    paused,
+                    cmd,
+                    sim_step,
+                    policy_step,
+                    data->time,
+                    data->qpos[0],
+                    data->qpos[1],
+                    data->qpos[2],
+                    stats);
             }
 
             const auto now_before_render = Clock::now();

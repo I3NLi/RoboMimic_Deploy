@@ -117,6 +117,7 @@ echo "[Smoke] Starting viewer HTTP control smoke on 127.0.0.1:${camera_port}"
 viewer_pid=$!
 
 health_url="http://127.0.0.1:${camera_port}/health"
+status_url="http://127.0.0.1:${camera_port}/status"
 control_url="http://127.0.0.1:${camera_port}/control"
 reset_url="http://127.0.0.1:${camera_port}/reset"
 
@@ -164,6 +165,22 @@ post_ok "${control_url}?mode=loco&vx=0.15&vy=0.05&wz=-0.05" "loco"
 post_ok "${control_url}?pause=1" "pause"
 post_ok "${control_url}?pause=0" "resume"
 post_ok "${control_url}?mode=final_damping" "final_damping"
+
+status_ready=0
+for _ in $(seq 1 40); do
+    if curl -sf "${status_url}" -o "${status_body}" &&
+       jq -e '.mode == "FINAL_DAMPING" and .paused == false and .http_control_commands >= 6 and .sim_steps > 0 and (.cmd | length) == 3' "${status_body}" >/dev/null; then
+        status_ready=1
+        break
+    fi
+    sleep 0.1
+done
+
+if [[ "${status_ready}" -ne 1 ]]; then
+    echo "[Smoke][ERROR] viewer /status did not report final control state" >&2
+    cat "${status_body}" >&2 || true
+    exit 1
+fi
 
 invalid_status="$(post_status "${control_url}?mode=teleport")"
 if [[ "${invalid_status}" != "400" ]]; then
