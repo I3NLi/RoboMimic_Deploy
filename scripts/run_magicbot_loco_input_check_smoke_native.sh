@@ -15,8 +15,9 @@ usage() {
 Usage: $0 [options] [-- extra magicbot_z1_loco_onnx args]
 
 Smoke-test the real runner input path without connecting to a robot. The script
-starts magicbot_z1_loco_onnx in --input-check mode, sends UDP text controls, and
-asserts that LOCO, PASSIVE, and FINAL_DAMPING are observed.
+starts magicbot_z1_loco_onnx in --input-check mode, sends UDP text controls,
+asserts that LOCO, PASSIVE, and FINAL_DAMPING are observed, and verifies DANCE is
+blocked by default unless the real runner is started with the explicit gate.
 
 Options:
   --duration S    Input-check duration, default ${duration}
@@ -127,6 +128,7 @@ import time
 port = int("${udp_port}")
 packets = [
     b"vx=0.25 vy=-0.10 wz=0.05 mode=loco",
+    b"mode=beyond",
     b"mode=passive",
     b"mode=final_damping",
 ]
@@ -152,8 +154,19 @@ for expected in 'mode=LOCO' 'mode=PASSIVE' 'mode=FINAL_DAMPING'; do
     fi
 done
 
+if ! rg -q 'DANCE ignored; add --allow-dance' "${log_path}"; then
+    echo "[Smoke][ERROR] expected DANCE request to be blocked without --allow-dance" >&2
+    sed -n '1,220p' "${log_path}" >&2
+    exit 1
+fi
+if rg -q 'mode=DANCE' "${log_path}"; then
+    echo "[Smoke][ERROR] DANCE mode was entered without --allow-dance" >&2
+    sed -n '1,220p' "${log_path}" >&2
+    exit 1
+fi
+
 echo "[Smoke] PASSED real-runner UDP input-check"
 if [[ "${keep_log}" -eq 1 ]]; then
     echo "[Smoke] log=${log_path}"
 fi
-rg 'mode=(LOCO|PASSIVE|FINAL_DAMPING)' "${log_path}"
+rg 'mode=(LOCO|PASSIVE|FINAL_DAMPING)|DANCE ignored' "${log_path}"

@@ -102,10 +102,12 @@ a second place for policy, mode, or safety logic.
 through `ControllerRuntime` and `MagicbotRealAdapter`. The existing staged safety
 flow is preserved: dry-run, connect-check, read-state, debug/passive damping,
 stand interpolation, and PD stand-only remain outside high-risk LOCO execution.
-LOCO still requires the explicit `--allow-loco` gate. When `--beyond-yaml PATH`
-is supplied, the runner registers BeyondMimic as the keyed shared `DANCE`
-external policy and accepts `mode=beyond` / `mode=dance` from UDP, `B` from
-keyboard input, or an explicitly configured gamepad dance button.
+LOCO still requires the explicit `--allow-loco` gate; real-runner DANCE requests
+are ignored unless `--allow-dance` is also set with `--beyond-yaml PATH`. When
+`--beyond-yaml PATH` is supplied, the runner registers BeyondMimic as the keyed
+shared `DANCE` external policy and accepts gated `mode=beyond` / `mode=dance`
+from UDP, `B` from keyboard input, or an explicitly configured gamepad dance
+button.
 The same UDP input now accepts `mode=passive` / `mode=damping` for shared
 `PASSIVE` and `mode=final`, `mode=finaldamping`, or `mode=final_damping` for
 shared `FINAL_DAMPING`; both clear velocity commands and route through
@@ -145,9 +147,9 @@ and `FINAL_DAMPING`. `DANCE` and `SKILL` are represented in the shared mode enum
 and intentionally reject requests until a matching external policy adapter is
 registered.
 
-This keeps the real-robot safety ladder intact: high-risk LOCO still requires
-the existing CLI `--allow-loco` gate, and adapters remain responsible only for
-state/command I/O.
+This keeps the real-robot safety ladder intact: high-risk LOCO and DANCE require
+the existing CLI `--allow-loco` and `--allow-dance` gates, and adapters remain
+responsible only for state/command I/O.
 
 ## Validation commands
 

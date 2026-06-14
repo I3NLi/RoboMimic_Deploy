@@ -72,6 +72,7 @@ struct Args {
     float vy{0.0f};
     float wz{0.0f};
     bool allow_loco{false};
+    bool allow_dance{false};
     bool keyboard_control{false};
     bool gamepad_control{false};
     bool udp_control{false};
@@ -134,6 +135,7 @@ void print_usage(const char* argv0)
         << "  --input-check                    Read keyboard/gamepad input only, no robot connection\n"
         << "  --pd-stand-only                  With --run, hold default PD stand and never run ONNX\n"
         << "  --allow-loco                     Required before ONNX loco is allowed\n"
+        << "  --allow-dance                    Required before DANCE/BeyondMimic is allowed on real robot\n"
         << "\n"
         << "Motion:\n"
         << "  --vx V --vy V --wz V             Normalized command inputs; YAML cmd_range maps physical speed\n"
@@ -242,6 +244,8 @@ Args parse_args(int argc, char** argv)
             args.wz = std::stof(take_value(i, argc, argv));
         } else if (a == "--allow-loco") {
             args.allow_loco = true;
+        } else if (a == "--allow-dance") {
+            args.allow_dance = true;
         } else if (a == "--keyboard-control") {
             args.keyboard_control = true;
         } else if (a == "--gamepad-control") {
@@ -481,6 +485,22 @@ ml::ModeRequest mode_request_for(RunMode mode)
         return ml::ModeRequest::enter_external(control_mode, "BeyondMimic");
     }
     return ml::ModeRequest::enter(control_mode);
+}
+
+bool dance_request_allowed(const Args& args, const char* prefix)
+{
+    if (!args.allow_dance) {
+        std::cout << prefix
+                  << " DANCE ignored; add --allow-dance together with --beyond-yaml PATH to enable BeyondMimic"
+                  << std::endl;
+        return false;
+    }
+    if (args.beyond_yaml.empty()) {
+        std::cout << prefix << " DANCE ignored; start with --beyond-yaml PATH to enable BeyondMimic"
+                  << std::endl;
+        return false;
+    }
+    return true;
 }
 
 ml::ControlMode control_mode_for_fsm_state(FSMStateName state)
@@ -1151,7 +1171,7 @@ int input_check_only(const Args& args)
         if (state.loco_requested) {
             mode = RunMode::Loco;
         }
-        if (state.dance_requested) {
+        if (state.dance_requested && dance_request_allowed(args, "[InputCheck]")) {
             mode = RunMode::Dance;
         }
         if (state.final_damping_requested) {
@@ -1335,10 +1355,7 @@ int run_robot_with_finally(const Args& args, const ml::LocoConfig& cfg, ml::Cont
                         mode_requested = true;
                     }
                     if (input.dance_requested) {
-                        if (args.beyond_yaml.empty()) {
-                            std::cout << "[Input] DANCE ignored; start with --beyond-yaml PATH to enable BeyondMimic"
-                                      << std::endl;
-                        } else {
+                        if (dance_request_allowed(args, "[Input]")) {
                             requested_mode = RunMode::Dance;
                             mode_requested = true;
                         }
