@@ -368,6 +368,34 @@ void check_external_policy_flow(const std::filesystem::path& config_path)
 
     {
         ml::ControllerCore core(cfg, options);
+        FakeExternalPolicy dance(ml::ControlMode::Dance, "PassiveExitDance");
+        core.register_external_policy("PassiveExitDance", dance, true);
+
+        const ml::JointArray dance_q = offset_target(cfg.default_motor(), 0.004f);
+        const ml::RobotSnapshot dance_snapshot = make_snapshot(dance_q);
+        const auto entered = core.step(
+            dance_snapshot,
+            ml::Command{{0.4f, -0.2f, 0.15f}},
+            ml::mode_request_for_control_mode(ml::ControlMode::Dance, "PassiveExitDance"),
+            cfg.policy_dt);
+        require(entered.telemetry.mode == ml::ControlMode::Dance, "passive-exit dance mode telemetry");
+        require(dance.steps == 1, "passive-exit dance should step on entry");
+
+        const ml::JointArray passive_q = offset_target(cfg.default_motor(), -0.006f);
+        const auto passive = core.step(
+            make_snapshot(passive_q),
+            ml::Command{{-0.5f, 0.3f, -0.1f}},
+            ml::mode_request_for_control_mode(ml::ControlMode::Passive),
+            cfg.policy_dt);
+        require(passive.telemetry.mode == ml::ControlMode::Passive, "external to passive mode telemetry");
+        require(passive.target.damping_only, "external to passive should be damping-only");
+        require(!passive.telemetry.policy_evaluated, "external to passive should not evaluate policy");
+        require(dance.steps == 1, "external to passive should stop stepping external policy");
+        require_joint_array_near(passive.target.q, passive_q, "external to passive should seed from state");
+    }
+
+    {
+        ml::ControllerCore core(cfg, options);
         FakeExternalPolicy skill(ml::ControlMode::Skill, "FakeSkill");
         core.register_external_policy("FakeSkill", skill, true);
 

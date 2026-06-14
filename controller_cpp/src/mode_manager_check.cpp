@@ -91,6 +91,36 @@ void check_core_transitions()
         "passive to stand");
 
     expect_transition(
+        manager.apply(ml::ModeRequest::enter(ml::ControlMode::Passive)),
+        ml::ControlMode::Stand,
+        ml::ControlMode::Passive,
+        true,
+        false,
+        true,
+        true,
+        "stand to passive");
+
+    expect_transition(
+        manager.apply(ml::ModeRequest::enter(ml::ControlMode::Loco)),
+        ml::ControlMode::Passive,
+        ml::ControlMode::Loco,
+        true,
+        true,
+        false,
+        false,
+        "passive to loco");
+
+    expect_transition(
+        manager.apply(ml::ModeRequest::enter(ml::ControlMode::Stand)),
+        ml::ControlMode::Loco,
+        ml::ControlMode::Stand,
+        true,
+        true,
+        true,
+        false,
+        "loco to stand");
+
+    expect_transition(
         manager.apply(ml::ModeRequest::enter(ml::ControlMode::FinalDamping)),
         ml::ControlMode::Stand,
         ml::ControlMode::FinalDamping,
@@ -125,6 +155,7 @@ void check_external_policy_modes()
     require(threw, "DANCE request should throw until enabled");
 
     manager.set_enabled(ml::ControlMode::Dance, true);
+    manager.set_enabled(ml::ControlMode::Skill, true);
     expect_transition(
         manager.apply(ml::ModeRequest::enter_external(
             ml::ControlMode::Dance,
@@ -138,8 +169,30 @@ void check_external_policy_modes()
         "stand to dance");
 
     expect_transition(
-        manager.apply(ml::ModeRequest::enter(ml::ControlMode::Loco)),
+        manager.apply(ml::ModeRequest::enter(ml::ControlMode::Passive)),
         ml::ControlMode::Dance,
+        ml::ControlMode::Passive,
+        true,
+        true,
+        true,
+        true,
+        "dance to passive");
+
+    expect_transition(
+        manager.apply(ml::ModeRequest::enter_external(
+            ml::ControlMode::Skill,
+            ml::kTrackMimicPolicyKey)),
+        ml::ControlMode::Passive,
+        ml::ControlMode::Skill,
+        true,
+        true,
+        true,
+        false,
+        "passive to skill");
+
+    expect_transition(
+        manager.apply(ml::ModeRequest::enter(ml::ControlMode::Loco)),
+        ml::ControlMode::Skill,
         ml::ControlMode::Loco,
         true,
         true,
