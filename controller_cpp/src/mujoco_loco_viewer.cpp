@@ -1423,7 +1423,7 @@ void apply_viewer_text_action(
         return;
     }
     if (effect.mode_requested && effect.mode == magicbot_loco::ControlMode::Skill && !skill_enabled) {
-        std::fprintf(stderr, "[Viewer] SKILL ignored; start with --track-mimic-yaml PATH to enable BeyondMimic trajectory/TrackMimic\n");
+        std::fprintf(stderr, "[Viewer] SKILL ignored; start with --track-mimic-yaml PATH to enable SKILL/TrackMimic trajectory\n");
         return;
     }
 
@@ -2300,7 +2300,9 @@ int main(int argc, char** argv)
             std::printf("Beyond : %s\n", resolve_path(root, args.beyond_yaml).string().c_str());
         }
         if (skill_enabled) {
-            std::printf("Track  : %s (BeyondMimic trajectory-conditioned mode)\n", resolve_path(root, args.track_mimic_yaml).string().c_str());
+            std::printf(
+                "Track  : %s (SKILL/TrackMimic key, BeyondMimic trajectory config)\n",
+                resolve_path(root, args.track_mimic_yaml).string().c_str());
         }
         std::printf(
             "Keys   : L loco, M passive, N final damping, B beyond/dance, T track/skill, Space pause, R reset, "

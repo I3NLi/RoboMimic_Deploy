@@ -208,9 +208,10 @@ modes out into runner-specific per-mode booleans.
 The native FSM state names and their `FSMStateName -> ControlMode` completion
 mapper live in `native_fsm_states.h`; viewer and real external-policy adapters
 both use that helper instead of maintaining separate return-mode mappings.
-`NativeBeyondMimicExternalPolicyRegistry` now owns the native BeyondMimic and
-TrackMimic trajectory policy/adapter lifetimes for both entrypoints, so viewer
-and real runner only pass resolved YAML paths into the shared registration path.
+`NativeBeyondMimicExternalPolicyRegistry` now owns the native BeyondMimic
+policy/adapters for both plain `DANCE/BeyondMimic` and trajectory-conditioned
+`SKILL/TrackMimic`, so viewer and real runner only pass resolved YAML paths into
+the shared registration path.
 The real-runner dry-run path uses the same registry and steps the shared core
 once through each requested external mode, so YAML/model checks also cover the
 registered DANCE/BeyondMimic and SKILL/TrackMimic trajectory selection path.
@@ -495,7 +496,8 @@ entrypoint, keeping the Python command aligned with the native shared runtime.
 
 ## Next cuts
 
-1. Register additional concrete BeyondMimic skill/trajectory variants through
-   `FsmExternalPolicyAdapter` where those entrypoints need them.
+1. Register additional BeyondMimic trajectory variants through
+   `FsmExternalPolicyAdapter` as distinct keys; do not introduce a separate
+   TrackMimic policy family for the same trained architecture.
 2. Move viewer mode/control API code to send requests only; it must not duplicate
    core policy or safety logic.

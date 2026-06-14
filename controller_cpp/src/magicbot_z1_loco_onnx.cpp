@@ -127,7 +127,7 @@ void print_usage(const char* argv0)
         << "Common:\n"
         << "  --config PATH                    Loco YAML config\n"
         << "  --beyond-yaml PATH               Enable BeyondMimic as DANCE external policy\n"
-        << "  --track-mimic-yaml PATH          Enable BeyondMimic trajectory/TrackMimic as SKILL policy\n"
+        << "  --track-mimic-yaml PATH          Enable SKILL/TrackMimic as a BeyondMimic trajectory config\n"
         << "  --local-ip IP                    SDK local IP, default MAGICBOT_LOCAL_IP or 192.168.54.119\n"
         << "  --skip-network-check             Do not verify local-ip exists on this host\n"
         << "  --dry-run                        Load YAML/ONNX and run one inference\n"
@@ -138,7 +138,7 @@ void print_usage(const char* argv0)
         << "  --pd-stand-only                  With --run, hold default PD stand and never run ONNX\n"
         << "  --allow-loco                     Required before ONNX loco is allowed\n"
         << "  --allow-dance                    Required before DANCE/BeyondMimic is allowed on real robot\n"
-        << "  --allow-skill                    Required before BeyondMimic trajectory/TrackMimic is allowed on real robot\n"
+        << "  --allow-skill                    Required before SKILL/TrackMimic trajectory is allowed on real robot\n"
         << "\n"
         << "Motion:\n"
         << "  --vx V --vy V --wz V             Normalized command inputs; YAML cmd_range maps physical speed\n"
@@ -176,7 +176,7 @@ void print_usage(const char* argv0)
         << "  --gamepad-pause-button N         Button that toggles pause-zero, default 7\n"
         << "  --gamepad-reset-button N         Button that re-interpolates to STAND, default 6\n"
         << "  --gamepad-dance-button N         Optional button that enters DANCE/BeyondMimic, default disabled\n"
-        << "  --gamepad-skill-button N         Optional button that enters BeyondMimic trajectory/TrackMimic, default disabled\n"
+        << "  --gamepad-skill-button N         Optional button that enters SKILL/TrackMimic trajectory, default disabled\n"
         << "\n"
         << "Debug entry:\n"
         << "  --debug-entry                    TTS, wait, then LowLevel passive damping before run\n"
@@ -480,12 +480,12 @@ bool skill_request_allowed(const Args& args, const char* prefix)
 {
     if (!args.allow_skill) {
         std::cout << prefix
-                  << " SKILL ignored; add --allow-skill together with --track-mimic-yaml PATH to enable BeyondMimic trajectory/TrackMimic"
+                  << " SKILL ignored; add --allow-skill together with --track-mimic-yaml PATH to enable SKILL/TrackMimic trajectory"
                   << std::endl;
         return false;
     }
     if (args.track_mimic_yaml.empty()) {
-        std::cout << prefix << " SKILL ignored; start with --track-mimic-yaml PATH to enable BeyondMimic trajectory/TrackMimic"
+        std::cout << prefix << " SKILL ignored; start with --track-mimic-yaml PATH to enable SKILL/TrackMimic trajectory"
                   << std::endl;
         return false;
     }
@@ -1522,7 +1522,7 @@ int main(int argc, char** argv)
                     ml::ControlMode::Skill,
                     ml::kTrackMimicPolicyKey,
                     args.track_mimic_yaml,
-                    "BeyondMimic TrackMimic trajectory");
+                    "BeyondMimic trajectory/TrackMimic key");
             }
             return 0;
         }
@@ -1552,7 +1552,7 @@ int main(int argc, char** argv)
                     args.track_mimic_yaml.string());
             }
             external_policies.register_track_mimic(core, args.track_mimic_yaml.string());
-            std::cout << "[ExternalPolicy] SKILL -> BeyondMimic trajectory/TrackMimic: "
+            std::cout << "[ExternalPolicy] SKILL/TrackMimic -> BeyondMimic trajectory: "
                       << args.track_mimic_yaml << std::endl;
         }
         return run_robot_with_finally(args, cfg, core);

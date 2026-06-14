@@ -171,7 +171,7 @@ void check_mode_request_helpers()
     require(default_skill.mode == ml::ControlMode::Skill, "default skill helper mode");
     require(
         default_skill.external_policy_key == ml::kTrackMimicPolicyKey,
-        "default skill helper should select TrackMimic");
+        "default skill helper should select TrackMimic trajectory key");
 
     const ml::ModeRequest steady_stand = ml::mode_request_for_desired_control_mode(
         ml::ControlMode::Stand,
@@ -224,7 +224,7 @@ void check_native_fsm_mode_mapper()
         "native BeyondMimic should map to DANCE");
     require(
         control_mode_for_fsm_state(FSMStateName::SKILL_TRACK_MIMIC) == ml::ControlMode::Skill,
-        "native TrackMimic trajectory should map to SKILL");
+        "native BeyondMimic trajectory/TrackMimic should map to SKILL");
 }
 
 }  // namespace

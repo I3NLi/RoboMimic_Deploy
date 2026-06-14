@@ -16,7 +16,8 @@ enum class ControlMode {
 };
 
 inline constexpr const char kBeyondMimicPolicyKey[] = "BeyondMimic";
-// TrackMimic selects a BeyondMimic-trained, trajectory-conditioned config.
+// TrackMimic is the default SKILL key for a BeyondMimic-trained,
+// trajectory-conditioned config, not a separate policy family.
 inline constexpr const char kTrackMimicPolicyKey[] = "TrackMimic";
 
 struct ModeRequest {
