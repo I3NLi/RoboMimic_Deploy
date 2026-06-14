@@ -117,6 +117,11 @@ echo "[Smoke] Starting viewer HTTP perturb smoke via ${RUNNER} on 127.0.0.1:${ca
     --camera-host 127.0.0.1 \
     --camera-port "${camera_port}" \
     --push-body pelvis \
+    --push-force 35,0,0 \
+    --push-start 0.25 \
+    --push-duration 0.12 \
+    --push-impulse 0,1,0 \
+    --push-impulse-time 0.55 \
     --summary-json "${summary_json}" \
     "${extra_args[@]}" \
     >"${viewer_log}" 2>&1 &
@@ -180,6 +185,9 @@ http_viewer_events="$(jq -r '.http_viewer_events' "${summary_json}")"
 mouse_perturb_steps="$(jq -r '.mouse_perturb_steps' "${summary_json}")"
 last_perturb_body="$(jq -r '.last_perturb_body' "${summary_json}")"
 last_perturb_body_name="$(jq -r '.last_perturb_body_name' "${summary_json}")"
+push_body_resolved="$(jq -r '.push_body_resolved' "${summary_json}")"
+push_force_steps="$(jq -r '.push_force_steps' "${summary_json}")"
+push_impulse_applied="$(jq -r '.push_impulse_applied' "${summary_json}")"
 
 if [[ "${sim_steps}" -le 0 ]]; then
     echo "[Smoke][ERROR] expected sim to advance, got sim_steps=${sim_steps}" >&2
@@ -201,7 +209,27 @@ if [[ "${last_perturb_body}" -le 0 || -z "${last_perturb_body_name}" ]]; then
     cat "${summary_json}" >&2
     exit 1
 fi
+if [[ -z "${push_body_resolved}" || "${push_body_resolved}" == "null" ]]; then
+    echo "[Smoke][ERROR] expected scheduled push body to resolve" >&2
+    cat "${summary_json}" >&2
+    exit 1
+fi
+if [[ "${push_force_steps}" -le 0 ]]; then
+    echo "[Smoke][ERROR] expected scheduled push_force_steps > 0, got ${push_force_steps}" >&2
+    cat "${summary_json}" >&2
+    exit 1
+fi
+if [[ "${push_impulse_applied}" != "true" ]]; then
+    echo "[Smoke][ERROR] expected scheduled push_impulse_applied=true" >&2
+    cat "${summary_json}" >&2
+    exit 1
+fi
+if ! jq -e '.push_enabled == true and .push_force_norm > 0 and .push_impulse_norm > 0 and .push_duration_s > 0' "${summary_json}" >/dev/null; then
+    echo "[Smoke][ERROR] expected nonzero scheduled push/impulse summary fields" >&2
+    cat "${summary_json}" >&2
+    exit 1
+fi
 
 echo "[Smoke] PASSED viewer HTTP perturb API"
 echo "[Smoke] summary=${summary_json}"
-jq '{sim_steps, http_viewer_events, mouse_perturb_steps, last_perturb_body, last_perturb_body_name}' "${summary_json}"
+jq '{sim_steps, http_viewer_events, mouse_perturb_steps, last_perturb_body, last_perturb_body_name, push_body_resolved, push_force_steps, push_impulse_applied, push_force_norm, push_impulse_norm}' "${summary_json}"
