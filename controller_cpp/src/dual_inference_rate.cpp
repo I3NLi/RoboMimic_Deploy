@@ -181,6 +181,8 @@ struct Summary {
     double push_start_s{0.0};
     double push_duration_s{0.0};
     double push_impulse_time_s{0.0};
+    std::array<double, 3> push_force{0.0, 0.0, 0.0};
+    std::array<double, 3> push_impulse{0.0, 0.0, 0.0};
     double push_force_norm{0.0};
     double push_impulse_norm{0.0};
     int push_force_steps{0};
@@ -706,6 +708,10 @@ std::string summary_json(const Summary& s)
         << "\"push_start_s\":" << s.push_start_s << ","
         << "\"push_duration_s\":" << s.push_duration_s << ","
         << "\"push_impulse_time_s\":" << s.push_impulse_time_s << ","
+        << "\"push_force\":["
+        << s.push_force[0] << "," << s.push_force[1] << "," << s.push_force[2] << "],"
+        << "\"push_impulse\":["
+        << s.push_impulse[0] << "," << s.push_impulse[1] << "," << s.push_impulse[2] << "],"
         << "\"push_force_norm\":" << s.push_force_norm << ","
         << "\"push_impulse_norm\":" << s.push_impulse_norm << ","
         << "\"push_force_steps\":" << s.push_force_steps << ","
@@ -1053,6 +1059,8 @@ Summary run_rate_loop(
     s.push_start_s = args.push_start_s;
     s.push_duration_s = args.push_duration_s;
     s.push_impulse_time_s = args.push_impulse_time_s;
+    s.push_force = args.push_force;
+    s.push_impulse = args.push_impulse;
     s.push_force_norm = vec3_norm(args.push_force);
     s.push_impulse_norm = vec3_norm(args.push_impulse);
     s.push_force_steps = push_force_steps;

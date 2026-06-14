@@ -191,6 +191,8 @@ push_force_steps="$(jq -r '.push_force_steps' "${summary_json}")"
 push_impulse_applied="$(jq -r '.push_impulse_applied' "${summary_json}")"
 push_force_norm="$(jq -r '.push_force_norm' "${summary_json}")"
 push_impulse_norm="$(jq -r '.push_impulse_norm' "${summary_json}")"
+expected_force_json="$(jq -cn --arg value "${push_force}" '$value | split(",") | map(tonumber)')"
+expected_impulse_json="$(jq -cn --arg value "${push_impulse}" '$value | split(",") | map(tonumber)')"
 
 if [[ "${pass}" != "true" ]]; then
     echo "[Smoke][ERROR] closed-loop check did not pass" >&2
@@ -222,7 +224,23 @@ if ! jq -e '.push_force_norm > 0 and .push_impulse_norm > 0' "${summary_json}" >
     cat "${summary_json}" >&2
     exit 1
 fi
+if ! jq -e \
+    --argjson expected_force "${expected_force_json}" \
+    --argjson expected_impulse "${expected_impulse_json}" \
+    --argjson expected_start "${push_start}" \
+    --argjson expected_duration "${push_duration}" \
+    --argjson expected_impulse_time "${push_impulse_time}" \
+    '.push_force == $expected_force
+     and .push_impulse == $expected_impulse
+     and .push_start_s == $expected_start
+     and .push_duration_s == $expected_duration
+     and .push_impulse_time_s == $expected_impulse_time' \
+     "${summary_json}" >/dev/null; then
+    echo "[Smoke][ERROR] expected configured push vectors/timing in summary" >&2
+    cat "${summary_json}" >&2
+    exit 1
+fi
 
 echo "[Smoke] PASSED dual-rate scheduled push"
 echo "[Smoke] summary=${summary_json}"
-jq '{pass, sim_steps, control_steps, push_body, push_enabled, push_force_steps, push_impulse_applied, push_force_norm, push_impulse_norm}' "${summary_json}"
+jq '{pass, sim_steps, control_steps, push_body, push_enabled, push_force, push_impulse, push_start_s, push_duration_s, push_impulse_time_s, push_force_steps, push_impulse_applied, push_force_norm, push_impulse_norm}' "${summary_json}"
