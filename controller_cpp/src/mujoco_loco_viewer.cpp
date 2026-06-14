@@ -2666,7 +2666,16 @@ int main(int argc, char** argv)
             if (!running) break;
             if (camera_server) {
                 if (camera_server->take_reset_request()) {
-                    reset_requested = true;
+                    apply_viewer_text_action(
+                        magicbot_loco::TextControlAction::ResetStand,
+                        cmd,
+                        desired_mode,
+                        desired_external_policy_key,
+                        dance_enabled,
+                        skill_enabled,
+                        paused,
+                        running,
+                        reset_requested);
                     ++stats.http_reset_requests;
                 }
                 const auto viewer_events = camera_server->take_viewer_events();

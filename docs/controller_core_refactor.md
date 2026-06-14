@@ -224,8 +224,9 @@ request semantics.
 The target mode for LOCO toggles now comes from the shared
 `mode_request_for_loco_toggle()` helper in `mode_manager.h`, so viewer and real
 runner do not each encode `LOCO -> STAND, otherwise -> LOCO`.
-The viewer's local reset/re-stand key likewise uses `ResetStand` text action
-semantics instead of directly mutating desired mode/reset fields.
+The viewer's local reset/re-stand key and HTTP `/reset` endpoint likewise use
+`ResetStand` text action semantics instead of directly mutating desired
+mode/reset fields.
 `ResetStand` now carries both the shared `STAND` mode request and the reset flag,
 so entrypoints can preserve re-stand interpolation/reset behavior without
 hard-coding the target mode locally.
@@ -472,17 +473,18 @@ scripts/run_viewer_http_control_smoke_native.sh --duration 1.5 --keep-summary
 ```
 
 The script starts the viewer HTTP server, posts reset plus
-`passive -> stand -> stand velocity-only -> walk -> run_forward -> loco -> reset -> pause -> resume -> final_damping`,
+`passive -> stand -> stand velocity-only -> walk -> run_forward -> loco -> /reset -> reset -> pause -> resume -> final_damping`,
 verifies an invalid mode returns
 HTTP 400, checks live `/status` for `mode == FINAL_DAMPING`, `paused == false`,
 `adapter_backend == mujoco-sim`, `adapter_command_published == true`, and
 `http_control_commands >= 10`, then checks the summary for
 `mode == FINAL_DAMPING`, `http_control_commands >= 10`,
-`http_reset_requests >= 1`, published adapter commands, and advancing
+`http_reset_requests >= 2`, published adapter commands, and advancing
 `sim_steps`. The live `/status` checks also verify a velocity-only request while
-still in STAND is sanitized back to zero, and that the shared walk and
-run-forward presets publish the expected LOCO command vectors before the final
-damping sequence. With the default duration it also checks periodic viewer stdout for
+still in STAND is sanitized back to zero, that the shared walk and run-forward
+presets publish the expected LOCO command vectors, and that the HTTP `/reset`
+endpoint returns LOCO to STAND with a zero command before the final damping
+sequence. With the default duration it also checks periodic viewer stdout for
 `mode=FINAL_DAMPING`, covering the display/log path that reports
 `ControllerCore` telemetry. The script also guards the viewer against direct
 MuJoCo `data->ctrl` writes outside `MujocoSimAdapter`, and against duplicating

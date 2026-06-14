@@ -114,6 +114,21 @@ if "TextControlAction::ResetStand" not in r_block:
 if re.search(r"(desired_mode\s*=(?!=)|reset_requested\s*=(?!=)|desired_external_policy_key\.clear\(\))", r_block):
     print("[Smoke][ERROR] viewer R key must not set reset/mode fields directly", file=sys.stderr)
     sys.exit(1)
+http_reset_match = re.search(
+    r"if \(camera_server->take_reset_request\(\)\) \{(.*?)\n\s*\}",
+    source,
+    re.S,
+)
+if not http_reset_match:
+    print("[Smoke][ERROR] could not locate viewer HTTP reset request block", file=sys.stderr)
+    sys.exit(1)
+http_reset_block = http_reset_match.group(1)
+if "TextControlAction::ResetStand" not in http_reset_block:
+    print("[Smoke][ERROR] viewer HTTP /reset must route through TextControlAction::ResetStand", file=sys.stderr)
+    sys.exit(1)
+if re.search(r"(desired_mode\s*=(?!=)|reset_requested\s*=(?!=)|desired_external_policy_key\.clear\(\))", http_reset_block):
+    print("[Smoke][ERROR] viewer HTTP /reset must not set reset/mode fields directly", file=sys.stderr)
+    sys.exit(1)
 keyboard_action_match = re.search(
     r"void apply_viewer_keyboard_text_action\((.*?)\n}\n\nvoid handle_key",
     source,
@@ -293,6 +308,41 @@ if [[ "${run_ready}" -ne 1 ]]; then
 fi
 
 post_ok "${control_url}?mode=loco&vx=0.15&vy=0.05&wz=-0.05" "loco"
+
+loco_ready=0
+for _ in $(seq 1 40); do
+    if curl -sf "${status_url}" -o "${status_body}" &&
+       jq -e '.mode == "LOCO" and .paused == false and (.cmd[0] > 0.14 and .cmd[0] < 0.16) and (.cmd[1] > 0.04 and .cmd[1] < 0.06) and (.cmd[2] > -0.06 and .cmd[2] < -0.04) and .adapter_backend == "mujoco-sim" and .adapter_command_published == true' "${status_body}" >/dev/null; then
+        loco_ready=1
+        break
+    fi
+    sleep 0.1
+done
+
+if [[ "${loco_ready}" -ne 1 ]]; then
+    echo "[Smoke][ERROR] viewer /status did not report LOCO command before reset endpoint test" >&2
+    cat "${status_body}" >&2 || true
+    exit 1
+fi
+
+post_ok "${reset_url}" "reset after loco"
+
+reset_endpoint_ready=0
+for _ in $(seq 1 40); do
+    if curl -sf "${status_url}" -o "${status_body}" &&
+       jq -e '.mode == "STAND" and .paused == false and .cmd[0] == 0 and .cmd[1] == 0 and .cmd[2] == 0 and .http_reset_requests >= 2 and .adapter_backend == "mujoco-sim" and .adapter_command_published == true' "${status_body}" >/dev/null; then
+        reset_endpoint_ready=1
+        break
+    fi
+    sleep 0.1
+done
+
+if [[ "${reset_endpoint_ready}" -ne 1 ]]; then
+    echo "[Smoke][ERROR] viewer /reset endpoint did not return LOCO to STAND with zero command" >&2
+    cat "${status_body}" >&2 || true
+    exit 1
+fi
+
 post_ok "${control_url}?mode=reset" "control reset"
 post_ok "${control_url}?pause=1" "pause"
 post_ok "${control_url}?pause=0" "resume"
@@ -351,8 +401,8 @@ if [[ "${http_control_commands}" -lt 10 ]]; then
     cat "${summary_json}" >&2
     exit 1
 fi
-if [[ "${http_reset_requests}" -lt 1 ]]; then
-    echo "[Smoke][ERROR] expected at least 1 HTTP reset request, got ${http_reset_requests}" >&2
+if [[ "${http_reset_requests}" -lt 2 ]]; then
+    echo "[Smoke][ERROR] expected at least 2 HTTP reset requests, got ${http_reset_requests}" >&2
     cat "${summary_json}" >&2
     exit 1
 fi
