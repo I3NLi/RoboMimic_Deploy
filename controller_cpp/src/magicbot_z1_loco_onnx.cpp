@@ -969,6 +969,22 @@ void dry_run_external_policy(
               << yaml_path << std::endl;
 }
 
+ml::JointTarget make_position_joint_target(
+    const ml::JointArray& q,
+    const ml::JointArray& kp,
+    const ml::JointArray& kd,
+    const ml::JointArray& tau_limit,
+    float damping_kd)
+{
+    ml::JointTarget target;
+    target.q = q;
+    target.gains.kp = kp;
+    target.gains.kd = kd;
+    target.gains.tau_limit = tau_limit;
+    target.damping_kd = damping_kd;
+    return target;
+}
+
 ml::JointArray stand_interpolation(
     ml::MagicbotSdkAdapter& robot,
     ml::SdkRobotState& state,
@@ -990,6 +1006,7 @@ ml::JointArray stand_interpolation(
     auto next_t = std::chrono::steady_clock::now();
     const auto period = std::chrono::duration_cast<std::chrono::steady_clock::duration>(
         std::chrono::duration<double>(ml::kControlDt));
+    ml::MagicbotRealAdapter real_adapter(robot, state);
     for (int step = 0; step < steps && g_running.load(); ++step) {
         rate_watchdog.check();
         snap = state.snapshot();
@@ -1002,7 +1019,8 @@ ml::JointArray stand_interpolation(
             raw_target, snap.q, snap.dq, kp_motor, kd_motor, tau_limit, cfg.tau_limit_scale);
         command_target = ml::clamp_and_rate_limit(
             limited, command_target, args.max_target_rate, static_cast<float>(ml::kControlDt), 0.01f);
-        robot.publish_sdk24_command(snap.counts, command_target, kp_motor, kd_motor, false, args.damping_kd);
+        real_adapter.write_target(
+            make_position_joint_target(command_target, kp_motor, kd_motor, tau_limit, args.damping_kd));
         next_t += period;
         std::this_thread::sleep_until(next_t);
     }
@@ -1039,6 +1057,7 @@ ml::JointArray hold_default_stand(
     auto last_log = start - std::chrono::seconds(60);
     const auto period = std::chrono::duration_cast<std::chrono::steady_clock::duration>(
         std::chrono::duration<double>(ml::kControlDt));
+    ml::MagicbotRealAdapter real_adapter(robot, state);
     while (g_running.load()) {
         const auto now = std::chrono::steady_clock::now();
         if (!hold_until_stopped && std::chrono::duration<double>(now - start).count() >= duration_s) break;
@@ -1053,7 +1072,8 @@ ml::JointArray hold_default_stand(
             static_cast<float>(ml::kControlDt),
             args.joint_limit_margin);
         safety.check(snap, &command_target, &target_default, nullptr);
-        robot.publish_sdk24_command(snap.counts, command_target, kp_motor, kd_motor, false, args.damping_kd);
+        real_adapter.write_target(
+            make_position_joint_target(command_target, kp_motor, kd_motor, tau_limit, args.damping_kd));
         if (std::chrono::duration<double>(now - last_log).count() >= args.log_interval) {
             std::cout << "[" << label << "] q=" << range_string(snap.q) << " target=" << range_string(command_target)
                       << " counts=" << ml::counts_string(snap.counts) << std::endl;
