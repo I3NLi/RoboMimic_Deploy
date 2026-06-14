@@ -152,6 +152,7 @@ PY
 fi
 
 dry_log="$(mktemp /tmp/magicbot_loco_external_dry_XXXXXX.log)"
+blocked_log="$(mktemp /tmp/magicbot_loco_external_blocked_XXXXXX.log)"
 input_log="$(mktemp /tmp/magicbot_loco_external_input_XXXXXX.log)"
 runner_pid=""
 
@@ -161,11 +162,35 @@ cleanup() {
         wait "${runner_pid}" >/dev/null 2>&1 || true
     fi
     if [[ "${keep_log}" -eq 0 ]]; then
-        rm -f "${dry_log}" "${input_log}"
+        rm -f "${dry_log}" "${blocked_log}" "${input_log}"
     fi
     rm -rf "${track_tmp_dir}"
 }
 trap cleanup EXIT
+
+wait_for_udp_ready() {
+    local port="$1"
+    local log_path="$2"
+    local label="$3"
+    local ready=0
+    for _ in $(seq 1 100); do
+        if ss -lun | rg -q ":${port}\\b"; then
+            ready=1
+            break
+        fi
+        if ! kill -0 "${runner_pid}" >/dev/null 2>&1; then
+            echo "[Smoke][ERROR] ${label} exited before UDP was ready" >&2
+            sed -n '1,220p' "${log_path}" >&2
+            exit 1
+        fi
+        sleep 0.1
+    done
+    if [[ "${ready}" -ne 1 ]]; then
+        echo "[Smoke][ERROR] timed out waiting for UDP port ${port}" >&2
+        sed -n '1,220p' "${log_path}" >&2
+        exit 1
+    fi
+}
 
 echo "[Smoke] Checking dry-run external policy YAML loading"
 "${RUNNER}" \
@@ -178,6 +203,59 @@ for expected in '[DryRun] BeyondMimic loaded' '[DryRun] BeyondMimic trajectory/T
     if ! rg -F -q "${expected}" "${dry_log}"; then
         echo "[Smoke][ERROR] dry-run output missing: ${expected}" >&2
         sed -n '1,220p' "${dry_log}" >&2
+        exit 1
+    fi
+done
+
+echo "[Smoke] Checking external-policy YAML does not bypass allow gates"
+"${RUNNER}" \
+    --input-check \
+    --udp-control \
+    --udp-bind 127.0.0.1 \
+    --udp-port "${udp_port}" \
+    --duration 1.2 \
+    --log-interval 0.3 \
+    --beyond-yaml "${beyond_yaml}" \
+    --track-mimic-yaml "${track_mimic_runtime_yaml}" \
+    >"${blocked_log}" 2>&1 &
+runner_pid=$!
+
+wait_for_udp_ready "${udp_port}" "${blocked_log}" "blocked external-policy input-check"
+
+python3 - <<PY
+import socket
+import time
+
+port = int("${udp_port}")
+packets = [
+    b"mode=beyond",
+    b"mode=track_mimic",
+]
+
+sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+for packet in packets:
+    sock.sendto(packet, ("127.0.0.1", port))
+    time.sleep(0.25)
+PY
+
+if ! wait "${runner_pid}"; then
+    echo "[Smoke][ERROR] blocked input-check exited with failure" >&2
+    sed -n '1,260p' "${blocked_log}" >&2
+    exit 1
+fi
+runner_pid=""
+
+for expected in 'DANCE ignored; add --allow-dance' 'SKILL ignored; add --allow-skill'; do
+    if ! rg -q "${expected}" "${blocked_log}"; then
+        echo "[Smoke][ERROR] missing expected blocked external-policy output: ${expected}" >&2
+        sed -n '1,260p' "${blocked_log}" >&2
+        exit 1
+    fi
+done
+for forbidden in 'mode=DANCE' 'mode=SKILL'; do
+    if rg -q "${forbidden}" "${blocked_log}"; then
+        echo "[Smoke][ERROR] external policy entered without allow gate: ${forbidden}" >&2
+        sed -n '1,260p' "${blocked_log}" >&2
         exit 1
     fi
 done
@@ -197,25 +275,7 @@ echo "[Smoke] Starting allowed external-policy input-check on UDP 127.0.0.1:${ud
     >"${input_log}" 2>&1 &
 runner_pid=$!
 
-ready=0
-for _ in $(seq 1 100); do
-    if ss -lun | rg -q ":${udp_port}\\b"; then
-        ready=1
-        break
-    fi
-    if ! kill -0 "${runner_pid}" >/dev/null 2>&1; then
-        echo "[Smoke][ERROR] input-check exited before UDP was ready" >&2
-        sed -n '1,220p' "${input_log}" >&2
-        exit 1
-    fi
-    sleep 0.1
-done
-
-if [[ "${ready}" -ne 1 ]]; then
-    echo "[Smoke][ERROR] timed out waiting for UDP port ${udp_port}" >&2
-    sed -n '1,220p' "${input_log}" >&2
-    exit 1
-fi
+wait_for_udp_ready "${udp_port}" "${input_log}" "allowed external-policy input-check"
 
 python3 - <<PY
 import socket
@@ -260,6 +320,7 @@ done
 echo "[Smoke] PASSED real-runner external-policy input gates"
 if [[ "${keep_log}" -eq 1 ]]; then
     echo "[Smoke] dry_log=${dry_log}"
+    echo "[Smoke] blocked_log=${blocked_log}"
     echo "[Smoke] input_log=${input_log}"
 fi
-rg 'DryRun|mode=(DANCE|SKILL|FINAL_DAMPING)' "${dry_log}" "${input_log}"
+rg 'DryRun|DANCE ignored|SKILL ignored|mode=(DANCE|SKILL|FINAL_DAMPING)' "${dry_log}" "${blocked_log}" "${input_log}"

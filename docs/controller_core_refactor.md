@@ -376,11 +376,13 @@ shared external-policy registry, then runs `--input-check` with explicit
 `register_track_mimic()` still creates a `BeyondMimicPolicy` registered as the
 shared `SKILL/TrackMimic` key, rather than introducing a separate TrackMimic
 policy family, and that the TrackMimic registration requires `motion_file`. The
-smoke helper generates a temporary minimal trajectory YAML for this test. The
-live UDP portion sends `mode=beyond`, `mode=track_mimic`, and
-`mode=final_damping`, verifying that the real-runner input path accepts
-DANCE/SKILL only when the matching gates and YAML paths are present, without
-connecting to the robot.
+smoke helper generates a temporary minimal trajectory YAML for this test. It
+first sends `mode=beyond` and `mode=track_mimic` with both YAML paths present
+but without `--allow-dance` / `--allow-skill`, verifying that YAML presence does
+not bypass the explicit gates. The allowed UDP portion then sends `mode=beyond`,
+`mode=track_mimic`, and `mode=final_damping`, verifying that the real-runner
+input path accepts DANCE/SKILL only when the matching gates and YAML paths are
+present, without connecting to the robot.
 
 Baseline closed-loop smoke:
 
