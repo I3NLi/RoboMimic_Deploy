@@ -4,6 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 PROJECT_ROOT="$( cd "${SCRIPT_DIR}/.." &> /dev/null && pwd )"
 RUNNER="${SCRIPT_DIR}/run_mujoco_loco_viewer_native.sh"
+VIEWER_SOURCE="${PROJECT_ROOT}/controller_cpp/src/mujoco_loco_viewer.cpp"
 
 duration="1.5"
 camera_port=""
@@ -74,6 +75,12 @@ for tool in curl jq python3 rg; do
         exit 1
     fi
 done
+
+echo "[Smoke] Checking viewer sim writes through adapter boundary"
+if rg -n 'data->ctrl\[[^]]+\]\s*=' "${VIEWER_SOURCE}"; then
+    echo "[Smoke][ERROR] mujoco_loco_viewer.cpp must not write MuJoCo ctrl directly; use MujocoSimAdapter" >&2
+    exit 1
+fi
 
 if [[ -z "${camera_port}" ]]; then
     camera_port="$(python3 - <<'PY'

@@ -368,7 +368,8 @@ HTTP 400, checks live `/status` for `mode == FINAL_DAMPING`, `paused == false`,
 `http_reset_requests >= 1`, published adapter commands, and advancing
 `sim_steps`. With the default duration it also checks periodic viewer stdout for
 `mode=FINAL_DAMPING`, covering the display/log path that reports
-`ControllerCore` telemetry.
+`ControllerCore` telemetry. The script also guards the viewer against direct
+MuJoCo `data->ctrl` writes outside `MujocoSimAdapter`.
 
 Python viewer HTTP control smoke:
 
