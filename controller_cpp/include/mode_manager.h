@@ -15,6 +15,8 @@ enum class ControlMode {
     FinalDamping,
 };
 
+inline constexpr const char kBeyondMimicPolicyKey[] = "BeyondMimic";
+
 struct ModeRequest {
     bool requested{false};
     ControlMode mode{ControlMode::Stand};
@@ -56,9 +58,25 @@ inline const char* control_mode_name(ControlMode mode)
     return "UNKNOWN";
 }
 
+inline bool is_external_policy_mode(ControlMode mode)
+{
+    return mode == ControlMode::Dance || mode == ControlMode::Skill;
+}
+
 inline bool is_policy_mode(ControlMode mode)
 {
-    return mode == ControlMode::Loco || mode == ControlMode::Dance || mode == ControlMode::Skill;
+    return mode == ControlMode::Loco || is_external_policy_mode(mode);
+}
+
+inline ModeRequest mode_request_for_control_mode(ControlMode mode, std::string external_policy_key = {})
+{
+    if (!is_external_policy_mode(mode)) {
+        return ModeRequest::enter(mode);
+    }
+    if (mode == ControlMode::Dance && external_policy_key.empty()) {
+        external_policy_key = kBeyondMimicPolicyKey;
+    }
+    return ModeRequest::enter_external(mode, std::move(external_policy_key));
 }
 
 class ModeManager {

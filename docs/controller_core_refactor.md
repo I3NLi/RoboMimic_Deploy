@@ -43,7 +43,9 @@ backend I/O and `RobotSnapshot` / `JointTarget`.
 `PASSIVE`, `STAND`, `LOCO`, and `FINAL_DAMPING`. It marks transitions that must
 reset policy history, zero commands, or seed targets from the current robot
 state. `DANCE` and `SKILL` remain explicit modes but are rejected until a skill
-policy adapter is installed.
+policy adapter is installed. The shared mode helper also owns the default
+external-policy request mapping, including `DANCE -> BeyondMimic`, so entrypoints
+do not each encode a different dance request key.
 
 `policy_adapter.h` defines the external policy contract for `DANCE` / `SKILL`.
 Adapters return a raw motor-space target, an optional gains override, and a

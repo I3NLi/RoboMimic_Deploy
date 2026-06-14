@@ -143,6 +143,25 @@ void check_external_policy_modes()
         "dance to loco");
 }
 
+void check_mode_request_helpers()
+{
+    const ml::ModeRequest stand = ml::mode_request_for_control_mode(ml::ControlMode::Stand);
+    require(stand.requested, "stand helper should request a mode");
+    require(stand.mode == ml::ControlMode::Stand, "stand helper mode");
+    require(stand.external_policy_key.empty(), "stand helper should not set external key");
+
+    const ml::ModeRequest dance = ml::mode_request_for_control_mode(ml::ControlMode::Dance);
+    require(dance.requested, "dance helper should request a mode");
+    require(dance.mode == ml::ControlMode::Dance, "dance helper mode");
+    require(dance.external_policy_key == ml::kBeyondMimicPolicyKey, "dance helper should select BeyondMimic");
+
+    const ml::ModeRequest skill =
+        ml::mode_request_for_control_mode(ml::ControlMode::Skill, "TrackMimic");
+    require(skill.requested, "skill helper should request a mode");
+    require(skill.mode == ml::ControlMode::Skill, "skill helper mode");
+    require(skill.external_policy_key == "TrackMimic", "skill helper should preserve explicit key");
+}
+
 }  // namespace
 
 int main()
@@ -151,6 +170,7 @@ int main()
         check_default_modes();
         check_core_transitions();
         check_external_policy_modes();
+        check_mode_request_helpers();
     } catch (const std::exception& error) {
         std::cerr << "[mode_manager_check][FAIL] " << error.what() << "\n";
         return 1;

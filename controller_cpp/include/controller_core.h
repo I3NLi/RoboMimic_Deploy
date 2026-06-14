@@ -404,11 +404,6 @@ private:
         return policy;
     }
 
-    static bool is_external_policy_mode(ControlMode mode)
-    {
-        return mode == ControlMode::Dance || mode == ControlMode::Skill;
-    }
-
     void reset_external_policy(const RobotSnapshot& snapshot)
     {
         ExternalPolicyAdapter* policy = external_policy(mode_manager_.mode());
