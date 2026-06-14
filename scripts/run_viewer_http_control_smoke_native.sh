@@ -82,6 +82,25 @@ if rg -n 'data->ctrl\[[^]]+\]\s*=' "${VIEWER_SOURCE}"; then
     exit 1
 fi
 
+echo "[Smoke] Checking viewer keyboard LOCO uses shared text action"
+python3 - "${VIEWER_SOURCE}" <<'PY'
+import re
+import sys
+
+source = open(sys.argv[1], encoding="utf-8").read()
+match = re.search(r"case XK_l:\s*case XK_L:(.*?)case XK_m:", source, re.S)
+if not match:
+    print("[Smoke][ERROR] could not locate viewer L key block", file=sys.stderr)
+    sys.exit(1)
+block = match.group(1)
+if "TextControlAction::ToggleLoco" not in block:
+    print("[Smoke][ERROR] viewer L key must route through TextControlAction::ToggleLoco", file=sys.stderr)
+    sys.exit(1)
+if re.search(r"desired_mode\s*=", block):
+    print("[Smoke][ERROR] viewer L key must not set desired_mode directly", file=sys.stderr)
+    sys.exit(1)
+PY
+
 if [[ -z "${camera_port}" ]]; then
     camera_port="$(python3 - <<'PY'
 import socket

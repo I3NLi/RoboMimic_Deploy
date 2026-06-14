@@ -205,6 +205,9 @@ keyboard/gamepad absolute mode buttons derive those requests from the same
 text-control action helper used by UDP. The runner keeps only entrypoint-local
 relative actions such as LOCO toggle and re-stand, instead of fanning absolute
 modes out into runner-specific per-mode booleans.
+The viewer's local keyboard LOCO toggle also routes through the shared text
+action effect, so local keys, HTTP, and UDP no longer maintain separate LOCO
+request semantics.
 The native FSM state names and their `FSMStateName -> ControlMode` completion
 mapper live in `native_fsm_states.h`; viewer and real external-policy adapters
 both use that helper instead of maintaining separate return-mode mappings.
