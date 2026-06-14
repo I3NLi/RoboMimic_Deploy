@@ -210,6 +210,9 @@ action effect, so local keys, HTTP, and UDP no longer maintain separate LOCO
 request semantics.
 The real runner keyboard LOCO toggle now uses the same `ToggleLoco` text action
 effect before the run loop turns it into a shared desired-mode request.
+Real-runner relative input flags such as LOCO toggle and re-stand are assigned
+only by the shared live-input action-effect helper, so keyboard, gamepad, and
+UDP text controls do not carry separate copies of those state semantics.
 The native FSM state names and their `FSMStateName -> ControlMode` completion
 mapper live in `native_fsm_states.h`; viewer and real external-policy adapters
 both use that helper instead of maintaining separate return-mode mappings.

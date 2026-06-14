@@ -78,6 +78,25 @@ import re
 import sys
 
 source = open(sys.argv[1], encoding="utf-8").read()
+
+def function_extent(name):
+    marker = f"void {name}"
+    start = source.find(marker)
+    if start < 0:
+        print(f"[Smoke][ERROR] could not locate {name}", file=sys.stderr)
+        sys.exit(1)
+    brace = source.find("{", start)
+    depth = 0
+    for index in range(brace, len(source)):
+        if source[index] == "{":
+            depth += 1
+        elif source[index] == "}":
+            depth -= 1
+            if depth == 0:
+                return start, index + 1
+    print(f"[Smoke][ERROR] could not parse {name}", file=sys.stderr)
+    sys.exit(1)
+
 match = re.search(r"case 'l':\s*case 'L':(.*?)case 'b':", source, re.S)
 if not match:
     print("[Smoke][ERROR] could not locate real keyboard L key block", file=sys.stderr)
@@ -89,6 +108,16 @@ if "TextControlAction::ToggleLoco" not in block:
 if re.search(r"out\\.toggle_loco_requested\\s*=", block):
     print("[Smoke][ERROR] real keyboard L key must not set toggle_loco_requested directly", file=sys.stderr)
     sys.exit(1)
+
+helper_start, helper_end = function_extent("apply_live_input_action_effect")
+for field in ("toggle_loco_requested", "reset_stand_requested"):
+    for assignment in re.finditer(rf"out\\.{field}\\s*=", source):
+        if not (helper_start <= assignment.start() < helper_end):
+            print(
+                f"[Smoke][ERROR] real input {field} must only be assigned in apply_live_input_action_effect",
+                file=sys.stderr,
+            )
+            sys.exit(1)
 PY
 
 if [[ -z "${udp_port}" ]]; then

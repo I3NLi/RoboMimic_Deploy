@@ -449,13 +449,23 @@ void set_live_input_mode_request(LiveInputState& out, ml::ModeRequest request)
     out.mode_request = request;
 }
 
-void set_live_input_action_mode_request(LiveInputState& out, ml::TextControlAction action)
+void apply_live_input_action_effect(LiveInputState& out, const ml::TextControlActionEffect& effect)
 {
-    const ml::TextControlActionEffect effect = ml::text_control_action_effect(action);
+    if (effect.stop) {
+        out.stop_requested = true;
+    }
     if (effect.toggle_loco) {
         out.toggle_loco_requested = true;
     }
+    if (effect.reset_stand) {
+        out.reset_stand_requested = true;
+    }
     set_live_input_mode_request(out, ml::mode_request_for_text_control_effect(effect));
+}
+
+void set_live_input_action_request(LiveInputState& out, ml::TextControlAction action)
+{
+    apply_live_input_action_effect(out, ml::text_control_action_effect(action));
 }
 
 bool live_input_requested_mode(const LiveInputState& input, ml::ControlMode mode)
@@ -564,32 +574,33 @@ private:
             return;
         case 'l':
         case 'L':
-            set_live_input_action_mode_request(out, ml::TextControlAction::ToggleLoco);
+            set_live_input_action_request(out, ml::TextControlAction::ToggleLoco);
             paused_ = false;
             break;
         case 'b':
         case 'B':
-            set_live_input_action_mode_request(out, ml::TextControlAction::Dance);
+            set_live_input_action_request(out, ml::TextControlAction::Dance);
             paused_ = false;
             break;
         case 't':
         case 'T':
-            set_live_input_action_mode_request(out, ml::TextControlAction::Skill);
+            set_live_input_action_request(out, ml::TextControlAction::Skill);
             paused_ = false;
             break;
         case 'm':
         case 'M':
-            set_live_input_action_mode_request(out, ml::TextControlAction::Passive);
+            set_live_input_action_request(out, ml::TextControlAction::Passive);
             paused_ = false;
             break;
         case 'f':
         case 'F':
-            set_live_input_action_mode_request(out, ml::TextControlAction::FinalDamping);
+            set_live_input_action_request(out, ml::TextControlAction::FinalDamping);
             paused_ = false;
             break;
         case 'r':
         case 'R':
-            out.reset_stand_requested = true;
+            set_live_input_action_request(out, ml::TextControlAction::ResetStand);
+            paused_ = false;
             break;
         case 'w':
         case 'W':
@@ -708,11 +719,11 @@ private:
             if (event.value) {
                 if (args_.gamepad_loco_button >= 0 && event.number == args_.gamepad_loco_button) {
                     paused_ = false;
-                    set_live_input_action_mode_request(out, ml::TextControlAction::Loco);
+                    set_live_input_action_request(out, ml::TextControlAction::Loco);
                 }
                 if (args_.gamepad_stand_button >= 0 && event.number == args_.gamepad_stand_button) {
                     paused_ = false;
-                    set_live_input_action_mode_request(out, ml::TextControlAction::Stand);
+                    set_live_input_action_request(out, ml::TextControlAction::Stand);
                 }
                 if (args_.gamepad_zero_button >= 0 && event.number == args_.gamepad_zero_button) {
                     paused_ = true;
@@ -722,15 +733,15 @@ private:
                 }
                 if (args_.gamepad_reset_button >= 0 && event.number == args_.gamepad_reset_button) {
                     paused_ = false;
-                    out.reset_stand_requested = true;
+                    set_live_input_action_request(out, ml::TextControlAction::ResetStand);
                 }
                 if (args_.gamepad_dance_button >= 0 && event.number == args_.gamepad_dance_button) {
                     paused_ = false;
-                    set_live_input_action_mode_request(out, ml::TextControlAction::Dance);
+                    set_live_input_action_request(out, ml::TextControlAction::Dance);
                 }
                 if (args_.gamepad_skill_button >= 0 && event.number == args_.gamepad_skill_button) {
                     paused_ = false;
-                    set_live_input_action_mode_request(out, ml::TextControlAction::Skill);
+                    set_live_input_action_request(out, ml::TextControlAction::Skill);
                 }
             }
         }
@@ -856,19 +867,7 @@ private:
         if (effect.unpause) {
             paused_ = false;
         }
-        if (effect.stop) {
-            out.stop_requested = true;
-        }
-        if (effect.toggle_loco) {
-            out.toggle_loco_requested = true;
-        }
-        if (effect.reset_stand) {
-            out.reset_stand_requested = true;
-        }
-        if (!effect.mode_requested) {
-            return;
-        }
-        set_live_input_mode_request(out, ml::mode_request_for_text_control_effect(effect));
+        apply_live_input_action_effect(out, effect);
     }
 
     const Args& args_;
