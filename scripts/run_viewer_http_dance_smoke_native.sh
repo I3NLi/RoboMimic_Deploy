@@ -157,7 +157,7 @@ fi
 status_ready=0
 for _ in $(seq 1 80); do
     if curl -sf "${status_url}" -o "${status_body}" &&
-       jq -e '.mode == "DANCE" and .external_policy == "BeyondMimic" and .paused == false and .http_control_commands >= 1 and .policy_steps > 0 and .sim_steps > 0' "${status_body}" >/dev/null; then
+       jq -e '.mode == "DANCE" and .external_policy == "BeyondMimic" and .adapter_backend == "mujoco-sim" and .adapter_command_published == true and .paused == false and .http_control_commands >= 1 and .policy_steps > 0 and .sim_steps > 0' "${status_body}" >/dev/null; then
         status_ready=1
         break
     fi
@@ -184,7 +184,7 @@ if [[ ! -s "${summary_json}" ]]; then
     exit 1
 fi
 
-if ! jq -e '.mode == "DANCE" and .external_policy == "BeyondMimic" and .paused == false and .policy_steps > 0 and .sim_steps > 0 and .http_control_commands >= 1' "${summary_json}" >/dev/null; then
+if ! jq -e '.mode == "DANCE" and .external_policy == "BeyondMimic" and .adapter_backend == "mujoco-sim" and .adapter_command_published == true and .paused == false and .policy_steps > 0 and .sim_steps > 0 and .http_control_commands >= 1' "${summary_json}" >/dev/null; then
     echo "[Smoke][ERROR] summary did not report active DANCE" >&2
     cat "${summary_json}" >&2
     exit 1
@@ -192,4 +192,4 @@ fi
 
 echo "[Smoke] PASSED viewer HTTP DANCE/BeyondMimic control"
 echo "[Smoke] summary=${summary_json}"
-jq '{mode, external_policy, paused, sim_steps, policy_steps, http_control_commands}' "${summary_json}"
+jq '{mode, external_policy, adapter_backend, adapter_command_published, paused, sim_steps, policy_steps, http_control_commands}' "${summary_json}"

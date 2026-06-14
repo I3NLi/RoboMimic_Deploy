@@ -290,7 +290,8 @@ scripts/run_viewer_http_dance_smoke_native.sh --duration 0.8 --keep-summary
 The script registers BeyondMimic as the shared `DANCE` external policy in the
 viewer, posts `mode=beyond` through `/control`, then checks live `/status` and
 the summary for `mode == DANCE`, active `external_policy == BeyondMimic`,
-advancing `sim_steps` and `policy_steps`, and at least one HTTP control command.
+`adapter_backend == mujoco-sim`, `adapter_command_published == true`, advancing
+`sim_steps` and `policy_steps`, and at least one HTTP control command.
 
 Viewer HTTP control smoke:
 
@@ -316,7 +317,8 @@ scripts/run_viewer_http_skill_smoke_native.sh --duration 0.8 --keep-summary
 The script registers the BeyondMimic trajectory variant as the shared `SKILL`
 external policy in the viewer, posts `mode=track_mimic` through `/control`, then
 checks live `/status` and the summary for `mode == SKILL`, advancing
-`sim_steps` and `policy_steps`, active `external_policy == TrackMimic`, and at
+`sim_steps` and `policy_steps`, active `external_policy == TrackMimic`,
+`adapter_backend == mujoco-sim`, `adapter_command_published == true`, and at
 least one HTTP control command. This is an entry-path smoke, not a stability
 acceptance test.
 
@@ -341,7 +343,8 @@ scripts/run_viewer_udp_external_policy_smoke_native.sh --duration 1.8 --keep-sum
 The script starts the viewer with UDP control and HTTP status enabled, sends UDP
 text controls for `mode=beyond` and `mode=track_mimic`, checks live `/status`
 for `DANCE/BeyondMimic` and `SKILL/TrackMimic`, then checks the summary for a
-final `SKILL` state with active `external_policy == TrackMimic`.
+final `SKILL` state with active `external_policy == TrackMimic`,
+`adapter_backend == mujoco-sim`, and `adapter_command_published == true`.
 
 Viewer HTTP remote perturb smoke:
 

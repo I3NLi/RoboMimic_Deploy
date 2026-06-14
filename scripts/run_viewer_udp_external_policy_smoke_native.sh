@@ -191,7 +191,7 @@ send_udp "mode=beyond"
 dance_ready=0
 for _ in $(seq 1 80); do
     if curl -sf "${status_url}" -o "${status_body}" &&
-       jq -e '.mode == "DANCE" and .external_policy == "BeyondMimic" and .paused == false and .policy_steps > 0 and .sim_steps > 0' "${status_body}" >/dev/null; then
+       jq -e '.mode == "DANCE" and .external_policy == "BeyondMimic" and .adapter_backend == "mujoco-sim" and .adapter_command_published == true and .paused == false and .policy_steps > 0 and .sim_steps > 0' "${status_body}" >/dev/null; then
         dance_ready=1
         break
     fi
@@ -210,7 +210,7 @@ send_udp "mode=track_mimic"
 skill_ready=0
 for _ in $(seq 1 80); do
     if curl -sf "${status_url}" -o "${status_body}" &&
-       jq -e '.mode == "SKILL" and .external_policy == "TrackMimic" and .paused == false and .policy_steps > 0 and .sim_steps > 0' "${status_body}" >/dev/null; then
+       jq -e '.mode == "SKILL" and .external_policy == "TrackMimic" and .adapter_backend == "mujoco-sim" and .adapter_command_published == true and .paused == false and .policy_steps > 0 and .sim_steps > 0' "${status_body}" >/dev/null; then
         skill_ready=1
         break
     fi
@@ -237,7 +237,7 @@ if [[ ! -s "${summary_json}" ]]; then
     exit 1
 fi
 
-if ! jq -e '.mode == "SKILL" and .external_policy == "TrackMimic" and .paused == false and .policy_steps > 0 and .sim_steps > 0' "${summary_json}" >/dev/null; then
+if ! jq -e '.mode == "SKILL" and .external_policy == "TrackMimic" and .adapter_backend == "mujoco-sim" and .adapter_command_published == true and .paused == false and .policy_steps > 0 and .sim_steps > 0' "${summary_json}" >/dev/null; then
     echo "[Smoke][ERROR] summary did not report final UDP SKILL/TrackMimic" >&2
     cat "${summary_json}" >&2
     exit 1
@@ -245,4 +245,4 @@ fi
 
 echo "[Smoke] PASSED viewer UDP external-policy path"
 echo "[Smoke] summary=${summary_json}"
-jq '{mode, external_policy, paused, sim_steps, policy_steps}' "${summary_json}"
+jq '{mode, external_policy, adapter_backend, adapter_command_published, paused, sim_steps, policy_steps}' "${summary_json}"
