@@ -19,8 +19,9 @@ Usage: $0 [options] [-- extra run_mujoco_loco_viewer_native args]
 
 Smoke-test the --control-station preset. The script starts the native viewer
 through the control-station wrapper, provides a smoke TrackMimic trajectory
-YAML, then verifies HTTP control can enter the base modes, reset back to STAND,
-and enter DANCE/BeyondMimic plus SKILL/TrackMimic trajectory.
+YAML, then verifies UDP control can enter LOCO and HTTP control can enter the
+base modes, reset back to STAND, and enter DANCE/BeyondMimic plus
+SKILL/TrackMimic trajectory.
 
 Options:
   --duration S       Viewer wall-clock duration, default ${duration}
@@ -82,7 +83,7 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-for tool in curl jq python3; do
+for tool in curl jq python3 rg ss; do
     if ! command -v "${tool}" >/dev/null 2>&1; then
         echo "[Smoke][ERROR] required tool not found: ${tool}" >&2
         exit 1
@@ -97,7 +98,7 @@ resolve_repo_path() {
     fi
 }
 
-choose_port() {
+choose_tcp_port() {
     python3 - <<'PY'
 import socket
 
@@ -107,11 +108,21 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
 PY
 }
 
+choose_udp_port() {
+    python3 - <<'PY'
+import socket
+
+with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+    sock.bind(("127.0.0.1", 0))
+    print(sock.getsockname()[1])
+PY
+}
+
 if [[ -z "${camera_port}" ]]; then
-    camera_port="$(choose_port)"
+    camera_port="$(choose_tcp_port)"
 fi
 if [[ -z "${udp_port}" ]]; then
-    udp_port="$(choose_port)"
+    udp_port="$(choose_udp_port)"
 fi
 if [[ -z "${summary_json}" ]]; then
     summary_json="$(mktemp /tmp/magicbot_viewer_control_station_XXXXXX.json)"
@@ -168,14 +179,14 @@ for _ in $(seq 1 80); do
         sed -n '1,220p' "${viewer_log}" >&2
         exit 1
     fi
-    if curl -fsS "${health_url}" >/dev/null 2>&1; then
+    if curl -fsS "${health_url}" >/dev/null 2>&1 && ss -lun | rg -q ":${udp_port}\\b"; then
         ready=1
         break
     fi
     sleep 0.05
 done
 if [[ "${ready}" -ne 1 ]]; then
-    echo "[Smoke][ERROR] viewer control-station HTTP endpoint did not become ready" >&2
+    echo "[Smoke][ERROR] viewer control-station HTTP/UDP endpoints did not become ready" >&2
     sed -n '1,220p' "${viewer_log}" >&2
     exit 1
 fi
@@ -209,6 +220,19 @@ post_reset() {
     fi
 }
 
+send_udp() {
+    local packet="$1"
+    PACKET="${packet}" UDP_PORT="${udp_port}" python3 - <<'PY'
+import os
+import socket
+
+packet = os.environ["PACKET"].encode()
+port = int(os.environ["UDP_PORT"])
+with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+    sock.sendto(packet, ("127.0.0.1", port))
+PY
+}
+
 wait_status() {
     local jq_expr="$1"
     local description="$2"
@@ -234,6 +258,9 @@ wait_status() {
         exit 1
     fi
 }
+
+send_udp "mode=loco vx=0.10 vy=-0.02 wz=0.04"
+wait_status '.mode == "LOCO" and .adapter_backend == "mujoco-sim" and .adapter_command_published == true and .paused == false and (.cmd[0] > 0.09 and .cmd[0] < 0.11) and (.cmd[1] > -0.03 and .cmd[1] < -0.01) and (.cmd[2] > 0.03 and .cmd[2] < 0.05) and .sim_steps > 0' "control-station UDP LOCO velocity"
 
 post_control "passive"
 wait_status '.mode == "PASSIVE" and .adapter_backend == "mujoco-sim" and .adapter_command_published == true and .paused == false and .cmd[0] == 0 and .cmd[1] == 0 and .cmd[2] == 0 and .sim_steps > 0' "control-station PASSIVE"

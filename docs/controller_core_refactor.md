@@ -603,11 +603,12 @@ scripts/run_viewer_control_station_smoke_native.sh --duration 2.0 --keep-summary
 ```
 
 The script starts `run_mujoco_loco_viewer_native.sh --control-station` without
-explicit `--beyond-yaml` or `--track-mimic-yaml`, then uses the HTTP control API
-to enter `PASSIVE`, `STAND`, `LOCO`, reset back to `STAND`, enter
+explicit `--beyond-yaml` or `--track-mimic-yaml`, waits for both HTTP and UDP
+control endpoints, sends a UDP LOCO velocity command, then uses the HTTP control
+API to enter `PASSIVE`, `STAND`, `LOCO`, reset back to `STAND`, enter
 `FINAL_DAMPING`, then enter `DANCE/BeyondMimic` and `SKILL/TrackMimic`
-trajectory. It verifies the preset mounts the same shared mode/control and
-external-policy adapters used by direct viewer launches.
+trajectory. It verifies the preset mounts the same shared UDP/HTTP mode-control
+and external-policy adapters used by direct viewer launches.
 
 Python viewer entrypoint smoke:
 
