@@ -1,0 +1,159 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+PROJECT_ROOT="$( cd "${SCRIPT_DIR}/.." &> /dev/null && pwd )"
+RUNNER="${SCRIPT_DIR}/run_magicbot_loco_native.sh"
+
+duration="2.2"
+udp_port=""
+keep_log=0
+extra_args=()
+
+usage() {
+    cat <<EOF
+Usage: $0 [options] [-- extra magicbot_z1_loco_onnx args]
+
+Smoke-test the real runner input path without connecting to a robot. The script
+starts magicbot_z1_loco_onnx in --input-check mode, sends UDP text controls, and
+asserts that LOCO, PASSIVE, and FINAL_DAMPING are observed.
+
+Options:
+  --duration S    Input-check duration, default ${duration}
+  --udp-port N    UDP port, default: choose a free local port
+  --keep-log      Print and keep the temp log path
+  -h, --help      Show this help
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --duration)
+            duration="$2"
+            shift 2
+            ;;
+        --udp-port)
+            udp_port="$2"
+            shift 2
+            ;;
+        --keep-log)
+            keep_log=1
+            shift
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        --)
+            shift
+            extra_args=("$@")
+            break
+            ;;
+        *)
+            extra_args+=("$1")
+            shift
+            ;;
+    esac
+done
+
+for tool in python3 ss rg; do
+    if ! command -v "${tool}" >/dev/null 2>&1; then
+        echo "[Smoke][ERROR] required tool not found: ${tool}" >&2
+        exit 1
+    fi
+done
+
+if [[ -z "${udp_port}" ]]; then
+    udp_port="$(python3 - <<'PY'
+import socket
+
+with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+    sock.bind(("127.0.0.1", 0))
+    print(sock.getsockname()[1])
+PY
+)"
+fi
+
+log_path="$(mktemp /tmp/magicbot_loco_input_check_XXXXXX.log)"
+runner_pid=""
+
+cleanup() {
+    if [[ -n "${runner_pid}" ]] && kill -0 "${runner_pid}" >/dev/null 2>&1; then
+        kill "${runner_pid}" >/dev/null 2>&1 || true
+        wait "${runner_pid}" >/dev/null 2>&1 || true
+    fi
+    if [[ "${keep_log}" -eq 0 ]]; then
+        rm -f "${log_path}"
+    fi
+}
+trap cleanup EXIT
+
+echo "[Smoke] Starting real-runner input-check on UDP 127.0.0.1:${udp_port}"
+"${RUNNER}" \
+    --input-check \
+    --udp-control \
+    --udp-bind 127.0.0.1 \
+    --udp-port "${udp_port}" \
+    --duration "${duration}" \
+    --log-interval 0.4 \
+    "${extra_args[@]}" \
+    >"${log_path}" 2>&1 &
+runner_pid=$!
+
+ready=0
+for _ in $(seq 1 100); do
+    if ss -lun | rg -q ":${udp_port}\\b"; then
+        ready=1
+        break
+    fi
+    if ! kill -0 "${runner_pid}" >/dev/null 2>&1; then
+        echo "[Smoke][ERROR] input-check exited before UDP was ready" >&2
+        sed -n '1,200p' "${log_path}" >&2
+        exit 1
+    fi
+    sleep 0.1
+done
+
+if [[ "${ready}" -ne 1 ]]; then
+    echo "[Smoke][ERROR] timed out waiting for UDP port ${udp_port}" >&2
+    sed -n '1,200p' "${log_path}" >&2
+    exit 1
+fi
+
+python3 - <<PY
+import socket
+import time
+
+port = int("${udp_port}")
+packets = [
+    b"vx=0.25 vy=-0.10 wz=0.05 mode=loco",
+    b"mode=passive",
+    b"mode=final_damping",
+]
+
+sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+for packet in packets:
+    sock.sendto(packet, ("127.0.0.1", port))
+    time.sleep(0.25)
+PY
+
+if ! wait "${runner_pid}"; then
+    echo "[Smoke][ERROR] input-check exited with failure" >&2
+    sed -n '1,220p' "${log_path}" >&2
+    exit 1
+fi
+runner_pid=""
+
+for expected in 'mode=LOCO' 'mode=PASSIVE' 'mode=FINAL_DAMPING'; do
+    if ! rg -q "${expected}" "${log_path}"; then
+        echo "[Smoke][ERROR] missing expected input-check output: ${expected}" >&2
+        sed -n '1,220p' "${log_path}" >&2
+        exit 1
+    fi
+done
+
+echo "[Smoke] PASSED real-runner UDP input-check"
+if [[ "${keep_log}" -eq 1 ]]; then
+    echo "[Smoke] log=${log_path}"
+fi
+rg 'mode=(LOCO|PASSIVE|FINAL_DAMPING)' "${log_path}"

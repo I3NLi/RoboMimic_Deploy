@@ -95,6 +95,7 @@ if [[ ! -x "${NATIVE_BIN}" \
     || "${CPP_DIR}/CMakeLists.txt" -nt "${NATIVE_BIN}" \
     || "${CPP_DIR}/include/magicbot_loco_core.h" -nt "${NATIVE_BIN}" \
     || "${CPP_DIR}/include/magicbot_loco_sdk_adapter.h" -nt "${NATIVE_BIN}" \
+    || "${CPP_DIR}/include/text_control_command.h" -nt "${NATIVE_BIN}" \
     || "${CPP_DIR}/src/magicbot_loco_core.cpp" -nt "${NATIVE_BIN}" \
     || "${CPP_DIR}/src/magicbot_loco_sdk_adapter.cpp" -nt "${NATIVE_BIN}" \
     || "${CPP_DIR}/src/magicbot_z1_loco_onnx.cpp" -nt "${NATIVE_BIN}" ]]; then

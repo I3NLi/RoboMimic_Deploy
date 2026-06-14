@@ -157,6 +157,12 @@ Shared text-control parser check:
 scripts/run_text_control_parser_check_native.sh
 ```
 
+Real-runner UDP input smoke (no robot connection):
+
+```bash
+scripts/run_magicbot_loco_input_check_smoke_native.sh
+```
+
 Baseline closed-loop smoke:
 
 ```bash
