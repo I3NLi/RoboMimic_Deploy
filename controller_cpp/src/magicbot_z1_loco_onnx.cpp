@@ -1363,7 +1363,7 @@ int run_robot_with_finally(const Args& args, const ml::LocoConfig& cfg, ml::Cont
                         command_target = stand_interpolation(robot, state, cfg, args, rate_watchdog);
                         core.seed_target(command_target);
                         core.reset_policy();
-                        pending_mode_request = ml::ModeRequest::enter(ml::ControlMode::Stand);
+                        pending_mode_request = ml::mode_request_for_control_mode(ml::ControlMode::Stand);
                         next_control_t = std::chrono::steady_clock::now();
                         last_log = next_control_t - std::chrono::seconds(60);
                         continue;

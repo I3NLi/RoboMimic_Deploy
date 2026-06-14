@@ -895,7 +895,7 @@ Summary run_rate_loop(
                     const auto t0 = std::chrono::steady_clock::now();
                     const auto mode_request = requested_loco
                                                   ? ml::ModeRequest::none()
-                                                  : ml::ModeRequest::enter(ml::ControlMode::Loco);
+                                                  : ml::mode_request_for_control_mode(ml::ControlMode::Loco);
                     tick.snapshot = snap;
                     tick.core = core.step(snap, command, mode_request, static_cast<float>(control_dt));
                     tick.adapter.backend = "real-state-sim";
@@ -910,7 +910,7 @@ Summary run_rate_loop(
                     tick_input.command = command;
                     tick_input.mode_request = requested_loco
                                                   ? ml::ModeRequest::none()
-                                                  : ml::ModeRequest::enter(ml::ControlMode::Loco);
+                                                  : ml::mode_request_for_control_mode(ml::ControlMode::Loco);
                     tick_input.control_dt_s = static_cast<float>(sim.model->opt.timestep);
                     tick_input.publish_target = true;
                     const auto t0 = std::chrono::steady_clock::now();

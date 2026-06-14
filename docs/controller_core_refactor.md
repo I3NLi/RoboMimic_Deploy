@@ -148,7 +148,8 @@ requests, maps mode aliases through the same shared action parser used by UDP,
 and then still routes each tick through the shared runtime.
 Both the viewer and real runner now build `ModeRequest` objects through the
 shared mode helper, including the default `DANCE -> BeyondMimic` external policy
-key, so entrypoints no longer duplicate that mapping.
+key, so entrypoints no longer duplicate that mapping. The dual-rate validation
+tool also uses the helper for LOCO entry requests.
 
 The first `ControllerCore` implementation supports `PASSIVE`, `STAND`, `LOCO`,
 and `FINAL_DAMPING`. `DANCE` and `SKILL` are represented in the shared mode enum
