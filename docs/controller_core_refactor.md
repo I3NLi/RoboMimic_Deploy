@@ -55,6 +55,11 @@ its `.cpp`; neither side should put those details into `ControllerCore`.
 outputs into SDK low-level commands or damping commands. It deliberately does
 not inspect mode requests, run policies, or perform safety checks.
 
+`mujoco_sim_adapter.h` is the first concrete sim adapter. It reads MuJoCo
+`qpos` / `qvel` into `RobotSnapshot` and writes `JointTarget` as PD torques into
+`mjData::ctrl`. It does not step the simulation, handle viewer input, or run
+policy logic.
+
 The first `ControllerCore` implementation supports `PASSIVE`, `STAND`, `LOCO`,
 and `FINAL_DAMPING`. `DANCE` and `SKILL` are represented in the shared mode enum
 but intentionally reject requests until the skill policy adapter is wired.
@@ -66,7 +71,7 @@ state/command I/O.
 ## Next cuts
 
 1. Route `magicbot_z1_loco_onnx` LOCO loop through `ControllerCore`.
-2. Add the MuJoCo `SimAdapter` and route closed-loop code through the same
+2. Route MuJoCo closed-loop code through `MujocoSimAdapter` and the same
    `ControllerCore` API.
 3. Extract the mode manager for `PASSIVE` / `STAND` / `LOCO`.
 4. Add policy adapters for `DANCE` / `SKILL`.
