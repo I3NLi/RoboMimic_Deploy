@@ -113,6 +113,55 @@ run_step() {
     "$@"
 }
 
+check_python_viewer_delegates() {
+    python3 - "${PYTHON_VIEWER}" <<'PY'
+import ast
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+forbidden_imports = {
+    "mujoco",
+    "onnx",
+    "onnxruntime",
+    "torch",
+    "numpy",
+    "rospy",
+    "rclpy",
+}
+
+imports = []
+uses_subprocess_run = False
+for node in ast.walk(tree):
+    if isinstance(node, ast.Import):
+        imports.extend(alias.name.split(".", 1)[0] for alias in node.names)
+    elif isinstance(node, ast.ImportFrom) and node.module:
+        imports.append(node.module.split(".", 1)[0])
+    elif isinstance(node, ast.Call):
+        func = node.func
+        if (
+            isinstance(func, ast.Attribute)
+            and func.attr == "run"
+            and isinstance(func.value, ast.Name)
+            and func.value.id == "subprocess"
+        ):
+            uses_subprocess_run = True
+
+bad_imports = sorted({name for name in imports if name in forbidden_imports})
+if bad_imports:
+    raise SystemExit(
+        "[Smoke][ERROR] Python viewer must delegate to native runtime; "
+        f"forbidden imports: {', '.join(bad_imports)}"
+    )
+if not uses_subprocess_run:
+    raise SystemExit(
+        "[Smoke][ERROR] Python viewer should launch the native viewer runner "
+        "through subprocess.run"
+    )
+PY
+}
+
 if [[ "${RUN_CORE}" -eq 1 ]]; then
     run_step "${SCRIPT_DIR}/run_text_control_parser_check_native.sh"
     run_step "${SCRIPT_DIR}/run_mode_manager_check_native.sh"
@@ -134,6 +183,7 @@ if [[ "${RUN_VIEWER}" -eq 1 ]]; then
 fi
 
 if [[ "${RUN_PYTHON}" -eq 1 ]]; then
+    run_step check_python_viewer_delegates
     run_step python3 -m py_compile "${PYTHON_VIEWER}"
     run_step "${SCRIPT_DIR}/run_viewer_http_control_smoke_native.sh" --runner "${PYTHON_VIEWER}" --duration 1.5
     run_step "${SCRIPT_DIR}/run_viewer_udp_control_smoke_native.sh" --runner "${PYTHON_VIEWER}" --duration 1.5

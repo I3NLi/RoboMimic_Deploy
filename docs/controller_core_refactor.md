@@ -239,7 +239,9 @@ pure-sim closed-loop disturbance, native viewer HTTP/UDP/external-policy and
 remote perturb paths, Python-facing viewer compatibility paths, and the
 real-runner no-robot safety/input gates. The suite only orchestrates existing
 scripts; control, policy, mode, safety, and adapter behavior stay in the shared
-runtime being tested.
+runtime being tested. The Python-facing viewer group also statically checks that
+`run_python_mujoco_viewer.py` delegates through `subprocess.run` and does not
+import MuJoCo, ONNX Runtime, Torch, NumPy, ROS, or other control/runtime stacks.
 
 Shared text-control parser check:
 
@@ -453,7 +455,9 @@ scripts/run_viewer_control_station_smoke_native.sh \
 
 This repeats the same control-station external-policy checks through the Python
 compatibility launcher, proving the Python-facing viewer command still delegates
-to the shared native runtime instead of a separate control brain.
+to the shared native runtime instead of a separate control brain. The aggregate
+suite also guards that launcher at the import/call level so it remains a thin
+native-runtime wrapper.
 
 Viewer HTTP remote perturb smoke:
 
