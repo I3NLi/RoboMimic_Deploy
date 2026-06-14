@@ -173,7 +173,7 @@ reset_url="http://127.0.0.1:${camera_port}/reset"
 status_url="http://127.0.0.1:${camera_port}/status"
 
 ready=0
-for _ in $(seq 1 80); do
+for _ in $(seq 1 720); do
     if ! kill -0 "${viewer_pid}" >/dev/null 2>&1; then
         echo "[Smoke][ERROR] viewer exited before control-station endpoints became ready" >&2
         sed -n '1,220p' "${viewer_log}" >&2

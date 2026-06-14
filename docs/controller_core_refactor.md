@@ -492,6 +492,9 @@ sequence. With the default duration it also checks periodic viewer stdout for
 `ControllerCore` telemetry. The script also guards the viewer against direct
 MuJoCo `data->ctrl` writes outside `MujocoSimAdapter`, and against duplicating
 policy inference, motion safety, or target limiting outside `ControllerCore`.
+Viewer endpoint-readiness loops allow for the native viewer to rebuild before
+the HTTP/UDP servers begin listening, so source edits do not create false
+startup timeouts in these smokes.
 
 Python viewer HTTP control smoke:
 

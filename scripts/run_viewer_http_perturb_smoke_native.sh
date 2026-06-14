@@ -132,7 +132,7 @@ status_url="http://127.0.0.1:${camera_port}/status"
 event_url="http://127.0.0.1:${camera_port}/viewer-event"
 
 ready=0
-for _ in $(seq 1 120); do
+for _ in $(seq 1 360); do
     if curl -sf "${health_url}" >/dev/null; then
         ready=1
         break

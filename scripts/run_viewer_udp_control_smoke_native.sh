@@ -120,7 +120,7 @@ echo "[Smoke] Starting viewer UDP control smoke via ${RUNNER} on 127.0.0.1:${udp
 viewer_pid=$!
 
 ready=0
-for _ in $(seq 1 120); do
+for _ in $(seq 1 360); do
     if ss -lun | rg -q ":${udp_port}\\b"; then
         ready=1
         break
