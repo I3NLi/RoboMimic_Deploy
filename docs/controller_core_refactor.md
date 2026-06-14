@@ -389,7 +389,9 @@ This wraps the native dual-rate runner in pure-sim mode, applies both a
 scheduled force and an impulse to `pelvis`, and checks the summary for
 `pass == true`, advancing sim/control steps, non-zero `push_force_steps`, and
 `push_impulse_applied == true`. It also guards the validation tool against
-direct MuJoCo `data->ctrl` writes outside `MujocoSimAdapter`.
+direct MuJoCo `data->ctrl` writes outside `MujocoSimAdapter`, and against
+duplicating policy inference, motion safety, or target limiting outside
+`ControllerCore`.
 
 Viewer disturbance smoke:
 
@@ -439,7 +441,8 @@ HTTP 400, checks live `/status` for `mode == FINAL_DAMPING`, `paused == false`,
 `sim_steps`. With the default duration it also checks periodic viewer stdout for
 `mode=FINAL_DAMPING`, covering the display/log path that reports
 `ControllerCore` telemetry. The script also guards the viewer against direct
-MuJoCo `data->ctrl` writes outside `MujocoSimAdapter`.
+MuJoCo `data->ctrl` writes outside `MujocoSimAdapter`, and against duplicating
+policy inference, motion safety, or target limiting outside `ControllerCore`.
 
 Python viewer HTTP control smoke:
 

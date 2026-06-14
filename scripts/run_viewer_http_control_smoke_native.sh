@@ -81,6 +81,10 @@ if rg -n 'data->ctrl\[[^]]+\]\s*=' "${VIEWER_SOURCE}"; then
     echo "[Smoke][ERROR] mujoco_loco_viewer.cpp must not write MuJoCo ctrl directly; use MujocoSimAdapter" >&2
     exit 1
 fi
+if rg -n 'OnnxLocoPolicy|\.infer\(|MotionSafety|safety\.check|torque_limited_target|clamp_and_rate_limit' "${VIEWER_SOURCE}"; then
+    echo "[Smoke][ERROR] mujoco_loco_viewer.cpp must keep policy, safety, and target limiting inside ControllerCore" >&2
+    exit 1
+fi
 
 echo "[Smoke] Checking viewer keyboard mode keys use shared text actions"
 python3 - "${VIEWER_SOURCE}" <<'PY'

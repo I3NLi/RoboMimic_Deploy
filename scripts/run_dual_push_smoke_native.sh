@@ -105,6 +105,10 @@ if rg -n 'data->ctrl\[[^]]+\]\s*=' "${DUAL_SOURCE}"; then
     echo "[Smoke][ERROR] dual_inference_rate.cpp must not write MuJoCo ctrl directly; use MujocoSimAdapter" >&2
     exit 1
 fi
+if rg -n 'OnnxLocoPolicy|\.infer\(|MotionSafety|safety\.check|torque_limited_target|clamp_and_rate_limit' "${DUAL_SOURCE}"; then
+    echo "[Smoke][ERROR] dual_inference_rate.cpp must keep policy, safety, and target limiting inside ControllerCore" >&2
+    exit 1
+fi
 if rg -n 'sim_adapter\.write_target' "${DUAL_SOURCE}"; then
     echo "[Smoke][ERROR] dual_inference_rate.cpp should publish held sim targets through ControllerRuntime" >&2
     exit 1
