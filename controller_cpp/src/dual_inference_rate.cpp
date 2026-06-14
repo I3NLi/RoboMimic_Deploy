@@ -79,6 +79,12 @@ struct Args {
     std::string ground_floor_geom{"floor"};
     std::vector<std::string> ground_body_keywords;
     double ground_max_penetration{0.0};
+    std::string push_body{"pelvis"};
+    std::array<double, 3> push_force{0.0, 0.0, 0.0};
+    std::array<double, 3> push_impulse{0.0, 0.0, 0.0};
+    double push_start_s{0.0};
+    double push_duration_s{0.0};
+    double push_impulse_time_s{-1.0};
     bool closed_loop_check{false};
     double min_control_hz{0.0};
     double max_deadline_miss_ratio{-1.0};
@@ -96,6 +102,7 @@ struct SimContext {
     std::vector<int> qpos_idx;
     std::vector<int> qvel_idx;
     int root_body_id{-1};
+    int push_body_id{-1};
     int floor_geom_id{-1};
     std::vector<int> ground_contact_geom_ids;
     ml::JointArray init_q{};
@@ -129,6 +136,15 @@ struct Summary {
     double max_gravity_xy{0.0};
     double max_root_xy_drift{0.0};
     double max_policy_target_jump{0.0};
+    std::string push_body;
+    bool push_enabled{false};
+    double push_start_s{0.0};
+    double push_duration_s{0.0};
+    double push_impulse_time_s{0.0};
+    double push_force_norm{0.0};
+    double push_impulse_norm{0.0};
+    int push_force_steps{0};
+    bool push_impulse_applied{false};
     bool pass{true};
     std::string fail_reason;
 };
@@ -143,6 +159,35 @@ void sleep_sec(double seconds)
 {
     if (seconds <= 0.0) return;
     std::this_thread::sleep_for(std::chrono::duration<double>(seconds));
+}
+
+std::array<double, 3> parse_vec3(std::string value)
+{
+    std::replace(value.begin(), value.end(), ',', ' ');
+    std::replace(value.begin(), value.end(), ';', ' ');
+    std::istringstream iss(value);
+    std::array<double, 3> out{0.0, 0.0, 0.0};
+    if (!(iss >> out[0] >> out[1] >> out[2])) {
+        throw std::runtime_error("expected vec3 formatted as x,y,z");
+    }
+    std::string extra;
+    if (iss >> extra) {
+        throw std::runtime_error("expected exactly three vec3 components");
+    }
+    for (double v : out) {
+        if (!std::isfinite(v)) throw std::runtime_error("vec3 components must be finite");
+    }
+    return out;
+}
+
+double vec3_norm(const std::array<double, 3>& value)
+{
+    return std::sqrt(value[0] * value[0] + value[1] * value[1] + value[2] * value[2]);
+}
+
+bool has_vec3(const std::array<double, 3>& value)
+{
+    return vec3_norm(value) > 0.0;
 }
 
 void usage(const char* argv0)
@@ -168,6 +213,14 @@ void usage(const char* argv0)
         << "  --skip-network-check       Skip local IP preflight\n"
         << "  --real-disconnect          Run full SDK Disconnect/Shutdown on exit\n"
         << "  --vx V --vy V --wz V       Normalized command inputs; YAML cmd_range maps physical speed\n"
+        << "\n"
+        << "Disturbance test, pure-sim/forward sim only:\n"
+        << "  --push-body NAME           Body receiving external force, default pelvis\n"
+        << "  --push-force X,Y,Z         Continuous world-frame force in Newtons\n"
+        << "  --push-start S             Force start time in sim seconds\n"
+        << "  --push-duration S          Force duration in seconds\n"
+        << "  --push-impulse X,Y,Z       One-step world-frame impulse in N*s\n"
+        << "  --push-impulse-time S      Impulse time in sim seconds, default --push-start\n"
         << "\n"
         << "Closed-loop acceptance:\n"
         << "  --closed-loop-check        Enable pass/fail checks with conservative defaults\n"
@@ -238,6 +291,18 @@ Args parse_args(int argc, char** argv)
             args.wz = std::stof(need_value(i, argc, argv));
         } else if (a == "--damping-kd") {
             args.damping_kd = std::stod(need_value(i, argc, argv));
+        } else if (a == "--push-body") {
+            args.push_body = need_value(i, argc, argv);
+        } else if (a == "--push-force") {
+            args.push_force = parse_vec3(need_value(i, argc, argv));
+        } else if (a == "--push-start") {
+            args.push_start_s = std::stod(need_value(i, argc, argv));
+        } else if (a == "--push-duration") {
+            args.push_duration_s = std::stod(need_value(i, argc, argv));
+        } else if (a == "--push-impulse") {
+            args.push_impulse = parse_vec3(need_value(i, argc, argv));
+        } else if (a == "--push-impulse-time") {
+            args.push_impulse_time_s = std::stod(need_value(i, argc, argv));
         } else if (a == "--closed-loop-check") {
             args.closed_loop_check = true;
         } else if (a == "--min-control-hz") {
@@ -265,6 +330,16 @@ Args parse_args(int argc, char** argv)
         throw std::runtime_error("--mode must be pure-sim or real-state-sim");
     }
     args.duration = std::max(0.001, args.duration);
+    args.push_start_s = std::max(0.0, args.push_start_s);
+    args.push_duration_s = std::max(0.0, args.push_duration_s);
+    if (args.push_impulse_time_s < 0.0) args.push_impulse_time_s = args.push_start_s;
+    if (has_vec3(args.push_force) && args.push_duration_s <= 0.0) {
+        throw std::runtime_error("--push-duration must be > 0 when --push-force is nonzero");
+    }
+    if ((has_vec3(args.push_force) || has_vec3(args.push_impulse)) && args.mode == "real-state-sim" &&
+        args.real_forward_only) {
+        throw std::runtime_error("--push-* requires a dynamic MuJoCo step; remove --real-forward-only");
+    }
     if (args.closed_loop_check) {
         if (args.max_deadline_miss_ratio < 0.0) args.max_deadline_miss_ratio = args.realtime ? 0.05 : 1.0;
         if (args.max_infer_p99_ms <= 0.0) args.max_infer_p99_ms = 2.0;
@@ -521,6 +596,45 @@ double max_abs_ctrl(const mjModel* model, const mjData* data)
     return out;
 }
 
+struct PushStepResult {
+    bool force_active{false};
+    bool impulse_applied{false};
+};
+
+PushStepResult apply_push_disturbance(const Args& args, SimContext& sim, bool& impulse_done)
+{
+    PushStepResult result;
+    if (sim.model->nbody <= 0 || sim.data->xfrc_applied == nullptr) return result;
+
+    mju_zero(sim.data->xfrc_applied, 6 * sim.model->nbody);
+    if (sim.push_body_id < 0) return result;
+
+    const double sim_time = sim.data->time;
+    const double dt = std::max(1e-9, sim.model->opt.timestep);
+    double* xfrc = sim.data->xfrc_applied + 6 * sim.push_body_id;
+
+    const bool force_active =
+        has_vec3(args.push_force) &&
+        sim_time + 0.5 * dt >= args.push_start_s &&
+        sim_time < args.push_start_s + args.push_duration_s;
+    if (force_active) {
+        for (int i = 0; i < 3; ++i) xfrc[i] += args.push_force[static_cast<size_t>(i)];
+        result.force_active = true;
+    }
+
+    const bool should_apply_impulse =
+        has_vec3(args.push_impulse) &&
+        !impulse_done &&
+        sim_time + 0.5 * dt >= args.push_impulse_time_s;
+    if (should_apply_impulse) {
+        for (int i = 0; i < 3; ++i) xfrc[i] += args.push_impulse[static_cast<size_t>(i)] / dt;
+        impulse_done = true;
+        result.impulse_applied = true;
+    }
+
+    return result;
+}
+
 double max_abs(const ml::JointArray& values)
 {
     double out = 0.0;
@@ -575,6 +689,15 @@ std::string summary_json(const Summary& s)
         << "\"max_gravity_xy\":" << s.max_gravity_xy << ","
         << "\"max_root_xy_drift\":" << s.max_root_xy_drift << ","
         << "\"max_policy_target_jump\":" << s.max_policy_target_jump << ","
+        << "\"push_body\":\"" << json_escape(s.push_body) << "\","
+        << "\"push_enabled\":" << (s.push_enabled ? "true" : "false") << ","
+        << "\"push_start_s\":" << s.push_start_s << ","
+        << "\"push_duration_s\":" << s.push_duration_s << ","
+        << "\"push_impulse_time_s\":" << s.push_impulse_time_s << ","
+        << "\"push_force_norm\":" << s.push_force_norm << ","
+        << "\"push_impulse_norm\":" << s.push_impulse_norm << ","
+        << "\"push_force_steps\":" << s.push_force_steps << ","
+        << "\"push_impulse_applied\":" << (s.push_impulse_applied ? "true" : "false") << ","
         << "\"pass\":" << (s.pass ? "true" : "false") << ","
         << "\"fail_reason\":\"" << json_escape(s.fail_reason) << "\""
         << "}";
@@ -650,6 +773,10 @@ SimContext make_sim(const Args& args, const fs::path& root, double sim_dt, doubl
     sim.qpos_idx = actuator_qpos_indices(model);
     sim.qvel_idx = actuator_qvel_indices(model);
     sim.root_body_id = mj_name2id(model, mjOBJ_BODY, "pelvis");
+    sim.push_body_id = mj_name2id(model, mjOBJ_BODY, args.push_body.c_str());
+    if ((has_vec3(args.push_force) || has_vec3(args.push_impulse)) && sim.push_body_id < 0) {
+        throw std::runtime_error("push body not found in MuJoCo model: " + args.push_body);
+    }
     if (args.ground_correction) {
         sim.floor_geom_id = mj_name2id(model, mjOBJ_GEOM, args.ground_floor_geom.c_str());
         sim.ground_contact_geom_ids = resolve_contact_geom_ids(model, args.ground_body_keywords);
@@ -719,6 +846,8 @@ Summary run_rate_loop(
     double max_gravity_xy = 0.0;
     double max_root_xy_drift = 0.0;
     double max_policy_target_jump = 0.0;
+    int push_force_steps = 0;
+    bool push_impulse_done = false;
     const double root_x0 = sim.data->qpos[0];
     const double root_y0 = sim.data->qpos[1];
     ml::JointArray previous_policy_target = policy_target;
@@ -835,6 +964,8 @@ Summary run_rate_loop(
                 } else {
                     max_abs_tau = std::max(max_abs_tau, max_abs_ctrl(sim.model, sim.data));
                 }
+                const PushStepResult push = apply_push_disturbance(args, sim, push_impulse_done);
+                if (push.force_active) ++push_force_steps;
                 mj_step(sim.model, sim.data);
                 if (args.ground_correction) {
                     (void)correct_ground_penetration(
@@ -905,6 +1036,15 @@ Summary run_rate_loop(
     s.max_gravity_xy = max_gravity_xy;
     s.max_root_xy_drift = max_root_xy_drift;
     s.max_policy_target_jump = max_policy_target_jump;
+    s.push_body = args.push_body;
+    s.push_enabled = has_vec3(args.push_force) || has_vec3(args.push_impulse);
+    s.push_start_s = args.push_start_s;
+    s.push_duration_s = args.push_duration_s;
+    s.push_impulse_time_s = args.push_impulse_time_s;
+    s.push_force_norm = vec3_norm(args.push_force);
+    s.push_impulse_norm = vec3_norm(args.push_impulse);
+    s.push_force_steps = push_force_steps;
+    s.push_impulse_applied = push_impulse_done;
     if (args.closed_loop_check) {
         evaluate_closed_loop(args, s);
     }

@@ -85,7 +85,10 @@ policy logic.
 `dual_inference_rate.cpp` now routes pure-sim through `ControllerRuntime` and
 `MujocoSimAdapter`, and routes real-state-sim policy stepping through
 `ControllerCore`. It remains a validation tool only and still never publishes
-commands to the real robot.
+commands to the real robot. Pure-sim validation also supports configurable
+world-frame push tests with `--push-body`, `--push-force`, `--push-start`,
+`--push-duration`, `--push-impulse`, and `--push-impulse-time`; `RATE_SUMMARY`
+JSON records whether force/impulse disturbance was applied.
 
 `controller_runtime.h` adds the shared one-tick runtime flow:
 `RobotAdapter::read_snapshot()` -> `ControllerCore::step()` ->
@@ -115,6 +118,26 @@ but intentionally reject requests until the skill policy adapter is wired.
 This keeps the real-robot safety ladder intact: high-risk LOCO still requires
 the existing CLI `--allow-loco` gate, and adapters remain responsible only for
 state/command I/O.
+
+## Validation commands
+
+Baseline closed-loop smoke:
+
+```bash
+scripts/run_dual_inference_rate_native.sh --mode pure-sim --duration 1.0 \
+  --no-realtime --closed-loop-check \
+  --summary-json /tmp/dual_no_push_refactor_smoke.json
+```
+
+Disturbance closed-loop smoke:
+
+```bash
+scripts/run_dual_inference_rate_native.sh --mode pure-sim --duration 1.0 \
+  --no-realtime --closed-loop-check \
+  --push-body pelvis --push-force 35,0,0 --push-start 0.30 \
+  --push-duration 0.12 --push-impulse 0,1.0,0 --push-impulse-time 0.55 \
+  --summary-json /tmp/dual_push_refactor_smoke.json
+```
 
 ## Next cuts
 
