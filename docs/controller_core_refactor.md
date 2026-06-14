@@ -39,6 +39,17 @@ backend I/O and `RobotSnapshot` / `JointTarget`.
 - `ControllerTelemetry`
 - `ControllerCore`
 
+`robot_adapter.h` introduces the backend boundary:
+
+- `RobotAdapter::read_snapshot()`
+- `RobotAdapter::write_target()`
+- `RobotAdapter::write_damping()`
+- `AdapterTelemetry`
+
+Concrete adapters must keep backend details local. A MuJoCo adapter may include
+MuJoCo headers in its `.cpp`; a real adapter may include MagicBot SDK headers in
+its `.cpp`; neither side should put those details into `ControllerCore`.
+
 The first `ControllerCore` implementation supports `PASSIVE`, `STAND`, `LOCO`,
 and `FINAL_DAMPING`. `DANCE` and `SKILL` are represented in the shared mode enum
 but intentionally reject requests until the skill policy adapter is wired.
