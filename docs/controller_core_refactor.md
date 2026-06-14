@@ -199,6 +199,16 @@ Real-runner UDP input smoke (no robot connection):
 scripts/run_magicbot_loco_input_check_smoke_native.sh
 ```
 
+Real-runner safety-gate smoke (no robot connection):
+
+```bash
+scripts/run_magicbot_loco_safety_gate_smoke_native.sh
+```
+
+This verifies explicit dry-run policy loading, the default dry-run mode, and
+that `--run` is rejected before any robot connection path unless
+`--allow-loco` is present.
+
 Baseline closed-loop smoke:
 
 ```bash
