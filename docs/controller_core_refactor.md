@@ -151,6 +151,12 @@ state/command I/O.
 
 ## Validation commands
 
+Shared text-control parser check:
+
+```bash
+scripts/run_text_control_parser_check_native.sh
+```
+
 Baseline closed-loop smoke:
 
 ```bash
