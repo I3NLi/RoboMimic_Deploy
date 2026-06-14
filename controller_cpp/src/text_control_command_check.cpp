@@ -116,6 +116,16 @@ void check_action_effects()
     require(skill.mode == ml::ControlMode::Skill, "skill effect mode");
     require(skill.zero_command, "skill effect should zero command");
     require(skill.external_policy_key == ml::kTrackMimicPolicyKey, "skill effect external key");
+    const auto skill_request = ml::mode_request_for_text_control_effect(skill);
+    require(skill_request.requested, "skill effect should build a mode request");
+    require(skill_request.mode == ml::ControlMode::Skill, "skill effect request mode");
+    require(
+        skill_request.external_policy_key == ml::kTrackMimicPolicyKey,
+        "skill effect request external key");
+
+    const auto zero = ml::text_control_action_effect(ml::TextControlAction::Zero);
+    const auto zero_request = ml::mode_request_for_text_control_effect(zero);
+    require(!zero_request.requested, "non-mode effect should not build a mode request");
 
     const auto reset = ml::text_control_action_effect(ml::TextControlAction::ResetStand);
     require(!reset.mode_requested, "reset effect should leave mode handling to entrypoint");

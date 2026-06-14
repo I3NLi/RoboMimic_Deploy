@@ -307,6 +307,40 @@ void check_external_policy_flow(const std::filesystem::path& config_path)
         require(skill.resets == 1, "skill policy should reset on entry");
         require(skill.steps == 1, "skill policy should step on entry");
     }
+
+    {
+        ml::ControllerCore core(cfg, options);
+        FakeExternalPolicy first(ml::ControlMode::Skill, "SkillA");
+        FakeExternalPolicy second(ml::ControlMode::Skill, "SkillB");
+        core.register_external_policy("SkillA", first, true);
+        core.register_external_policy("SkillB", second, false);
+
+        const ml::RobotSnapshot snapshot = make_snapshot(offset_target(cfg.default_motor(), 0.006f));
+        const ml::Command command{{0.2f, 0.1f, -0.2f}};
+        const auto first_out = core.step(
+            snapshot,
+            command,
+            ml::mode_request_for_control_mode(ml::ControlMode::Skill, "SkillA"),
+            cfg.policy_dt);
+        require(first_out.telemetry.external_policy == "SkillA", "first skill key telemetry");
+        require(first.resets == 1, "first skill policy should reset on entry");
+        require(first.steps == 1, "first skill policy should step on entry");
+
+        const auto second_out = core.step(
+            snapshot,
+            command,
+            ml::mode_request_for_control_mode(ml::ControlMode::Skill, "SkillB"),
+            cfg.policy_dt);
+        require(second_out.telemetry.mode == ml::ControlMode::Skill, "same-mode skill switch mode");
+        require(second_out.telemetry.external_policy == "SkillB", "same-mode skill switch telemetry");
+        require(first.steps == 1, "first skill policy should stop stepping after switch");
+        require(second.resets == 1, "second skill policy should reset on same-mode key switch");
+        require(second.steps == 1, "second skill policy should step after same-mode key switch");
+        require_vec3_near(
+            second.last_velocity,
+            {0.0f, 0.0f, 0.0f},
+            "same-mode external switch should zero command");
+    }
 }
 
 }  // namespace

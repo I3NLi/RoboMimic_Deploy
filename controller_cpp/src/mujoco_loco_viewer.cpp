@@ -1417,6 +1417,7 @@ void apply_viewer_text_action(
     bool& dance_active,
     bool& skill_active,
     bool& final_damping_active,
+    std::string& desired_external_policy_key,
     bool dance_enabled,
     bool skill_enabled,
     bool& paused,
@@ -1450,6 +1451,7 @@ void apply_viewer_text_action(
         dance_active = false;
         skill_active = false;
         final_damping_active = false;
+        desired_external_policy_key.clear();
         reset_requested = true;
     }
     if (effect.toggle_loco) {
@@ -1464,6 +1466,7 @@ void apply_viewer_text_action(
         dance_active = false;
         skill_active = false;
         final_damping_active = false;
+        desired_external_policy_key.clear();
     }
     if (!effect.mode_requested) {
         return;
@@ -1482,6 +1485,8 @@ void apply_viewer_text_action(
     loco_active = mode == magicbot_loco::ControlMode::Loco;
     dance_active = mode == magicbot_loco::ControlMode::Dance;
     skill_active = mode == magicbot_loco::ControlMode::Skill;
+    desired_external_policy_key =
+        magicbot_loco::mode_request_for_text_control_effect(effect).external_policy_key;
 }
 
 class ViewerUdpCommandInput {
@@ -1527,6 +1532,7 @@ public:
         bool& dance_active,
         bool& skill_active,
         bool& final_damping_active,
+        std::string& desired_external_policy_key,
         bool& paused,
         bool& running,
         bool& reset_requested)
@@ -1547,6 +1553,7 @@ public:
                 const bool old_dance_active = dance_active;
                 const bool old_skill_active = skill_active;
                 const bool old_final_damping_active = final_damping_active;
+                const std::string old_desired_external_policy_key = desired_external_policy_key;
                 const bool old_paused = paused;
                 const bool old_running = running;
                 const bool old_reset_requested = reset_requested;
@@ -1558,6 +1565,7 @@ public:
                     dance_active,
                     skill_active,
                     final_damping_active,
+                    desired_external_policy_key,
                     paused,
                     running,
                     reset_requested);
@@ -1569,6 +1577,7 @@ public:
                           old_dance_active != dance_active ||
                           old_skill_active != skill_active ||
                           old_final_damping_active != final_damping_active ||
+                          old_desired_external_policy_key != desired_external_policy_key ||
                           old_paused != paused ||
                           old_running != running || old_reset_requested != reset_requested;
                 continue;
@@ -1597,6 +1606,7 @@ private:
         bool& dance_active,
         bool& skill_active,
         bool& final_damping_active,
+        std::string& desired_external_policy_key,
         bool& paused,
         bool& running,
         bool& reset_requested)
@@ -1616,6 +1626,7 @@ private:
                     dance_active,
                     skill_active,
                     final_damping_active,
+                    desired_external_policy_key,
                     dance_enabled_,
                     skill_enabled_,
                     paused,
@@ -1657,14 +1668,22 @@ magicbot_loco::ModeRequest viewer_mode_request(
     bool dance,
     bool skill,
     bool final_damping,
+    const std::string& external_policy_key,
+    const std::string& last_requested_external_policy_key,
     magicbot_loco::ControlMode current_mode)
 {
     const magicbot_loco::ControlMode desired_mode =
         viewer_control_mode(loco, passive, dance, skill, final_damping);
+    const magicbot_loco::ModeRequest request =
+        magicbot_loco::mode_request_for_control_mode(desired_mode, external_policy_key);
     if (desired_mode == current_mode) {
+        if (magicbot_loco::is_external_policy_mode(desired_mode) &&
+            request.external_policy_key != last_requested_external_policy_key) {
+            return request;
+        }
         return magicbot_loco::ModeRequest::none();
     }
-    return magicbot_loco::mode_request_for_control_mode(desired_mode);
+    return request;
 }
 
 void sync_viewer_mode_flags(
@@ -1708,6 +1727,7 @@ void apply_viewer_control_command(
     bool& dance_active,
     bool& skill_active,
     bool& final_damping_active,
+    std::string& desired_external_policy_key,
     bool dance_enabled,
     bool skill_enabled,
     bool& paused,
@@ -1728,6 +1748,7 @@ void apply_viewer_control_command(
         dance_active,
         skill_active,
         final_damping_active,
+        desired_external_policy_key,
         dance_enabled,
         skill_enabled,
         paused,
@@ -1743,6 +1764,7 @@ void handle_key(
     bool& dance_active,
     bool& skill_active,
     bool& final_damping_active,
+    std::string& desired_external_policy_key,
     bool dance_enabled,
     bool skill_enabled,
     bool& paused,
@@ -1765,6 +1787,7 @@ void handle_key(
         dance_active = false;
         skill_active = false;
         final_damping_active = false;
+        desired_external_policy_key.clear();
         break;
     case XK_m:
     case XK_M:
@@ -1774,6 +1797,7 @@ void handle_key(
         dance_active = false;
         skill_active = false;
         final_damping_active = false;
+        desired_external_policy_key.clear();
         paused = false;
         break;
     case XK_n:
@@ -1784,6 +1808,7 @@ void handle_key(
         dance_active = false;
         skill_active = false;
         final_damping_active = true;
+        desired_external_policy_key.clear();
         paused = false;
         break;
     case XK_b:
@@ -1797,7 +1822,15 @@ void handle_key(
         dance_active = !dance_active;
         skill_active = false;
         final_damping_active = false;
-        if (dance_active) paused = false;
+        if (dance_active) {
+            desired_external_policy_key =
+                magicbot_loco::mode_request_for_text_control_effect(
+                    magicbot_loco::text_control_action_effect(magicbot_loco::TextControlAction::Dance))
+                    .external_policy_key;
+            paused = false;
+        } else {
+            desired_external_policy_key.clear();
+        }
         break;
     case XK_t:
     case XK_T:
@@ -1810,7 +1843,15 @@ void handle_key(
         dance_active = false;
         skill_active = !skill_active;
         final_damping_active = false;
-        if (skill_active) paused = false;
+        if (skill_active) {
+            desired_external_policy_key =
+                magicbot_loco::mode_request_for_text_control_effect(
+                    magicbot_loco::text_control_action_effect(magicbot_loco::TextControlAction::Skill))
+                    .external_policy_key;
+            paused = false;
+        } else {
+            desired_external_policy_key.clear();
+        }
         break;
     case XK_r:
     case XK_R:
@@ -1819,6 +1860,7 @@ void handle_key(
         dance_active = false;
         skill_active = false;
         final_damping_active = false;
+        desired_external_policy_key.clear();
         break;
     case XK_f:
     case XK_F:
@@ -1878,6 +1920,7 @@ void process_events(
     bool& dance_active,
     bool& skill_active,
     bool& final_damping_active,
+    std::string& desired_external_policy_key,
     bool dance_enabled,
     bool skill_enabled,
     bool& paused,
@@ -1906,6 +1949,7 @@ void process_events(
                 dance_active,
                 skill_active,
                 final_damping_active,
+                desired_external_policy_key,
                 dance_enabled,
                 skill_enabled,
                 paused,
@@ -2364,6 +2408,8 @@ int main(int argc, char** argv)
         bool dance_active = false;
         bool skill_active = false;
         bool final_damping_active = false;
+        std::string desired_external_policy_key;
+        std::string last_requested_external_policy_key;
         bool paused = args.paused;
         bool follow = args.follow;
         bool reset_requested = false;
@@ -2442,6 +2488,7 @@ int main(int argc, char** argv)
                 dance_active,
                 skill_active,
                 final_damping_active,
+                desired_external_policy_key,
                 dance_enabled,
                 skill_enabled,
                 paused,
@@ -2481,6 +2528,7 @@ int main(int argc, char** argv)
                             dance_active,
                             skill_active,
                             final_damping_active,
+                            desired_external_policy_key,
                             dance_enabled,
                             skill_enabled,
                             paused,
@@ -2498,6 +2546,7 @@ int main(int argc, char** argv)
                     dance_active,
                     skill_active,
                     final_damping_active,
+                    desired_external_policy_key,
                     paused,
                     running,
                     reset_requested)) {
@@ -2530,7 +2579,17 @@ int main(int argc, char** argv)
                         dance_active,
                         skill_active,
                         final_damping_active,
+                        desired_external_policy_key,
+                        last_requested_external_policy_key,
                         core.mode());
+                    if (tick_input.mode_request.requested) {
+                        if (magicbot_loco::is_external_policy_mode(tick_input.mode_request.mode)) {
+                            last_requested_external_policy_key =
+                                tick_input.mode_request.external_policy_key;
+                        } else {
+                            last_requested_external_policy_key.clear();
+                        }
+                    }
                     tick_input.control_dt_s = static_cast<float>(model->opt.timestep);
                     tick_input.publish_target = true;
                     const auto tick = runtime.tick(tick_input);
@@ -2541,6 +2600,9 @@ int main(int argc, char** argv)
                         dance_active,
                         skill_active,
                         final_damping_active);
+                    if (!magicbot_loco::is_external_policy_mode(tick.core.telemetry.mode)) {
+                        last_requested_external_policy_key.clear();
+                    }
                     policy_step = tick.core.telemetry.policy_steps;
                     const auto gravity = tick.core.telemetry.projected_gravity;
                     stats.max_gravity_xy = std::max(

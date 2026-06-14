@@ -215,6 +215,14 @@ inline TextControlActionEffect text_control_action_effect(TextControlAction acti
     return effect;
 }
 
+inline ModeRequest mode_request_for_text_control_effect(const TextControlActionEffect& effect)
+{
+    if (!effect.mode_requested) {
+        return ModeRequest::none();
+    }
+    return mode_request_for_control_mode(effect.mode, effect.external_policy_key);
+}
+
 inline std::vector<TextControlOperation> parse_text_control_operations(std::string message)
 {
     for (char& ch : message) {

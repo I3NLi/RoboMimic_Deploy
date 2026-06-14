@@ -446,6 +446,7 @@ struct LiveInputState {
     bool pause_zero{false};
     bool changed{false};
     bool zeroed_by_deadman{false};
+    std::string requested_external_policy_key;
     std::string status;
 };
 
@@ -496,9 +497,9 @@ ml::ControlMode control_mode_for(RunMode mode)
     return ml::ControlMode::Stand;
 }
 
-ml::ModeRequest mode_request_for(RunMode mode)
+ml::ModeRequest mode_request_for(RunMode mode, const std::string& external_policy_key = {})
 {
-    return ml::mode_request_for_control_mode(control_mode_for(mode));
+    return ml::mode_request_for_control_mode(control_mode_for(mode), external_policy_key);
 }
 
 bool dance_request_allowed(const Args& args, const char* prefix)
@@ -925,6 +926,8 @@ private:
         if (!effect.mode_requested) {
             return;
         }
+        out.requested_external_policy_key =
+            ml::mode_request_for_text_control_effect(effect).external_policy_key;
 
         switch (effect.mode) {
         case ml::ControlMode::Passive:
@@ -1349,6 +1352,7 @@ int run_robot_with_finally(const Args& args, const ml::LocoConfig& cfg, ml::Cont
             ml::ControllerRuntime runtime(core, real_adapter);
             core.seed_target(command_target);
             core.reset_policy();
+            std::string run_external_policy_key;
             ml::ModeRequest pending_mode_request = mode_request_for(run_mode);
             std::cout << "[Mode] Starting operator loop: mode=" << mode_name(run_mode)
                       << " command=[" << args.vx << " " << args.vy << " " << args.wz << "]" << std::endl;
@@ -1416,6 +1420,7 @@ int run_robot_with_finally(const Args& args, const ml::LocoConfig& cfg, ml::Cont
                         std::cout << "[Input] Re-stand requested" << std::endl;
                         raw_cmd = {0.0f, 0.0f, 0.0f};
                         run_mode = RunMode::Stand;
+                        run_external_policy_key.clear();
                         command_target = stand_interpolation(robot, state, cfg, args, rate_watchdog);
                         core.seed_target(command_target);
                         core.reset_policy();
@@ -1424,10 +1429,15 @@ int run_robot_with_finally(const Args& args, const ml::LocoConfig& cfg, ml::Cont
                         last_log = next_control_t - std::chrono::seconds(60);
                         continue;
                     }
-                    if (mode_requested && requested_mode != run_mode) {
+                    const std::string requested_external_policy_key = input.requested_external_policy_key;
+                    const bool external_key_changed =
+                        mode_requested && !requested_external_policy_key.empty() &&
+                        requested_external_policy_key != run_external_policy_key;
+                    if (mode_requested && (requested_mode != run_mode || external_key_changed)) {
                         run_mode = requested_mode;
                         if (run_mode != RunMode::Loco) raw_cmd = {0.0f, 0.0f, 0.0f};
-                        pending_mode_request = mode_request_for(run_mode);
+                        run_external_policy_key = requested_external_policy_key;
+                        pending_mode_request = mode_request_for(run_mode, run_external_policy_key);
                         std::cout << "[Input] Mode -> " << mode_name(run_mode) << std::endl;
                     }
                     if (input.changed && std::chrono::duration<double>(now - last_log).count() < args.log_interval) {

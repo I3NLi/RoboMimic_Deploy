@@ -167,8 +167,12 @@ does not move policy or safety logic out of `ControllerCore`.
 Both the viewer and real runner now build `ModeRequest` objects through the
 shared mode helper, including the default `DANCE -> BeyondMimic` external policy
 key and default `SKILL -> TrackMimic` external policy key, so entrypoints no
-longer duplicate those mappings. The dual-rate validation tool also uses the
-helper for LOCO entry requests.
+longer duplicate those mappings. TrackMimic is still a BeyondMimic-trained
+policy path; the TrackMimic key selects the BeyondMimic implementation with its
+extra trajectory input/config. The viewer also compares the requested external
+key when deciding whether to send a new request, so the same `SKILL` mode can
+switch trajectory variants without leaving and re-entering the mode first. The
+dual-rate validation tool also uses the helper for LOCO entry requests.
 
 The first `ControllerCore` implementation supports `PASSIVE`, `STAND`, `LOCO`,
 and `FINAL_DAMPING`. `DANCE` and `SKILL` are represented in the shared mode enum
