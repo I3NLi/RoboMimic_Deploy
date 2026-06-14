@@ -172,8 +172,10 @@ The same HTTP server exposes `GET /status` for control-station telemetry:
 current `ControllerCore` mode, active external policy key/name, pause state,
 adapter backend/command-published telemetry from `ControllerRuntime`, velocity
 command, sim/policy steps, base pose, queue depths, and disturbance/control
-counters. This is display/telemetry only; it does not move policy or safety
-logic out of `ControllerCore`.
+counters. The on-screen overlay, periodic viewer stdout, `/status`, and summary
+JSON all report the mode from `ControllerCore` telemetry rather than from local
+viewer input intent flags. This is display/telemetry only; it does not move
+policy or safety logic out of `ControllerCore`.
 Both the viewer and real runner now build `ModeRequest` objects through the
 shared mode helper, including the default `DANCE -> BeyondMimic` external policy
 key and default `SKILL -> TrackMimic` external policy key, so entrypoints no
