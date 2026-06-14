@@ -234,6 +234,41 @@ void check_runtime_adapter_flow(const std::filesystem::path& config_path)
     require(near(adapter.last_damping_kd, 4.5f), "runtime write_damping kd");
 }
 
+void check_shared_target_rate_limit(const std::filesystem::path& config_path)
+{
+    ml::LocoConfig cfg = ml::load_loco_config(config_path);
+    ml::ControllerCoreOptions options;
+    options.safety.enabled = false;
+    options.max_target_rate = 0.02f;
+    ml::ControllerCore core(cfg, options);
+
+    const ml::JointArray start_q = cfg.default_motor();
+    ml::JointArray desired_q = start_q;
+    for (float& q : desired_q) q += 0.08f;
+
+    core.set_default_target(desired_q);
+    core.seed_target(start_q);
+
+    const float dt = 0.5f;
+    const float max_delta = options.max_target_rate * dt;
+    const auto out = core.step(
+        make_snapshot(start_q),
+        ml::Command{},
+        ml::mode_request_for_control_mode(ml::ControlMode::Stand),
+        dt);
+
+    require(out.telemetry.mode == ml::ControlMode::Stand, "rate-limit stand mode telemetry");
+    for (int i = 0; i < ml::kNumJoints; ++i) {
+        const float expected = start_q[static_cast<size_t>(i)] + max_delta;
+        if (!near(out.target.q[static_cast<size_t>(i)], expected)) {
+            throw std::runtime_error("shared target rate limit: joint " + std::to_string(i));
+        }
+        if (!near(out.telemetry.command_target[static_cast<size_t>(i)], expected)) {
+            throw std::runtime_error("shared target telemetry rate limit: joint " + std::to_string(i));
+        }
+    }
+}
+
 void check_external_policy_flow(const std::filesystem::path& config_path)
 {
     ml::LocoConfig cfg = ml::load_loco_config(config_path);
@@ -361,6 +396,7 @@ int main(int argc, char** argv)
     try {
         check_stand_passive_final_modes(argv[1]);
         check_runtime_adapter_flow(argv[1]);
+        check_shared_target_rate_limit(argv[1]);
         check_external_policy_flow(argv[1]);
     } catch (const std::exception& error) {
         std::cerr << "[controller_core_check][FAIL] " << error.what() << "\n";
