@@ -435,12 +435,6 @@ struct LiveInputState {
     std::array<float, 3> command{0.0f, 0.0f, 0.0f};
     ml::ModeRequest mode_request{ml::ModeRequest::none()};
     bool stop_requested{false};
-    bool passive_requested{false};
-    bool loco_requested{false};
-    bool stand_requested{false};
-    bool dance_requested{false};
-    bool skill_requested{false};
-    bool final_damping_requested{false};
     bool toggle_loco_requested{false};
     bool reset_stand_requested{false};
     bool pause_zero{false};
@@ -453,26 +447,11 @@ void set_live_input_mode_request(LiveInputState& out, ml::ModeRequest request)
 {
     if (!request.requested) return;
     out.mode_request = request;
-    switch (request.mode) {
-    case ml::ControlMode::Passive:
-        out.passive_requested = true;
-        break;
-    case ml::ControlMode::Stand:
-        out.stand_requested = true;
-        break;
-    case ml::ControlMode::Loco:
-        out.loco_requested = true;
-        break;
-    case ml::ControlMode::Dance:
-        out.dance_requested = true;
-        break;
-    case ml::ControlMode::Skill:
-        out.skill_requested = true;
-        break;
-    case ml::ControlMode::FinalDamping:
-        out.final_damping_requested = true;
-        break;
-    }
+}
+
+bool live_input_requested_mode(const LiveInputState& input, ml::ControlMode mode)
+{
+    return input.mode_request.requested && input.mode_request.mode == mode;
 }
 
 bool dance_request_allowed(const Args& args, const char* prefix)
@@ -1189,10 +1168,10 @@ int input_check_only(const Args& args)
             if (state.zeroed_by_deadman) std::cout << " deadman=open";
             if (state.pause_zero) std::cout << " pause-zero";
             if (state.reset_stand_requested) std::cout << " reset-stand";
-            if (state.passive_requested) std::cout << " passive";
-            if (state.dance_requested) std::cout << " dance";
-            if (state.skill_requested) std::cout << " skill";
-            if (state.final_damping_requested) std::cout << " final-damping";
+            if (live_input_requested_mode(state, ml::ControlMode::Passive)) std::cout << " passive";
+            if (live_input_requested_mode(state, ml::ControlMode::Dance)) std::cout << " dance";
+            if (live_input_requested_mode(state, ml::ControlMode::Skill)) std::cout << " skill";
+            if (live_input_requested_mode(state, ml::ControlMode::FinalDamping)) std::cout << " final-damping";
             std::cout << std::endl;
             last_log = now;
         }
@@ -1394,10 +1373,12 @@ int run_robot_with_finally(const Args& args, const ml::LocoConfig& cfg, ml::Cont
                                   << " cmd=[" << raw_cmd[0] << " " << raw_cmd[1] << " " << raw_cmd[2] << "]";
                         if (input.zeroed_by_deadman) std::cout << " deadman=open";
                         if (input.pause_zero) std::cout << " pause-zero";
-                        if (input.passive_requested) std::cout << " passive";
-                        if (input.dance_requested) std::cout << " dance";
-                        if (input.skill_requested) std::cout << " skill";
-                        if (input.final_damping_requested) std::cout << " final-damping";
+                        if (live_input_requested_mode(input, ml::ControlMode::Passive)) std::cout << " passive";
+                        if (live_input_requested_mode(input, ml::ControlMode::Dance)) std::cout << " dance";
+                        if (live_input_requested_mode(input, ml::ControlMode::Skill)) std::cout << " skill";
+                        if (live_input_requested_mode(input, ml::ControlMode::FinalDamping)) {
+                            std::cout << " final-damping";
+                        }
                         std::cout << std::endl;
                     }
                 }
