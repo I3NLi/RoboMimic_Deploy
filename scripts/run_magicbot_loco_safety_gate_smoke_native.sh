@@ -54,6 +54,10 @@ if rg -n 'OnnxLocoPolicy[[:space:]]+[A-Za-z_]|\.infer\(' "${RUNNER_SOURCE}"; the
     echo "[Smoke][ERROR] magicbot_z1_loco_onnx.cpp must run policy inference through ControllerCore" >&2
     exit 1
 fi
+if rg -n 'MotionSafety[[:space:]]+[A-Za-z_]|safety\.check' "${RUNNER_SOURCE}"; then
+    echo "[Smoke][ERROR] magicbot_z1_loco_onnx.cpp must run motion safety through ControllerCore" >&2
+    exit 1
+fi
 
 echo "[Smoke] Checking safety-wall final damping path"
 python3 - "${RUNNER_SOURCE}" <<'PY'

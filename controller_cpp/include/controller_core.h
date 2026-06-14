@@ -173,6 +173,7 @@ public:
         if (active_mode == ControlMode::Passive || active_mode == ControlMode::FinalDamping) {
             projected_gravity_ = gravity_orientation(snapshot.quat);
             command_target_ = snapshot.q;
+            safety_.check(snapshot, &command_target_, nullptr, nullptr);
             return make_output(false);
         }
         if (active_mode == ControlMode::Stand) {

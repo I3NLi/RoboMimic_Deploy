@@ -1268,7 +1268,6 @@ int run_robot_with_finally(const Args& args, const ml::LocoConfig& cfg, ml::Cont
         std::cout << "[State] Robot state ready" << std::endl;
 
         ml::RateWatchdog rate_watchdog(args.rate);
-        ml::MotionSafety safety(args.safety, cfg);
 
         if (args.rate.enabled) {
             std::cout << "[Safety] Rate watchdog: min_hz=" << args.rate.min_hz
@@ -1348,8 +1347,6 @@ int run_robot_with_finally(const Args& args, const ml::LocoConfig& cfg, ml::Cont
                     break;
                 }
                 rate_watchdog.check();
-                const auto snap = state.snapshot();
-                safety.check(snap, &command_target, nullptr, nullptr);
                 if (operator_input.enabled()) {
                     const auto input = operator_input.poll();
                     if (input.stop_requested) {

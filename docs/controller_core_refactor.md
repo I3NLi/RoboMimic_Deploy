@@ -134,7 +134,10 @@ on real hardware.
 The same UDP input now accepts `mode=passive` / `mode=damping` for shared
 `PASSIVE` and `mode=final`, `mode=finaldamping`, or `mode=final_damping` for
 shared `FINAL_DAMPING`; both clear velocity commands and route through
-`ControllerCore`, not through runner-local control logic.
+`ControllerCore`, not through runner-local control logic. `ControllerCore` also
+runs motion safety for damping-only PASSIVE / FINAL_DAMPING ticks, so the real
+runtime loop does not keep a duplicate `MotionSafety` check outside the shared
+control brain.
 
 `mujoco_loco_viewer.cpp` now routes its closed-loop STAND/LOCO/PASSIVE execution
 through the same `ControllerRuntime` and `MujocoSimAdapter`. Viewer input, UDP
@@ -346,7 +349,8 @@ variable name used for the SDK object. A static safety-wall guard verifies that
 through `ControllerRuntime.write_damping()` before disconnect. It also guards
 that direct real-runner target limiting/writes remain confined to the staged
 stand-interpolation ramp; STAND hold and runtime execution must publish through
-`ControllerRuntime` / `ControllerCore`. It also verifies
+`ControllerRuntime` / `ControllerCore`. It also guards that policy inference and
+motion safety are not run directly in the real-runner entrypoint. It also verifies
 several no-robot CLI safety gates: only one main mode may be selected,
 `--input-check` requires an input source, and live keyboard/gamepad/UDP inputs
 remain mutually exclusive before any robot connection path starts.
