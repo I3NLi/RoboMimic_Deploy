@@ -159,6 +159,12 @@ Shared text-control parser check:
 scripts/run_text_control_parser_check_native.sh
 ```
 
+Shared mode transition check:
+
+```bash
+scripts/run_mode_manager_check_native.sh
+```
+
 Real-runner UDP input smoke (no robot connection):
 
 ```bash
