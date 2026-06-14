@@ -140,10 +140,18 @@ struct MouseState {
     int last_y{0};
 };
 
+struct RemoteViewerDragState {
+    bool perturb{false};
+    bool camera{false};
+    int button{0};
+};
+
 struct ViewerStats {
     int push_force_steps{0};
     bool push_impulse_applied{false};
     int mouse_perturb_steps{0};
+    int http_reset_requests{0};
+    int http_viewer_events{0};
     int last_perturb_body{0};
     std::string last_perturb_body_name;
     double min_base_height{std::numeric_limits<double>::infinity()};
@@ -151,12 +159,25 @@ struct ViewerStats {
     double max_gravity_xy{0.0};
 };
 
+struct ViewerHttpEvent {
+    std::string type;
+    double x{0.0};
+    double y{0.0};
+    double dx{0.0};
+    double dy{0.0};
+    double width{1.0};
+    double height{1.0};
+    int button{0};
+};
+
 struct CameraStreamState {
     std::mutex mutex;
     std::vector<unsigned char> latest_jpg;
     std::vector<unsigned char> latest_png;
+    std::vector<ViewerHttpEvent> viewer_events;
     double timestamp{0.0};
     uint64_t seq{0};
+    bool reset_requested{false};
     bool running{true};
 };
 
@@ -199,6 +220,22 @@ public:
         state_->seq++;
     }
 
+    bool take_reset_request()
+    {
+        std::lock_guard<std::mutex> lock(state_->mutex);
+        const bool requested = state_->reset_requested;
+        state_->reset_requested = false;
+        return requested;
+    }
+
+    std::vector<ViewerHttpEvent> take_viewer_events()
+    {
+        std::lock_guard<std::mutex> lock(state_->mutex);
+        std::vector<ViewerHttpEvent> events;
+        events.swap(state_->viewer_events);
+        return events;
+    }
+
     std::string url() const
     {
         std::string host = host_ == "0.0.0.0" ? "127.0.0.1" : host_;
@@ -222,6 +259,9 @@ private:
             "HTTP/1.1 " + std::to_string(code) + " " + status + "\r\n"
             "Content-Type: " + content_type + "\r\n"
             "Content-Length: " + std::to_string(body.size()) + "\r\n"
+            "Access-Control-Allow-Origin: *\r\n"
+            "Access-Control-Allow-Methods: GET,POST,OPTIONS\r\n"
+            "Access-Control-Allow-Headers: content-type\r\n"
             "Cache-Control: no-cache\r\n"
             "Connection: close\r\n\r\n";
         send_all(fd, header.data(), header.size());
@@ -239,19 +279,76 @@ private:
             "HTTP/1.1 " + std::to_string(code) + " " + status + "\r\n"
             "Content-Type: " + content_type + "\r\n"
             "Content-Length: " + std::to_string(body.size()) + "\r\n"
+            "Access-Control-Allow-Origin: *\r\n"
+            "Access-Control-Allow-Methods: GET,POST,OPTIONS\r\n"
+            "Access-Control-Allow-Headers: content-type\r\n"
             "Cache-Control: no-cache\r\n"
             "Connection: close\r\n\r\n";
         send_all(fd, header.data(), header.size());
         if (!body.empty()) send_all(fd, reinterpret_cast<const char*>(body.data()), body.size());
     }
 
-    static std::string request_path(const std::string& request)
+    static std::string request_method(const std::string& request)
+    {
+        const size_t first_space = request.find(' ');
+        if (first_space == std::string::npos) return "";
+        return request.substr(0, first_space);
+    }
+
+    static std::string request_target(const std::string& request)
     {
         const size_t first_space = request.find(' ');
         if (first_space == std::string::npos) return "/";
         const size_t second_space = request.find(' ', first_space + 1);
         if (second_space == std::string::npos) return "/";
         return request.substr(first_space + 1, second_space - first_space - 1);
+    }
+
+    static std::string request_path(const std::string& target)
+    {
+        const size_t query = target.find('?');
+        return query == std::string::npos ? target : target.substr(0, query);
+    }
+
+    static std::string request_query(const std::string& target)
+    {
+        const size_t query = target.find('?');
+        return query == std::string::npos ? std::string() : target.substr(query + 1);
+    }
+
+    static std::string query_value(const std::string& query, const std::string& key)
+    {
+        size_t start = 0;
+        while (start <= query.size()) {
+            const size_t end = query.find('&', start);
+            const std::string token =
+                query.substr(start, end == std::string::npos ? std::string::npos : end - start);
+            const size_t eq = token.find('=');
+            if (eq != std::string::npos && token.substr(0, eq) == key) {
+                return token.substr(eq + 1);
+            }
+            if (end == std::string::npos) break;
+            start = end + 1;
+        }
+        return "";
+    }
+
+    static double query_double(const std::string& query, const std::string& key, double fallback)
+    {
+        const std::string raw = query_value(query, key);
+        if (raw.empty()) return fallback;
+        char* end = nullptr;
+        const double value = std::strtod(raw.c_str(), &end);
+        return end != raw.c_str() && *end == '\0' && std::isfinite(value) ? value : fallback;
+    }
+
+    static int query_int(const std::string& query, const std::string& key, int fallback)
+    {
+        const std::string raw = query_value(query, key);
+        if (raw.empty()) return fallback;
+        char* end = nullptr;
+        const long value = std::strtol(raw.c_str(), &end, 10);
+        return end != raw.c_str() && *end == '\0' ? static_cast<int>(value) : fallback;
     }
 
     static void handle_client(int fd, std::shared_ptr<CameraStreamState> state)
@@ -262,12 +359,47 @@ private:
             close(fd);
             return;
         }
-        const std::string path = request_path(std::string(buffer, static_cast<size_t>(n)));
-        if (path == "/health") {
+        const std::string request_text(buffer, static_cast<size_t>(n));
+        const std::string method = request_method(request_text);
+        const std::string target = request_target(request_text);
+        const std::string path = request_path(target);
+        const std::string query = request_query(target);
+
+        if (method == "OPTIONS") {
+            send_text(fd, 204, "No Content", "", "text/plain");
+        } else if (path == "/health") {
             std::lock_guard<std::mutex> lock(state->mutex);
             std::string body = "{\"ok\":true,\"seq\":" + std::to_string(state->seq) +
-                               ",\"timestamp\":" + std::to_string(state->timestamp) + "}\n";
+                               ",\"timestamp\":" + std::to_string(state->timestamp) +
+                               ",\"reset_pending\":" + (state->reset_requested ? "true" : "false") +
+                               ",\"viewer_event_queue\":" + std::to_string(state->viewer_events.size()) + "}\n";
             send_text(fd, 200, "OK", body, "application/json");
+        } else if (path == "/reset") {
+            {
+                std::lock_guard<std::mutex> lock(state->mutex);
+                state->reset_requested = true;
+            }
+            send_text(fd, 200, "OK", "{\"ok\":true,\"action\":\"reset\"}\n", "application/json");
+        } else if (path == "/viewer-event") {
+            ViewerHttpEvent event;
+            event.type = query_value(query, "type");
+            event.x = query_double(query, "x", 0.0);
+            event.y = query_double(query, "y", 0.0);
+            event.dx = query_double(query, "dx", 0.0);
+            event.dy = query_double(query, "dy", 0.0);
+            event.width = std::max(1.0, query_double(query, "width", 1.0));
+            event.height = std::max(1.0, query_double(query, "height", 1.0));
+            event.button = query_int(query, "button", 0);
+            if (event.type.empty()) {
+                send_text(fd, 400, "Bad Request", "{\"ok\":false,\"error\":\"missing type\"}\n", "application/json");
+            } else {
+                {
+                    std::lock_guard<std::mutex> lock(state->mutex);
+                    if (state->viewer_events.size() > 128) state->viewer_events.erase(state->viewer_events.begin());
+                    state->viewer_events.push_back(event);
+                }
+                send_text(fd, 200, "OK", "{\"ok\":true,\"action\":\"viewer-event\"}\n", "application/json");
+            }
         } else if (path == "/frame.jpg") {
             std::vector<unsigned char> jpg;
             {
@@ -1008,6 +1140,8 @@ std::string viewer_summary_json(
         << "\"push_force_steps\":" << stats.push_force_steps << ","
         << "\"push_impulse_applied\":" << (stats.push_impulse_applied ? "true" : "false") << ","
         << "\"mouse_perturb_steps\":" << stats.mouse_perturb_steps << ","
+        << "\"http_reset_requests\":" << stats.http_reset_requests << ","
+        << "\"http_viewer_events\":" << stats.http_viewer_events << ","
         << "\"last_perturb_body\":" << stats.last_perturb_body << ","
         << "\"last_perturb_body_name\":\"" << json_escape(stats.last_perturb_body_name) << "\""
         << "}";
@@ -1557,6 +1691,104 @@ void process_events(
     }
 }
 
+void process_http_viewer_events(
+    const std::vector<ViewerHttpEvent>& events,
+    mjModel* model,
+    mjData* data,
+    mjvScene* scene,
+    mjvOption* opt,
+    mjvPerturb* perturb,
+    mjvCamera* cam,
+    RemoteViewerDragState& remote_drag,
+    ViewerStats& stats,
+    int fallback_body_id)
+{
+    for (const auto& event : events) {
+        const double width = std::max(1.0, event.width);
+        const double height = std::max(1.0, event.height);
+        if (event.type == "down") {
+            remote_drag.button = event.button;
+            remote_drag.camera = false;
+            remote_drag.perturb = false;
+
+            const mjtNum aspect = static_cast<mjtNum>(width / height);
+            const mjtNum relx = static_cast<mjtNum>(std::clamp(event.x / width, 0.0, 1.0));
+            const mjtNum rely = static_cast<mjtNum>(std::clamp((height - event.y) / height, 0.0, 1.0));
+            mjtNum selpnt[3] = {0, 0, 0};
+            int selgeom = -1;
+            int selflex = -1;
+            int selskin = -1;
+            int selbody = mjv_select(
+                model,
+                data,
+                opt,
+                aspect,
+                relx,
+                rely,
+                scene,
+                selpnt,
+                &selgeom,
+                &selflex,
+                &selskin);
+
+            const bool selected_from_view = selbody > 0;
+            if (!selected_from_view && fallback_body_id > 0) {
+                selbody = fallback_body_id;
+                selflex = -1;
+                selskin = -1;
+                selpnt[0] = data->xpos[3 * selbody + 0];
+                selpnt[1] = data->xpos[3 * selbody + 1];
+                selpnt[2] = data->xpos[3 * selbody + 2];
+            }
+
+            if (selbody > 0) {
+                perturb->select = selbody;
+                perturb->flexselect = selflex;
+                perturb->skinselect = selskin;
+                mjtNum tmp[3];
+                mju_sub3(tmp, selpnt, data->xpos + 3 * perturb->select);
+                mju_mulMatTVec(perturb->localpos, data->xmat + 9 * perturb->select, tmp, 3, 3);
+                mjv_initPerturb(model, data, scene, perturb);
+                perturb->active = mjPERT_TRANSLATE;
+                remote_drag.perturb = true;
+                stats.last_perturb_body = selbody;
+                stats.last_perturb_body_name = body_name(model, selbody);
+                std::printf(
+                    "[ViewerHTTP] perturb body=%d name=%s selected=%s\n",
+                    selbody,
+                    stats.last_perturb_body_name.c_str(),
+                    selected_from_view ? "yes" : "fallback");
+            } else {
+                remote_drag.camera = true;
+            }
+            continue;
+        }
+
+        if (event.type == "move") {
+            const double dx = event.dx / height;
+            const double dy = event.dy / height;
+            if (remote_drag.perturb && perturb->active) {
+                const int action = remote_drag.button == 1 ? mjMOUSE_MOVE_V : mjMOUSE_MOVE_H;
+                mjv_movePerturb(model, data, action, dx, -dy, scene, perturb);
+            } else if (remote_drag.camera) {
+                int action = mjMOUSE_ROTATE_H;
+                if (remote_drag.button == 1) action = mjMOUSE_ZOOM;
+                if (remote_drag.button == 2) action = mjMOUSE_MOVE_H;
+                mjv_moveCamera(model, action, dx, dy, scene, cam);
+            }
+            continue;
+        }
+
+        if (event.type == "up" || event.type == "cancel") {
+            if (remote_drag.perturb) {
+                perturb->active = 0;
+                remote_drag.perturb = false;
+            }
+            remote_drag.camera = false;
+        }
+    }
+}
+
 bool render_camera_frame(
     mjModel* model,
     mjData* data,
@@ -1793,6 +2025,7 @@ int main(int argc, char** argv)
             udp_input = std::make_unique<ViewerUdpCommandInput>(args, dance_enabled);
         }
         MouseState mouse;
+        RemoteViewerDragState remote_drag;
         ViewerStats stats;
         int sim_step = 0;
         int policy_step = 0;
@@ -1860,6 +2093,27 @@ int main(int argc, char** argv)
                 reset_requested,
                 cmd);
             if (!running) break;
+            if (camera_server) {
+                if (camera_server->take_reset_request()) {
+                    reset_requested = true;
+                    ++stats.http_reset_requests;
+                }
+                const auto viewer_events = camera_server->take_viewer_events();
+                if (!viewer_events.empty()) {
+                    stats.http_viewer_events += static_cast<int>(viewer_events.size());
+                    process_http_viewer_events(
+                        viewer_events,
+                        model,
+                        data,
+                        &scene,
+                        &opt,
+                        &perturb,
+                        &cam,
+                        remote_drag,
+                        stats,
+                        push_body_id);
+                }
+            }
             if (udp_input &&
                 udp_input->poll(cmd, loco_active, passive_active, dance_active, paused, running, reset_requested)) {
                 print_cmd(cmd, loco_active, passive_active, dance_active, paused);

@@ -113,7 +113,10 @@ initial-pose YAML overrides still feed the shared core default target and gains.
 The viewer can write a telemetry JSON summary with `--summary-json`, run the same
 scheduled push/impulse disturbance inputs as the rate smoke, and apply interactive
 MuJoCo perturb forces with `Shift+left` / `Shift+middle` mouse dragging on a
-selected body.
+selected body. When `--camera-stream` is enabled, the same HTTP server also
+accepts `POST /reset` and `POST /viewer-event?...`; this lets the web/Electron
+control station reset the sim and forward remote drag gestures into MuJoCo
+perturb/camera operations without moving control logic out of `ControllerCore`.
 When `--beyond-yaml PATH` is supplied, the viewer registers BeyondMimic as the
 same shared `DANCE` external policy used by the real runner; `B` and UDP
 `mode=beyond` / `mode=dance` enter it.
@@ -165,6 +168,24 @@ controller_cpp/build_mujoco_viewer/mujoco_loco_viewer --duration 0.2 \
   --beyond-yaml policies/beyond_mimic/config/BeyondMimic.yaml \
   --summary-json /tmp/viewer_beyond_summary.json
 ```
+
+Viewer HTTP control smoke:
+
+```bash
+controller_cpp/build_mujoco_viewer/mujoco_loco_viewer --duration 1.0 \
+  --paused --no-realtime --width 640 --height 480 \
+  --camera-stream --camera-port 18181 \
+  --summary-json /tmp/viewer_http_control_summary.json
+
+curl -X POST http://127.0.0.1:18181/reset
+curl -X POST 'http://127.0.0.1:18181/viewer-event?type=down&x=320&y=240&width=640&height=480&button=0'
+curl -X POST 'http://127.0.0.1:18181/viewer-event?type=move&x=340&y=240&dx=20&dy=0&width=640&height=480&button=0'
+curl -X POST 'http://127.0.0.1:18181/viewer-event?type=up&x=340&y=240&width=640&height=480&button=0'
+```
+
+For an unpaused remote perturb smoke, keep the drag active for a short wall-clock
+interval before sending `type=up`; the summary should report
+`mouse_perturb_steps > 0`.
 
 ## Next cuts
 
