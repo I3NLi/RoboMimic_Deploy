@@ -100,6 +100,9 @@ for forbidden in (
 if re.search(r"out\\.mode_request\\s*=", body):
     print("[Smoke][ERROR] real gamepad must not set mode_request directly", file=sys.stderr)
     sys.exit(1)
+if "command_for_live_mode" not in source:
+    print("[Smoke][ERROR] real runner must sanitize live commands by current mode", file=sys.stderr)
+    sys.exit(1)
 PY
 
 tmp_dir="$(mktemp -d /tmp/magicbot_real_gamepad_XXXXXX)"
@@ -168,7 +171,14 @@ def event(value: int, kind: int, number: int) -> bytes:
     now_ms = int(time.monotonic() * 1000) & 0xFFFFFFFF
     return struct.pack("<IhBB", now_ms, value, kind, number)
 
-if sequence == "loco_axis":
+if sequence == "axis_only":
+    packets = [
+        event(1, JS_EVENT_BUTTON, 4),       # deadman held
+        event(-16384, JS_EVENT_AXIS, 1),    # default vx axis with sign -1 -> +0.5
+        event(0, JS_EVENT_AXIS, 0),
+        event(0, JS_EVENT_AXIS, 3),
+    ]
+elif sequence == "loco_axis":
     packets = [
         event(1, JS_EVENT_BUTTON, 4),       # deadman held
         event(1, JS_EVENT_BUTTON, 0),       # LOCO button
@@ -187,6 +197,28 @@ with open(path, "wb", buffering=0) as fifo:
         time.sleep(0.02)
 PY
 }
+
+send_gamepad_events "axis_only"
+
+stand_zero_ready=0
+for _ in $(seq 1 80); do
+    if rg -q 'gamepad mode=STAND cmd=\[-?0 -?0 -?0\]$' "${log_path}"; then
+        stand_zero_ready=1
+        break
+    fi
+    if ! kill -0 "${runner_pid}" >/dev/null 2>&1; then
+        echo "[Smoke][ERROR] input-check exited before STAND axis-zero was observed" >&2
+        sed -n '1,260p' "${log_path}" >&2
+        exit 1
+    fi
+    sleep 0.1
+done
+
+if [[ "${stand_zero_ready}" -ne 1 ]]; then
+    echo "[Smoke][ERROR] fake gamepad axis should stay zero while mode is STAND" >&2
+    sed -n '1,260p' "${log_path}" >&2
+    exit 1
+fi
 
 send_gamepad_events "loco_axis"
 
@@ -243,4 +275,4 @@ echo "[Smoke] PASSED real-runner gamepad input-check"
 if [[ "${keep_log}" -eq 1 ]]; then
     echo "[Smoke] log=${log_path}"
 fi
-rg 'gamepad.*mode=LOCO|pause-zero' "${log_path}"
+rg 'gamepad.*mode=(STAND|LOCO)|pause-zero' "${log_path}"

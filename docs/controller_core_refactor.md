@@ -354,10 +354,11 @@ scripts/run_magicbot_loco_gamepad_input_smoke_native.sh
 
 This starts `magicbot_z1_loco_onnx --input-check --gamepad-control` with a
 FIFO-backed fake Linux joystick device, writes `js_event` packets for deadman,
-LOCO, axis, and pause buttons, then checks the no-robot log for LOCO with the
-expected axis-derived command and pause-zero. It also statically guards that the
-real gamepad input code routes buttons through shared `TextControlAction`
-handling and does not own mode/runtime logic.
+LOCO, axis, and pause buttons, then checks the no-robot log that axes remain
+zero while still in STAND, enter LOCO with the expected axis-derived command,
+and pause-zero. It also statically guards that the real gamepad input code
+routes buttons through shared `TextControlAction` handling, sanitizes live
+commands by current mode, and does not own mode/runtime logic.
 
 Real-runner safety-gate smoke (no robot connection):
 
