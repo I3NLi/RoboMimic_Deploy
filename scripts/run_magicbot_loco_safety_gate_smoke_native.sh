@@ -6,6 +6,7 @@ PROJECT_ROOT="$( cd "${SCRIPT_DIR}/.." &> /dev/null && pwd )"
 RUNNER="${SCRIPT_DIR}/run_magicbot_loco_native.sh"
 RUNNER_SOURCE="${SCRIPT_DIR}/../controller_cpp/src/magicbot_z1_loco_onnx.cpp"
 README_PATH="${PROJECT_ROOT}/README.md"
+RUNNER_WRAPPER="${SCRIPT_DIR}/run_magicbot_loco_native.sh"
 
 keep_log=0
 
@@ -96,6 +97,31 @@ if section.count("--pd-stand-only") != 1:
     sys.exit(1)
 if "--allow-loco" in section[: section.find("scripts/run_dual_push_smoke_native.sh")]:
     print("[Smoke][ERROR] README safety ladder must not allow LOCO before sim closed-loop smoke", file=sys.stderr)
+    sys.exit(1)
+PY
+
+echo "[Smoke] Checking real runner wrapper rebuilds on shared headers"
+python3 - "${RUNNER_WRAPPER}" <<'PY'
+import sys
+from pathlib import Path
+
+wrapper = Path(sys.argv[1]).read_text(encoding="utf-8")
+required = [
+    "needs_build()",
+    'find "${CPP_DIR}/include"',
+    "-name '*.h'",
+    "-name '*.hpp'",
+    "src/magicbot_z1_loco_onnx.cpp",
+    "src/magicbot_loco_core.cpp",
+    "src/magicbot_loco_sdk_adapter.cpp",
+]
+missing = [item for item in required if item not in wrapper]
+if missing:
+    print(
+        "[Smoke][ERROR] real runner wrapper must rebuild when shared headers or target sources change; missing: "
+        + ", ".join(missing),
+        file=sys.stderr,
+    )
     sys.exit(1)
 PY
 

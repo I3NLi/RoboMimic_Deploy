@@ -348,6 +348,9 @@ any SDK connection when the local IP is not assigned. The smoke also checks that
 `README.md` keeps the real-robot ladder ordered as dry-run, connect-check,
 read-state, passive damping, PD stand, sim closed-loop perturb smoke, then the
 explicitly allowed short real LOCO run. It also checks that the
+`run_magicbot_loco_native.sh` wrapper rebuilds when shared controller headers or
+target source files change, preventing stale binaries after ControllerCore /
+adapter refactors. It also checks that the
 real runner does not publish robot commands directly from the main entrypoint;
 SDK writes must stay behind `MagicbotRealAdapter`, independent of the local
 variable name used for the SDK object. A static safety-wall guard verifies that
