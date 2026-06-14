@@ -2,6 +2,7 @@
 
 #include <stdexcept>
 #include <string>
+#include <utility>
 
 namespace magicbot_loco {
 
@@ -17,9 +18,14 @@ enum class ControlMode {
 struct ModeRequest {
     bool requested{false};
     ControlMode mode{ControlMode::Stand};
+    std::string external_policy_key;
 
     static ModeRequest none() { return {}; }
-    static ModeRequest enter(ControlMode next_mode) { return ModeRequest{true, next_mode}; }
+    static ModeRequest enter(ControlMode next_mode) { return ModeRequest{true, next_mode, {}}; }
+    static ModeRequest enter_external(ControlMode next_mode, std::string policy_key)
+    {
+        return ModeRequest{true, next_mode, std::move(policy_key)};
+    }
 };
 
 struct ModeTransition {

@@ -50,7 +50,10 @@ Adapters return a raw motor-space target, an optional gains override, and a
 completion hint. `ControllerCore` still owns policy-history reset, motion safety,
 torque limiting, rate limiting, and final `JointTarget` generation. Optional
 external gains are held across the 500Hz adapter write ticks between lower-rate
-policy evaluations.
+policy evaluations. External policies are registered by `(mode, key)`, so
+`DANCE` and `SKILL` can host multiple concrete adapters without overwriting each
+other. `ModeRequest::enter_external(mode, key)` selects the concrete adapter;
+`ModeRequest::enter(mode)` remains valid for the default adapter for that mode.
 
 `fsm_external_policy_adapter.h` is a bridge for the existing native FSM policies
 such as Dance and BeyondMimic. It copies `RobotSnapshot` / velocity command into
@@ -100,9 +103,9 @@ through `ControllerRuntime` and `MagicbotRealAdapter`. The existing staged safet
 flow is preserved: dry-run, connect-check, read-state, debug/passive damping,
 stand interpolation, and PD stand-only remain outside high-risk LOCO execution.
 LOCO still requires the explicit `--allow-loco` gate. When `--beyond-yaml PATH`
-is supplied, the runner registers BeyondMimic as the shared `DANCE` external
-policy and accepts `mode=beyond` / `mode=dance` from UDP, `B` from keyboard input,
-or an explicitly configured gamepad dance button.
+is supplied, the runner registers BeyondMimic as the keyed shared `DANCE`
+external policy and accepts `mode=beyond` / `mode=dance` from UDP, `B` from
+keyboard input, or an explicitly configured gamepad dance button.
 
 `mujoco_loco_viewer.cpp` now routes its closed-loop STAND/LOCO/PASSIVE execution
 through the same `ControllerRuntime` and `MujocoSimAdapter`. Viewer input, UDP
@@ -118,7 +121,7 @@ accepts `POST /reset` and `POST /viewer-event?...`; this lets the web/Electron
 control station reset the sim and forward remote drag gestures into MuJoCo
 perturb/camera operations without moving control logic out of `ControllerCore`.
 When `--beyond-yaml PATH` is supplied, the viewer registers BeyondMimic as the
-same shared `DANCE` external policy used by the real runner; `B` and UDP
+same keyed shared `DANCE` external policy used by the real runner; `B` and UDP
 `mode=beyond` / `mode=dance` enter it.
 
 The first `ControllerCore` implementation supports `PASSIVE`, `STAND`, `LOCO`,

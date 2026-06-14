@@ -461,6 +461,15 @@ ml::ControlMode control_mode_for(RunMode mode)
     return ml::ControlMode::Stand;
 }
 
+ml::ModeRequest mode_request_for(RunMode mode)
+{
+    const ml::ControlMode control_mode = control_mode_for(mode);
+    if (control_mode == ml::ControlMode::Dance) {
+        return ml::ModeRequest::enter_external(control_mode, "BeyondMimic");
+    }
+    return ml::ModeRequest::enter(control_mode);
+}
+
 ml::ControlMode control_mode_for_fsm_state(FSMStateName state)
 {
     switch (state) {
@@ -1268,7 +1277,7 @@ int run_robot_with_finally(const Args& args, const ml::LocoConfig& cfg, ml::Cont
             ml::ControllerRuntime runtime(core, real_adapter);
             core.seed_target(command_target);
             core.reset_policy();
-            ml::ModeRequest pending_mode_request = ml::ModeRequest::enter(control_mode_for(run_mode));
+            ml::ModeRequest pending_mode_request = mode_request_for(run_mode);
             std::cout << "[Mode] Starting operator loop: mode=" << mode_name(run_mode)
                       << " command=[" << args.vx << " " << args.vy << " " << args.wz << "]" << std::endl;
             if (operator_input.enabled()) {
@@ -1335,7 +1344,7 @@ int run_robot_with_finally(const Args& args, const ml::LocoConfig& cfg, ml::Cont
                     if (mode_requested && requested_mode != run_mode) {
                         run_mode = requested_mode;
                         if (run_mode != RunMode::Loco) raw_cmd = {0.0f, 0.0f, 0.0f};
-                        pending_mode_request = ml::ModeRequest::enter(control_mode_for(run_mode));
+                        pending_mode_request = mode_request_for(run_mode);
                         std::cout << "[Input] Mode -> " << mode_name(run_mode) << std::endl;
                     }
                     if (input.changed && std::chrono::duration<double>(now - last_log).count() < args.log_interval) {
@@ -1468,7 +1477,7 @@ int main(int argc, char** argv)
                 external_output,
                 *beyond_policy,
                 control_mode_for_fsm_state);
-            core.register_external_policy(*beyond_adapter);
+            core.register_external_policy("BeyondMimic", *beyond_adapter, true);
             std::cout << "[ExternalPolicy] DANCE -> BeyondMimic: " << args.beyond_yaml << std::endl;
         }
         return run_robot_with_finally(args, cfg, core);

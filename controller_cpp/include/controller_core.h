@@ -33,6 +33,7 @@ struct JointTarget {
 
 struct ControllerTelemetry {
     ControlMode mode{ControlMode::Stand};
+    std::string external_policy;
     bool policy_evaluated{false};
     int policy_steps{0};
     JointArray raw_policy_target{};
@@ -114,13 +115,25 @@ public:
 
     void register_external_policy(ExternalPolicyAdapter& policy)
     {
+        register_external_policy(
+            policy.name(),
+            policy,
+            external_policies_.find(policy.mode()) == external_policies_.end());
+    }
+
+    void register_external_policy(std::string key, ExternalPolicyAdapter& policy, bool make_default = false)
+    {
         const ControlMode policy_mode = policy.mode();
         if (policy_mode != ControlMode::Dance && policy_mode != ControlMode::Skill) {
             throw std::runtime_error(
                 std::string("external policy mode must be DANCE or SKILL, got ") +
                 control_mode_name(policy_mode));
         }
-        external_policies_[policy_mode] = &policy;
+        if (key.empty()) key = policy.name();
+        keyed_external_policies_[std::make_pair(policy_mode, key)] = &policy;
+        if (make_default || external_policies_[policy_mode] == nullptr) {
+            external_policies_[policy_mode] = &policy;
+        }
         mode_manager_.set_enabled(policy_mode, true);
     }
 
@@ -130,15 +143,27 @@ public:
         ModeRequest request,
         float control_dt_s)
     {
+        ExternalPolicyAdapter* requested_external_policy = nullptr;
+        if (request.requested && is_external_policy_mode(request.mode)) {
+            requested_external_policy = resolve_external_policy(request.mode, request.external_policy_key);
+        }
+
         const ModeTransition transition = mode_manager_.apply(request);
-        if (transition.reset_policy_history) {
+        bool external_policy_changed = false;
+        if (requested_external_policy != nullptr) {
+            external_policy_changed = requested_external_policy != active_external_policy_;
+            active_external_policy_ = requested_external_policy;
+            active_external_policy_mode_ = request.mode;
+        }
+
+        if (transition.reset_policy_history || external_policy_changed) {
             reset_policy();
         }
         if (transition.seed_target_from_state) {
             command_target_ = snapshot.q;
         }
-        if (transition.reset_policy_history) {
-            reset_external_policy(mode_manager_.mode(), snapshot);
+        if (transition.reset_policy_history || external_policy_changed) {
+            reset_external_policy(snapshot);
         }
 
         const float dt = std::max(control_dt_s, 1e-6f);
@@ -157,7 +182,8 @@ public:
             return step_loco(snapshot, transition.zero_command ? Command{} : command);
         }
         if (active_mode == ControlMode::Dance || active_mode == ControlMode::Skill) {
-            return step_external_policy(snapshot, transition.zero_command ? Command{} : command);
+            const bool zero_command = transition.zero_command || external_policy_changed;
+            return step_external_policy(snapshot, zero_command ? Command{} : command);
         }
 
         throw std::runtime_error(
@@ -315,7 +341,7 @@ private:
             const ModeTransition transition = mode_manager_.apply(ModeRequest::enter(policy_output.next_mode));
             if (transition.reset_policy_history) {
                 reset_policy();
-                reset_external_policy(mode_manager_.mode(), snapshot);
+                reset_external_policy(snapshot);
             }
             if (transition.seed_target_from_state) {
                 command_target_ = snapshot.q;
@@ -333,6 +359,10 @@ private:
             mode_manager_.mode() == ControlMode::Passive || mode_manager_.mode() == ControlMode::FinalDamping;
         out.target.damping_kd = options_.damping_kd;
         out.telemetry.mode = mode_manager_.mode();
+        if (is_external_policy_mode(mode_manager_.mode())) {
+            ExternalPolicyAdapter* policy = external_policy(mode_manager_.mode());
+            if (policy != nullptr) out.telemetry.external_policy = policy->name();
+        }
         out.telemetry.policy_evaluated = policy_evaluated;
         out.telemetry.policy_steps = policy_steps_;
         out.telemetry.raw_policy_target = raw_policy_target_;
@@ -343,13 +373,45 @@ private:
 
     ExternalPolicyAdapter* external_policy(ControlMode mode) const
     {
+        if (active_external_policy_ != nullptr && active_external_policy_mode_ == mode) {
+            return active_external_policy_;
+        }
+        return default_external_policy(mode);
+    }
+
+    ExternalPolicyAdapter* default_external_policy(ControlMode mode) const
+    {
         const auto it = external_policies_.find(mode);
         return it == external_policies_.end() ? nullptr : it->second;
     }
 
-    void reset_external_policy(ControlMode mode, const RobotSnapshot& snapshot)
+    ExternalPolicyAdapter* resolve_external_policy(ControlMode mode, const std::string& key) const
     {
-        ExternalPolicyAdapter* policy = external_policy(mode);
+        if (!key.empty()) {
+            const auto it = keyed_external_policies_.find(std::make_pair(mode, key));
+            if (it == keyed_external_policies_.end()) {
+                throw std::runtime_error(
+                    std::string("no external policy registered for ") + control_mode_name(mode) +
+                    " key=" + key);
+            }
+            return it->second;
+        }
+        ExternalPolicyAdapter* policy = default_external_policy(mode);
+        if (policy == nullptr) {
+            throw std::runtime_error(
+                std::string("no external policy registered for ") + control_mode_name(mode));
+        }
+        return policy;
+    }
+
+    static bool is_external_policy_mode(ControlMode mode)
+    {
+        return mode == ControlMode::Dance || mode == ControlMode::Skill;
+    }
+
+    void reset_external_policy(const RobotSnapshot& snapshot)
+    {
+        ExternalPolicyAdapter* policy = external_policy(mode_manager_.mode());
         if (policy != nullptr) {
             policy->reset(snapshot);
         }
@@ -367,6 +429,9 @@ private:
     std::array<float, 3> projected_gravity_{0.0f, 0.0f, -1.0f};
     ModeManager mode_manager_{ControlMode::Stand};
     std::map<ControlMode, ExternalPolicyAdapter*> external_policies_;
+    std::map<std::pair<ControlMode, std::string>, ExternalPolicyAdapter*> keyed_external_policies_;
+    ExternalPolicyAdapter* active_external_policy_{nullptr};
+    ControlMode active_external_policy_mode_{ControlMode::Stand};
     float policy_elapsed_s_{kDefaultPolicyDt};
     bool have_previous_raw_policy_target_{false};
     int policy_steps_{0};

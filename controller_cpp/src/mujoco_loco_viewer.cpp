@@ -1449,6 +1449,15 @@ magicbot_loco::ControlMode viewer_control_mode(bool loco, bool passive, bool dan
     return loco ? magicbot_loco::ControlMode::Loco : magicbot_loco::ControlMode::Stand;
 }
 
+magicbot_loco::ModeRequest viewer_mode_request(bool loco, bool passive, bool dance)
+{
+    const magicbot_loco::ControlMode mode = viewer_control_mode(loco, passive, dance);
+    if (mode == magicbot_loco::ControlMode::Dance) {
+        return magicbot_loco::ModeRequest::enter_external(mode, "BeyondMimic");
+    }
+    return magicbot_loco::ModeRequest::enter(mode);
+}
+
 void sync_viewer_mode_flags(magicbot_loco::ControlMode mode, bool& loco, bool& passive, bool& dance)
 {
     passive = mode == magicbot_loco::ControlMode::Passive;
@@ -1901,7 +1910,7 @@ int main(int argc, char** argv)
                 external_output,
                 *beyond_policy,
                 control_mode_for_fsm_state);
-            core.register_external_policy(*beyond_adapter);
+            core.register_external_policy("BeyondMimic", *beyond_adapter, true);
             dance_enabled = true;
         }
 
@@ -2139,8 +2148,7 @@ int main(int argc, char** argv)
                 for (int i = 0; i < steps_per_frame; ++i) {
                     magicbot_loco::RuntimeTickInput tick_input;
                     tick_input.command.velocity = cmd;
-                    tick_input.mode_request =
-                        magicbot_loco::ModeRequest::enter(viewer_control_mode(loco_active, passive_active, dance_active));
+                    tick_input.mode_request = viewer_mode_request(loco_active, passive_active, dance_active);
                     tick_input.control_dt_s = static_cast<float>(model->opt.timestep);
                     tick_input.publish_target = true;
                     const auto tick = runtime.tick(tick_input);
