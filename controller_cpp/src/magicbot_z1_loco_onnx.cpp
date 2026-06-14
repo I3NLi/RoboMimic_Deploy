@@ -6,6 +6,7 @@
 #include "magicbot_loco_core.h"
 #include "magicbot_real_adapter.h"
 #include "magicbot_loco_sdk_adapter.h"
+#include "text_control_command.h"
 
 #include <algorithm>
 #include <array>
@@ -750,24 +751,6 @@ private:
     bool paused_{false};
 };
 
-std::string lower_copy(std::string value)
-{
-    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
-        return static_cast<char>(std::tolower(c));
-    });
-    return value;
-}
-
-bool parse_float_token(const std::string& token, float& value)
-{
-    char* end = nullptr;
-    errno = 0;
-    const float parsed = std::strtof(token.c_str(), &end);
-    if (end == token.c_str() || *end != '\0' || errno == ERANGE) return false;
-    value = parsed;
-    return true;
-}
-
 class UdpCommandInput {
 public:
     UdpCommandInput(const Args& args, std::array<float, 3> initial_command)
@@ -840,39 +823,15 @@ public:
 private:
     void handle_message(std::string message, LiveInputState& out)
     {
-        for (char& ch : message) {
-            if (ch == ',' || ch == ';' || ch == '\n' || ch == '\r' || ch == '\t') ch = ' ';
-        }
-
         std::array<float, 3> cmd = command_;
-        int numeric_index = 0;
-        std::istringstream iss(message);
-        std::string token;
-        while (iss >> token) {
-            const auto eq = token.find('=');
-            if (eq != std::string::npos) {
-                const std::string key = lower_copy(token.substr(0, eq));
-                const std::string val = lower_copy(token.substr(eq + 1));
-                float parsed = 0.0f;
-                if ((key == "vx" || key == "x") && parse_float_token(val, parsed)) {
-                    cmd[0] = clamp_command(parsed);
-                } else if ((key == "vy" || key == "y") && parse_float_token(val, parsed)) {
-                    cmd[1] = clamp_command(parsed);
-                } else if ((key == "wz" || key == "yaw") && parse_float_token(val, parsed)) {
-                    cmd[2] = clamp_command(parsed);
-                } else if (key == "mode") {
-                    handle_word(val, out, cmd);
+        for (const ml::TextControlOperation& op : ml::parse_text_control_operations(std::move(message))) {
+            if (op.type == ml::TextControlOperation::Type::Velocity) {
+                if (op.axis >= 0 && op.axis < 3) {
+                    cmd[static_cast<size_t>(op.axis)] = op.value;
                 }
-                continue;
+            } else {
+                handle_action(op.action, out, cmd);
             }
-
-            float parsed = 0.0f;
-            if (numeric_index < 3 && parse_float_token(token, parsed)) {
-                cmd[static_cast<size_t>(numeric_index)] = clamp_command(parsed);
-                ++numeric_index;
-                continue;
-            }
-            handle_word(lower_copy(token), out, cmd);
         }
 
         command_ = cmd;
@@ -882,42 +841,53 @@ private:
         out.status = "udp packet";
     }
 
-    void handle_word(const std::string& word, LiveInputState& out, std::array<float, 3>& cmd)
+    void handle_action(ml::TextControlAction action, LiveInputState& out, std::array<float, 3>& cmd)
     {
-        if (word == "loco" || word == "run") {
+        switch (action) {
+        case ml::TextControlAction::Loco:
             paused_ = false;
             out.loco_requested = true;
-        } else if (word == "passive" || word == "damping") {
+            break;
+        case ml::TextControlAction::Passive:
             cmd = {0.0f, 0.0f, 0.0f};
             paused_ = false;
             out.passive_requested = true;
-        } else if (word == "dance" || word == "beyond" || word == "beyondmimic") {
+            break;
+        case ml::TextControlAction::Dance:
             paused_ = false;
             out.dance_requested = true;
-        } else if (word == "final" || word == "finaldamping" || word == "final_damping" ||
-                   word == "fail_safe" || word == "failsafe") {
+            break;
+        case ml::TextControlAction::FinalDamping:
             cmd = {0.0f, 0.0f, 0.0f};
             paused_ = false;
             out.final_damping_requested = true;
-        } else if (word == "stand") {
+            break;
+        case ml::TextControlAction::Stand:
             cmd = {0.0f, 0.0f, 0.0f};
             paused_ = false;
             out.stand_requested = true;
-        } else if (word == "toggle") {
+            break;
+        case ml::TextControlAction::ToggleLoco:
             paused_ = false;
             out.toggle_loco_requested = true;
-        } else if (word == "reset" || word == "restand") {
+            break;
+        case ml::TextControlAction::ResetStand:
             cmd = {0.0f, 0.0f, 0.0f};
             paused_ = false;
             out.reset_stand_requested = true;
-        } else if (word == "zero" || word == "x") {
+            break;
+        case ml::TextControlAction::Zero:
             cmd = {0.0f, 0.0f, 0.0f};
-        } else if (word == "pause") {
+            break;
+        case ml::TextControlAction::Pause:
             paused_ = true;
-        } else if (word == "resume") {
+            break;
+        case ml::TextControlAction::Resume:
             paused_ = false;
-        } else if (word == "stop" || word == "exit") {
+            break;
+        case ml::TextControlAction::Stop:
             out.stop_requested = true;
+            break;
         }
     }
 

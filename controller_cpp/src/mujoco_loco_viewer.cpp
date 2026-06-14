@@ -5,6 +5,7 @@
 #include "fsm_external_policy_adapter.h"
 #include "magicbot_loco_core.h"
 #include "mujoco_sim_adapter.h"
+#include "text_control_command.h"
 
 #include <algorithm>
 #include <array>
@@ -1344,24 +1345,6 @@ void destroy_window(XGlWindow& win)
 
 float clamp_cmd(float v) { return std::clamp(v, -1.0f, 1.0f); }
 
-std::string lower_copy(std::string value)
-{
-    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
-        return static_cast<char>(std::tolower(c));
-    });
-    return value;
-}
-
-bool parse_float_token(const std::string& token, float& value)
-{
-    char* end = nullptr;
-    errno = 0;
-    const float parsed = std::strtof(token.c_str(), &end);
-    if (end == token.c_str() || *end != '\0' || errno == ERANGE) return false;
-    value = parsed;
-    return true;
-}
-
 class ViewerUdpCommandInput {
 public:
     explicit ViewerUdpCommandInput(const Args& args, bool dance_enabled)
@@ -1473,61 +1456,29 @@ private:
         bool& running,
         bool& reset_requested)
     {
-        for (char& ch : message) {
-            if (ch == ',' || ch == ';' || ch == '\n' || ch == '\r' || ch == '\t') ch = ' ';
-        }
-
-        int numeric_index = 0;
-        std::istringstream iss(message);
-        std::string token;
-        while (iss >> token) {
-            const auto eq = token.find('=');
-            if (eq != std::string::npos) {
-                const std::string key = lower_copy(token.substr(0, eq));
-                const std::string val = lower_copy(token.substr(eq + 1));
-                float parsed = 0.0f;
-                if ((key == "vx" || key == "x") && parse_float_token(val, parsed)) {
-                    cmd[0] = clamp_cmd(parsed);
-                } else if ((key == "vy" || key == "y") && parse_float_token(val, parsed)) {
-                    cmd[1] = clamp_cmd(parsed);
-                } else if ((key == "wz" || key == "yaw") && parse_float_token(val, parsed)) {
-                    cmd[2] = clamp_cmd(parsed);
-                } else if (key == "mode") {
-                    handle_word(
-                        val,
-                        cmd,
-                        loco_active,
-                        passive_active,
-                        dance_active,
-                        final_damping_active,
-                        paused,
-                        running,
-                        reset_requested);
+        for (const magicbot_loco::TextControlOperation& op :
+             magicbot_loco::parse_text_control_operations(std::move(message))) {
+            if (op.type == magicbot_loco::TextControlOperation::Type::Velocity) {
+                if (op.axis >= 0 && op.axis < 3) {
+                    cmd[static_cast<size_t>(op.axis)] = op.value;
                 }
-                continue;
+            } else {
+                handle_action(
+                    op.action,
+                    cmd,
+                    loco_active,
+                    passive_active,
+                    dance_active,
+                    final_damping_active,
+                    paused,
+                    running,
+                    reset_requested);
             }
-
-            float parsed = 0.0f;
-            if (numeric_index < 3 && parse_float_token(token, parsed)) {
-                cmd[static_cast<size_t>(numeric_index)] = clamp_cmd(parsed);
-                ++numeric_index;
-                continue;
-            }
-            handle_word(
-                lower_copy(token),
-                cmd,
-                loco_active,
-                passive_active,
-                dance_active,
-                final_damping_active,
-                paused,
-                running,
-                reset_requested);
         }
     }
 
-    void handle_word(
-        const std::string& word,
+    void handle_action(
+        magicbot_loco::TextControlAction action,
         std::array<float, 3>& cmd,
         bool& loco_active,
         bool& passive_active,
@@ -1537,14 +1488,16 @@ private:
         bool& running,
         bool& reset_requested)
     {
-        if (word == "loco" || word == "run") {
+        switch (action) {
+        case magicbot_loco::TextControlAction::Loco:
             if (!loco_active || passive_active || dance_active || final_damping_active) reset_requested = true;
             loco_active = true;
             passive_active = false;
             dance_active = false;
             final_damping_active = false;
             paused = false;
-        } else if (word == "stand") {
+            break;
+        case magicbot_loco::TextControlAction::Stand:
             cmd = {0.0f, 0.0f, 0.0f};
             loco_active = false;
             passive_active = false;
@@ -1552,29 +1505,32 @@ private:
             final_damping_active = false;
             reset_requested = true;
             paused = false;
-        } else if (word == "reset" || word == "restand") {
+            break;
+        case magicbot_loco::TextControlAction::ResetStand:
             cmd = {0.0f, 0.0f, 0.0f};
             passive_active = false;
             dance_active = false;
             final_damping_active = false;
             reset_requested = true;
             paused = false;
-        } else if (word == "passive" || word == "damping") {
+            break;
+        case magicbot_loco::TextControlAction::Passive:
             cmd = {0.0f, 0.0f, 0.0f};
             loco_active = false;
             passive_active = true;
             dance_active = false;
             final_damping_active = false;
             paused = false;
-        } else if (word == "final" || word == "finaldamping" || word == "final_damping" ||
-                   word == "fail_safe" || word == "failsafe") {
+            break;
+        case magicbot_loco::TextControlAction::FinalDamping:
             cmd = {0.0f, 0.0f, 0.0f};
             loco_active = false;
             passive_active = false;
             dance_active = false;
             final_damping_active = true;
             paused = false;
-        } else if (word == "dance" || word == "beyond" || word == "beyondmimic") {
+            break;
+        case magicbot_loco::TextControlAction::Dance:
             if (!dance_enabled_) {
                 std::fprintf(stderr, "[Viewer] DANCE ignored; start with --beyond-yaml PATH to enable BeyondMimic\n");
                 return;
@@ -1585,14 +1541,32 @@ private:
             dance_active = true;
             final_damping_active = false;
             paused = false;
-        } else if (word == "zero" || word == "x") {
+            break;
+        case magicbot_loco::TextControlAction::Zero:
             cmd = {0.0f, 0.0f, 0.0f};
-        } else if (word == "pause") {
+            break;
+        case magicbot_loco::TextControlAction::Pause:
             paused = true;
-        } else if (word == "resume") {
+            break;
+        case magicbot_loco::TextControlAction::Resume:
             paused = false;
-        } else if (word == "stop" || word == "exit") {
+            break;
+        case magicbot_loco::TextControlAction::Stop:
             running = false;
+            break;
+        case magicbot_loco::TextControlAction::ToggleLoco:
+            if (loco_active) {
+                loco_active = false;
+                cmd = {0.0f, 0.0f, 0.0f};
+            } else {
+                reset_requested = true;
+                loco_active = true;
+            }
+            passive_active = false;
+            dance_active = false;
+            final_damping_active = false;
+            paused = false;
+            break;
         }
     }
 

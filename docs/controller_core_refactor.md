@@ -128,8 +128,12 @@ moving control logic out of `ControllerCore`.
 When `--beyond-yaml PATH` is supplied, the viewer registers BeyondMimic as the
 same keyed shared `DANCE` external policy used by the real runner; `B` and UDP
 `mode=beyond` / `mode=dance` enter it.
-Viewer UDP also accepts `mode=passive` and `mode=final_damping`, and local
-keyboard shortcuts `M` / `N` request those shared modes.
+Viewer UDP and the real runner UDP input now share `text_control_command.h` for
+text command tokenization and mode aliases (`loco`, `stand`, `passive`,
+`final_damping`, `beyond`, `pause`, `resume`, `stop`, and `zero`). The consumers
+still apply those parsed operations to their own input state; the parser does
+not own policy, safety, or adapter behavior. Local viewer keyboard shortcuts
+`M` / `N` request the same shared passive and final-damping modes.
 The HTTP control endpoint accepts the same mode vocabulary through query
 parameters, for example `POST /control?mode=final_damping` or
 `POST /control?mode=loco&vx=0.2&wz=-0.1`; the main viewer loop consumes those
