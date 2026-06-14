@@ -167,9 +167,10 @@ parameters, for example `POST /control?mode=final_damping` or
 `POST /control?mode=loco&vx=0.2&wz=-0.1`; the main viewer loop consumes those
 requests, maps mode aliases through the same shared action parser used by UDP,
 and then still routes each tick through the shared runtime. The viewer now
-builds a `ModeRequest` only when the operator-desired mode differs from
-`ControllerCore::mode()`; steady ticks pass `ModeRequest::none()` so the viewer
-does not continuously re-command the mode manager. The viewer stores that
+uses the shared `mode_request_for_desired_control_mode()` helper to build a
+`ModeRequest` only when the operator-desired mode or external policy key differs
+from the current core state; steady ticks pass `ModeRequest::none()` so the
+viewer does not continuously re-command the mode manager. The viewer stores that
 operator intent as the shared `ControlMode` enum instead of parallel
 `loco/passive/dance/skill/final_damping` booleans; keyboard, HTTP, and UDP
 inputs only update the desired mode/key before the shared runtime consumes it.

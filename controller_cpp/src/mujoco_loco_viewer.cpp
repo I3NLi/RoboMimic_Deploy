@@ -1601,24 +1601,6 @@ private:
     Clock::time_point last_packet_t_{};
 };
 
-magicbot_loco::ModeRequest viewer_mode_request(
-    magicbot_loco::ControlMode desired_mode,
-    const std::string& external_policy_key,
-    const std::string& last_requested_external_policy_key,
-    magicbot_loco::ControlMode current_mode)
-{
-    const magicbot_loco::ModeRequest request =
-        magicbot_loco::mode_request_for_control_mode(desired_mode, external_policy_key);
-    if (desired_mode == current_mode) {
-        if (magicbot_loco::is_external_policy_mode(desired_mode) &&
-            request.external_policy_key != last_requested_external_policy_key) {
-            return request;
-        }
-        return magicbot_loco::ModeRequest::none();
-    }
-    return request;
-}
-
 void print_cmd(
     const std::array<float, 3>& cmd,
     magicbot_loco::ControlMode desired_mode,
@@ -2436,11 +2418,11 @@ int main(int argc, char** argv)
                 for (int i = 0; i < steps_per_frame; ++i) {
                     magicbot_loco::RuntimeTickInput tick_input;
                     tick_input.command.velocity = cmd;
-                    tick_input.mode_request = viewer_mode_request(
+                    tick_input.mode_request = magicbot_loco::mode_request_for_desired_control_mode(
                         desired_mode,
                         desired_external_policy_key,
-                        last_requested_external_policy_key,
-                        core.mode());
+                        core.mode(),
+                        last_requested_external_policy_key);
                     if (tick_input.mode_request.requested) {
                         if (magicbot_loco::is_external_policy_mode(tick_input.mode_request.mode)) {
                             last_requested_external_policy_key =

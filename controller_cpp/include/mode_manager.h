@@ -83,6 +83,23 @@ inline ModeRequest mode_request_for_control_mode(ControlMode mode, std::string e
     return ModeRequest::enter_external(mode, std::move(external_policy_key));
 }
 
+inline ModeRequest mode_request_for_desired_control_mode(
+    ControlMode desired_mode,
+    std::string external_policy_key,
+    ControlMode current_mode,
+    const std::string& current_external_policy_key = {})
+{
+    const ModeRequest request = mode_request_for_control_mode(desired_mode, std::move(external_policy_key));
+    if (desired_mode != current_mode) {
+        return request;
+    }
+    if (is_external_policy_mode(desired_mode) &&
+        request.external_policy_key != current_external_policy_key) {
+        return request;
+    }
+    return ModeRequest::none();
+}
+
 class ModeManager {
 public:
     explicit ModeManager(ControlMode initial_mode = ControlMode::Stand)

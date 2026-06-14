@@ -172,6 +172,37 @@ void check_mode_request_helpers()
     require(
         default_skill.external_policy_key == ml::kTrackMimicPolicyKey,
         "default skill helper should select TrackMimic");
+
+    const ml::ModeRequest steady_stand = ml::mode_request_for_desired_control_mode(
+        ml::ControlMode::Stand,
+        {},
+        ml::ControlMode::Stand);
+    require(!steady_stand.requested, "desired helper should not re-request current stand");
+
+    const ml::ModeRequest desired_loco = ml::mode_request_for_desired_control_mode(
+        ml::ControlMode::Loco,
+        {},
+        ml::ControlMode::Stand);
+    require(desired_loco.requested, "desired helper should request a different mode");
+    require(desired_loco.mode == ml::ControlMode::Loco, "desired helper different mode");
+
+    const ml::ModeRequest steady_skill = ml::mode_request_for_desired_control_mode(
+        ml::ControlMode::Skill,
+        ml::kTrackMimicPolicyKey,
+        ml::ControlMode::Skill,
+        ml::kTrackMimicPolicyKey);
+    require(!steady_skill.requested, "desired helper should not re-request same external policy");
+
+    const ml::ModeRequest changed_skill_key = ml::mode_request_for_desired_control_mode(
+        ml::ControlMode::Skill,
+        "TrackMimicVariant",
+        ml::ControlMode::Skill,
+        ml::kTrackMimicPolicyKey);
+    require(changed_skill_key.requested, "desired helper should request changed external policy key");
+    require(changed_skill_key.mode == ml::ControlMode::Skill, "desired helper changed external mode");
+    require(
+        changed_skill_key.external_policy_key == "TrackMimicVariant",
+        "desired helper should preserve changed external policy key");
 }
 
 void check_native_fsm_mode_mapper()
