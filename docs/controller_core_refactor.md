@@ -186,20 +186,14 @@ controller_cpp/build_mujoco_viewer/mujoco_loco_viewer --duration 0.2 \
 Viewer HTTP control smoke:
 
 ```bash
-controller_cpp/build_mujoco_viewer/mujoco_loco_viewer --duration 1.0 \
-  --paused --no-realtime --width 640 --height 480 \
-  --camera-stream --camera-port 18181 \
-  --summary-json /tmp/viewer_http_control_summary.json
-
-curl -X POST http://127.0.0.1:18181/reset
-curl -X POST 'http://127.0.0.1:18181/control?mode=final_damping&vx=0.4&vy=0.2&wz=-0.1'
-curl -X POST 'http://127.0.0.1:18181/viewer-event?type=down&x=320&y=240&width=640&height=480&button=0'
-curl -X POST 'http://127.0.0.1:18181/viewer-event?type=move&x=340&y=240&dx=20&dy=0&width=640&height=480&button=0'
-curl -X POST 'http://127.0.0.1:18181/viewer-event?type=up&x=340&y=240&width=640&height=480&button=0'
+scripts/run_viewer_http_control_smoke_native.sh --duration 1.5 --keep-summary
 ```
 
-The summary should include `http_control_commands > 0` and the requested mode
-when `/control` is used.
+The script starts the viewer HTTP server, posts reset plus
+`passive -> stand -> loco -> final_damping`, verifies an invalid mode returns
+HTTP 400, and checks the summary for `mode == FINAL_DAMPING`,
+`http_control_commands >= 4`, `http_reset_requests >= 1`, and advancing
+`sim_steps`.
 
 For an unpaused remote perturb smoke, keep the drag active for a short wall-clock
 interval before sending `type=up`; the summary should report
