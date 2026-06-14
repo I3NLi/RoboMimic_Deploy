@@ -276,7 +276,7 @@ scripts/run_shared_runtime_smoke_suite_native.sh
 
 This composes the focused checks below: shared parser/mode/core checks,
 pure-sim closed-loop disturbance, native viewer HTTP/UDP/external-policy and
-remote perturb paths, Python-facing viewer compatibility paths, and the
+gamepad/remote perturb paths, Python-facing viewer compatibility paths, and the
 real-runner no-robot safety/input gates. The suite only orchestrates existing
 scripts; control, policy, mode, safety, and adapter behavior stay in the shared
 runtime being tested. The Python-facing viewer group also statically checks that
@@ -555,6 +555,29 @@ scripts/run_viewer_udp_external_policy_smoke_native.sh \
 
 This repeats the UDP `DANCE/BeyondMimic` and `SKILL/TrackMimic` trajectory
 checks through the Python-facing viewer launcher.
+
+Viewer gamepad control smoke:
+
+```bash
+scripts/run_viewer_gamepad_control_smoke_native.sh --duration 1.5 --keep-summary
+```
+
+The script starts the viewer with `--gamepad-control` pointed at a FIFO-backed
+fake Linux joystick device, writes `js_event` packets for deadman, LOCO, axis,
+and pause buttons, then checks live `/status` and the summary for LOCO,
+published adapter commands, nonzero policy/sim steps, the expected axis-derived
+command vector, and pause-zero behavior. It also statically guards that the
+viewer gamepad code routes buttons through shared `TextControlAction` handling
+and does not own mode/runtime logic.
+
+Python viewer gamepad control smoke:
+
+```bash
+scripts/run_viewer_gamepad_control_smoke_native.sh \
+  --runner scripts/run_python_mujoco_viewer.py --duration 1.5 --keep-summary
+```
+
+This repeats the fake joystick check through the Python-facing viewer launcher.
 
 Viewer control-station preset smoke:
 
