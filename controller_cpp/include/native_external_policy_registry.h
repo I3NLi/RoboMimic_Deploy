@@ -41,6 +41,8 @@ public:
 
     void register_track_mimic(ControllerCore& core, const std::string& yaml_path)
     {
+        // TrackMimic is a keyed BeyondMimic trajectory-conditioned variant, not
+        // a separate native policy implementation.
         track_policy_ = std::make_unique<::BeyondMimicPolicy>(
             track_state_,
             track_output_,
