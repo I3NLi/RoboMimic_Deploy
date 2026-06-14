@@ -10,6 +10,8 @@ namespace ml = magicbot_loco;
 
 namespace {
 
+ml::JointArray offset_target(ml::JointArray target, float scale);
+
 class FakeAdapter : public ml::RobotAdapter {
 public:
     explicit FakeAdapter(ml::RobotSnapshot snapshot)
@@ -55,6 +57,47 @@ private:
     ml::RobotSnapshot snapshot_;
 };
 
+class FakeExternalPolicy : public ml::ExternalPolicyAdapter {
+public:
+    FakeExternalPolicy(ml::ControlMode mode, const char* name)
+        : mode_(mode),
+          name_(name)
+    {
+    }
+
+    ml::ControlMode mode() const override { return mode_; }
+    const char* name() const override { return name_; }
+
+    void reset(const ml::RobotSnapshot& snapshot) override
+    {
+        ++resets;
+        last_reset_q = snapshot.q;
+    }
+
+    ml::ExternalPolicyOutput step(const ml::ExternalPolicyInput& input) override
+    {
+        ++steps;
+        last_velocity = input.velocity_command;
+        ml::ExternalPolicyOutput out;
+        out.target_motor = offset_target(input.snapshot.q, 0.002f);
+        out.complete = complete_next_step;
+        out.next_mode = next_mode;
+        complete_next_step = false;
+        return out;
+    }
+
+    int resets{0};
+    int steps{0};
+    bool complete_next_step{false};
+    ml::ControlMode next_mode{ml::ControlMode::Stand};
+    ml::JointArray last_reset_q{};
+    std::array<float, 3> last_velocity{0.0f, 0.0f, 0.0f};
+
+private:
+    ml::ControlMode mode_;
+    const char* name_;
+};
+
 void require(bool condition, const std::string& message)
 {
     if (!condition) {
@@ -75,6 +118,18 @@ void require_joint_array_near(
     for (int i = 0; i < ml::kNumJoints; ++i) {
         if (!near(lhs[static_cast<size_t>(i)], rhs[static_cast<size_t>(i)])) {
             throw std::runtime_error(label + ": joint " + std::to_string(i));
+        }
+    }
+}
+
+void require_vec3_near(
+    const std::array<float, 3>& lhs,
+    const std::array<float, 3>& rhs,
+    const std::string& label)
+{
+    for (int i = 0; i < 3; ++i) {
+        if (!near(lhs[static_cast<size_t>(i)], rhs[static_cast<size_t>(i)])) {
+            throw std::runtime_error(label + ": axis " + std::to_string(i));
         }
     }
 }
@@ -173,6 +228,87 @@ void check_runtime_adapter_flow(const std::filesystem::path& config_path)
     require(near(adapter.last_damping_kd, 4.5f), "runtime write_damping kd");
 }
 
+void check_external_policy_flow(const std::filesystem::path& config_path)
+{
+    ml::LocoConfig cfg = ml::load_loco_config(config_path);
+    ml::ControllerCoreOptions options;
+    options.safety.enabled = false;
+
+    {
+        ml::ControllerCore core(cfg, options);
+        bool threw = false;
+        try {
+            (void)core.step(
+                make_snapshot(cfg.default_motor()),
+                ml::Command{},
+                ml::mode_request_for_control_mode(ml::ControlMode::Dance, "MissingDance"),
+                cfg.policy_dt);
+        } catch (const std::runtime_error&) {
+            threw = true;
+        }
+        require(threw, "unregistered DANCE policy should reject mode request");
+    }
+
+    {
+        ml::ControllerCore core(cfg, options);
+        FakeExternalPolicy dance(ml::ControlMode::Dance, "FakeDance");
+        core.register_external_policy("FakeDance", dance, true);
+
+        const ml::JointArray q = offset_target(cfg.default_motor(), 0.004f);
+        const ml::RobotSnapshot snapshot = make_snapshot(q);
+        const ml::Command command{{0.4f, -0.2f, 0.15f}};
+        const auto entered = core.step(
+            snapshot,
+            command,
+            ml::mode_request_for_control_mode(ml::ControlMode::Dance, "FakeDance"),
+            cfg.policy_dt);
+        require(entered.telemetry.mode == ml::ControlMode::Dance, "dance mode telemetry");
+        require(entered.telemetry.external_policy == "FakeDance", "dance external policy telemetry");
+        require(entered.telemetry.policy_evaluated, "dance should evaluate external policy");
+        require(dance.resets == 1, "dance policy should reset on entry");
+        require(dance.steps == 1, "dance policy should step on entry");
+        require_joint_array_near(dance.last_reset_q, q, "dance reset should receive snapshot");
+        require_vec3_near(dance.last_velocity, {0.0f, 0.0f, 0.0f}, "dance entry should zero command");
+
+        const auto continued = core.step(
+            snapshot,
+            command,
+            ml::ModeRequest::none(),
+            cfg.policy_dt);
+        require(continued.telemetry.mode == ml::ControlMode::Dance, "continued dance mode telemetry");
+        require(dance.steps == 2, "dance policy should step again after policy dt");
+        require_vec3_near(dance.last_velocity, command.velocity, "continued dance should preserve command");
+
+        dance.complete_next_step = true;
+        dance.next_mode = ml::ControlMode::FinalDamping;
+        const auto completed = core.step(
+            snapshot,
+            command,
+            ml::ModeRequest::none(),
+            cfg.policy_dt);
+        require(completed.telemetry.mode == ml::ControlMode::FinalDamping, "completed dance next mode");
+        require(completed.target.damping_only, "completed dance should enter damping target");
+        require_joint_array_near(completed.target.q, q, "completed dance should seed target from state");
+    }
+
+    {
+        ml::ControllerCore core(cfg, options);
+        FakeExternalPolicy skill(ml::ControlMode::Skill, "FakeSkill");
+        core.register_external_policy("FakeSkill", skill, true);
+
+        const auto out = core.step(
+            make_snapshot(offset_target(cfg.default_motor(), -0.004f)),
+            ml::Command{{-0.1f, 0.2f, -0.3f}},
+            ml::mode_request_for_control_mode(ml::ControlMode::Skill, "FakeSkill"),
+            cfg.policy_dt);
+        require(out.telemetry.mode == ml::ControlMode::Skill, "skill mode telemetry");
+        require(out.telemetry.external_policy == "FakeSkill", "skill external policy telemetry");
+        require(out.telemetry.policy_evaluated, "skill should evaluate external policy");
+        require(skill.resets == 1, "skill policy should reset on entry");
+        require(skill.steps == 1, "skill policy should step on entry");
+    }
+}
+
 }  // namespace
 
 int main(int argc, char** argv)
@@ -185,6 +321,7 @@ int main(int argc, char** argv)
     try {
         check_stand_passive_final_modes(argv[1]);
         check_runtime_adapter_flow(argv[1]);
+        check_external_policy_flow(argv[1]);
     } catch (const std::exception& error) {
         std::cerr << "[controller_core_check][FAIL] " << error.what() << "\n";
         return 1;
