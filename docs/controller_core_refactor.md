@@ -161,9 +161,10 @@ builds a `ModeRequest` only when the operator-desired mode differs from
 `ControllerCore::mode()`; steady ticks pass `ModeRequest::none()` so the viewer
 does not continuously re-command the mode manager.
 The same HTTP server exposes `GET /status` for control-station telemetry:
-current mode, pause state, velocity command, sim/policy steps, base pose, queue
-depths, and disturbance/control counters. This is display/telemetry only; it
-does not move policy or safety logic out of `ControllerCore`.
+current `ControllerCore` mode, active external policy key/name, pause state,
+velocity command, sim/policy steps, base pose, queue depths, and
+disturbance/control counters. This is display/telemetry only; it does not move
+policy or safety logic out of `ControllerCore`.
 Both the viewer and real runner now build `ModeRequest` objects through the
 shared mode helper, including the default `DANCE -> BeyondMimic` external policy
 key and default `SKILL -> TrackMimic` external policy key, so entrypoints no
@@ -289,8 +290,9 @@ scripts/run_viewer_http_skill_smoke_native.sh --duration 0.8 --keep-summary
 The script registers the BeyondMimic trajectory variant as the shared `SKILL`
 external policy in the viewer, posts `mode=track_mimic` through `/control`, then
 checks live `/status` and the summary for `mode == SKILL`, advancing
-`sim_steps` and `policy_steps`, and at least one HTTP control command. This is
-an entry-path smoke, not a stability acceptance test.
+`sim_steps` and `policy_steps`, active `external_policy == TrackMimic`, and at
+least one HTTP control command. This is an entry-path smoke, not a stability
+acceptance test.
 
 Viewer UDP control smoke:
 

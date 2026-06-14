@@ -59,6 +59,8 @@ using Clock = std::chrono::steady_clock;
 
 namespace {
 
+std::string json_escape(const std::string& value);
+
 struct Args {
     std::string config = "policies/loco_mode/config/LocoMode_lowKp.yaml";
     std::string beyond_yaml;
@@ -191,6 +193,7 @@ struct CameraStreamState {
     std::vector<ViewerHttpEvent> viewer_events;
     std::vector<ViewerControlCommand> control_commands;
     std::string mode{"STAND"};
+    std::string external_policy;
     std::array<float, 3> command{0.0f, 0.0f, 0.0f};
     double timestamp{0.0};
     double sim_time_s{0.0};
@@ -252,6 +255,7 @@ public:
 
     void update_status(
         std::string mode,
+        std::string external_policy,
         bool paused,
         const std::array<float, 3>& command,
         int sim_steps,
@@ -264,6 +268,7 @@ public:
     {
         std::lock_guard<std::mutex> lock(state_->mutex);
         state_->mode = std::move(mode);
+        state_->external_policy = std::move(external_policy);
         state_->paused = paused;
         state_->command = command;
         state_->sim_steps = sim_steps;
@@ -528,6 +533,7 @@ private:
                  << "\"seq\":" << state->seq << ","
                  << "\"timestamp\":" << state->timestamp << ","
                  << "\"mode\":\"" << state->mode << "\","
+                 << "\"external_policy\":\"" << json_escape(state->external_policy) << "\","
                  << "\"paused\":" << (state->paused ? "true" : "false") << ","
                  << "\"cmd\":[" << state->command[0] << "," << state->command[1] << "," << state->command[2] << "],"
                  << "\"sim_time_s\":" << state->sim_time_s << ","
@@ -1299,11 +1305,8 @@ std::string viewer_summary_json(
     const ViewerStats& stats,
     int sim_step,
     int policy_step,
-    bool loco_active,
-    bool passive_active,
-    bool dance_active,
-    bool skill_active,
-    bool final_damping_active,
+    magicbot_loco::ControlMode current_core_mode,
+    const std::string& external_policy,
     bool paused,
     double wall_s,
     int push_body_id)
@@ -1311,7 +1314,8 @@ std::string viewer_summary_json(
     std::ostringstream out;
     out << std::fixed << std::setprecision(6)
         << "{"
-        << "\"mode\":\"" << viewer_mode_label(loco_active, passive_active, dance_active, skill_active, final_damping_active) << "\","
+        << "\"mode\":\"" << magicbot_loco::control_mode_name(current_core_mode) << "\","
+        << "\"external_policy\":\"" << json_escape(external_policy) << "\","
         << "\"paused\":" << (paused ? "true" : "false") << ","
         << "\"wall_s\":" << wall_s << ","
         << "\"sim_time_s\":" << data->time << ","
@@ -2410,6 +2414,8 @@ int main(int argc, char** argv)
         bool final_damping_active = false;
         std::string desired_external_policy_key;
         std::string last_requested_external_policy_key;
+        magicbot_loco::ControlMode current_core_mode = core.mode();
+        std::string current_external_policy;
         bool paused = args.paused;
         bool follow = args.follow;
         bool reset_requested = false;
@@ -2593,6 +2599,8 @@ int main(int argc, char** argv)
                     tick_input.control_dt_s = static_cast<float>(model->opt.timestep);
                     tick_input.publish_target = true;
                     const auto tick = runtime.tick(tick_input);
+                    current_core_mode = tick.core.telemetry.mode;
+                    current_external_policy = tick.core.telemetry.external_policy;
                     sync_viewer_mode_flags(
                         tick.core.telemetry.mode,
                         loco_active,
@@ -2649,7 +2657,8 @@ int main(int argc, char** argv)
 
             if (camera_server) {
                 camera_server->update_status(
-                    viewer_mode_label(loco_active, passive_active, dance_active, skill_active, final_damping_active),
+                    magicbot_loco::control_mode_name(current_core_mode),
+                    current_external_policy,
                     paused,
                     cmd,
                     sim_step,
@@ -2761,11 +2770,8 @@ int main(int argc, char** argv)
                 stats,
                 sim_step,
                 policy_step,
-                loco_active,
-                passive_active,
-                dance_active,
-                skill_active,
-                final_damping_active,
+                current_core_mode,
+                current_external_policy,
                 paused,
                 wall_s,
                 push_body_id);
