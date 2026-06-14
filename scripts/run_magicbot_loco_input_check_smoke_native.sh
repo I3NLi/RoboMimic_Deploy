@@ -6,7 +6,7 @@ PROJECT_ROOT="$( cd "${SCRIPT_DIR}/.." &> /dev/null && pwd )"
 RUNNER="${SCRIPT_DIR}/run_magicbot_loco_native.sh"
 RUNNER_SOURCE="${PROJECT_ROOT}/controller_cpp/src/magicbot_z1_loco_onnx.cpp"
 
-duration="2.8"
+duration="3.0"
 udp_port=""
 keep_log=0
 extra_args=()
@@ -202,6 +202,7 @@ packets = [
     b"mode=beyond",
     b"mode=track_mimic",
     b"mode=passive",
+    b"mode=stand",
     b"mode=reset",
     b"mode=final_damping",
 ]
@@ -226,6 +227,12 @@ for expected in 'mode=LOCO' 'pause-zero' 'mode=PASSIVE' 'reset-stand' 'mode=FINA
         exit 1
     fi
 done
+
+if ! rg -q 'mode=STAND cmd=\[0 0 0\]$' "${log_path}"; then
+    echo "[Smoke][ERROR] missing expected plain STAND output before reset-stand" >&2
+    sed -n '1,240p' "${log_path}" >&2
+    exit 1
+fi
 
 if ! rg -q 'DANCE ignored; add --allow-dance' "${log_path}"; then
     echo "[Smoke][ERROR] expected DANCE request to be blocked without --allow-dance" >&2
@@ -252,4 +259,4 @@ echo "[Smoke] PASSED real-runner UDP input-check"
 if [[ "${keep_log}" -eq 1 ]]; then
     echo "[Smoke] log=${log_path}"
 fi
-rg 'mode=(LOCO|PASSIVE|FINAL_DAMPING)|pause-zero|reset-stand|DANCE ignored|SKILL ignored' "${log_path}"
+rg 'mode=(LOCO|PASSIVE|STAND|FINAL_DAMPING)|pause-zero|reset-stand|DANCE ignored|SKILL ignored' "${log_path}"
