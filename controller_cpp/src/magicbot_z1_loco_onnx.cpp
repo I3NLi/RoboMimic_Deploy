@@ -1068,6 +1068,7 @@ ml::JointArray hold_default_stand(
 void publish_damping_for_duration(
     ml::MagicbotSdkAdapter& robot,
     ml::SdkRobotState& state,
+    ml::ControllerCore& core,
     const Args& args,
     ml::RateWatchdog& rate_watchdog,
     double duration_s)
@@ -1078,9 +1079,11 @@ void publish_damping_for_duration(
     auto next_t = std::chrono::steady_clock::now();
     const auto period = std::chrono::duration_cast<std::chrono::steady_clock::duration>(
         std::chrono::duration<double>(ml::kControlDt));
+    ml::MagicbotRealAdapter real_adapter(robot, state);
+    ml::ControllerRuntime runtime(core, real_adapter);
     for (int i = 0; i < steps && g_running.load(); ++i) {
         rate_watchdog.check();
-        robot.publish_damping(state.snapshot().counts, args.damping_kd);
+        runtime.write_damping(args.damping_kd);
         next_t += period;
         std::this_thread::sleep_until(next_t);
     }
@@ -1250,7 +1253,7 @@ int run_robot_with_finally(const Args& args, const ml::LocoConfig& cfg, ml::Cont
         }
 
         if (debug_entry) {
-            publish_damping_for_duration(robot, state, args, rate_watchdog, args.debug_entry_passive_s);
+            publish_damping_for_duration(robot, state, core, args, rate_watchdog, args.debug_entry_passive_s);
             if (args.debug_entry_only) {
                 std::cout << "[Stage] Debug-entry passive stage complete" << std::endl;
                 hard_exit_code = args.hard_exit_after_final_damping ? 0 : -1;
