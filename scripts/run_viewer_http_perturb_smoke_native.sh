@@ -229,7 +229,18 @@ if ! jq -e '.push_enabled == true and .push_force_norm > 0 and .push_impulse_nor
     cat "${summary_json}" >&2
     exit 1
 fi
+if ! jq -e '
+    .push_force == [35,0,0]
+    and .push_impulse == [0,1,0]
+    and .push_start_s == 0.25
+    and .push_duration_s == 0.12
+    and .push_impulse_time_s == 0.55
+' "${summary_json}" >/dev/null; then
+    echo "[Smoke][ERROR] expected scheduled push vectors/timing in summary" >&2
+    cat "${summary_json}" >&2
+    exit 1
+fi
 
 echo "[Smoke] PASSED viewer HTTP perturb API"
 echo "[Smoke] summary=${summary_json}"
-jq '{sim_steps, http_viewer_events, mouse_perturb_steps, last_perturb_body, last_perturb_body_name, push_body_resolved, push_force_steps, push_impulse_applied, push_force_norm, push_impulse_norm}' "${summary_json}"
+jq '{sim_steps, http_viewer_events, mouse_perturb_steps, last_perturb_body, last_perturb_body_name, push_body_resolved, push_force, push_impulse, push_start_s, push_duration_s, push_impulse_time_s, push_force_steps, push_impulse_applied, push_force_norm, push_impulse_norm}' "${summary_json}"
