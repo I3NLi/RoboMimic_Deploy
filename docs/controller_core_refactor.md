@@ -196,6 +196,9 @@ both use that helper instead of maintaining separate return-mode mappings.
 `NativeBeyondMimicExternalPolicyRegistry` now owns the native BeyondMimic and
 TrackMimic trajectory policy/adapter lifetimes for both entrypoints, so viewer
 and real runner only pass resolved YAML paths into the shared registration path.
+The real-runner dry-run path uses the same registry and steps the shared core
+once through each requested external mode, so YAML/model checks also cover the
+registered DANCE/BeyondMimic and SKILL/TrackMimic trajectory selection path.
 
 The dual-rate validation tool also uses the helper for LOCO entry requests.
 
@@ -276,11 +279,12 @@ Real-runner external-policy gate smoke (no robot connection):
 scripts/run_magicbot_loco_external_policy_smoke_native.sh
 ```
 
-This dry-runs BeyondMimic and BeyondMimic trajectory/TrackMimic YAML loading, then runs
-`--input-check` with explicit `--allow-dance` and `--allow-skill` gates. It sends
-UDP `mode=beyond`, `mode=track_mimic`, and `mode=final_damping`, verifying that
-the real-runner input path accepts DANCE/SKILL only when the matching gates and
-YAML paths are present, without connecting to the robot.
+This dry-runs BeyondMimic and BeyondMimic trajectory/TrackMimic through the
+shared external-policy registry, then runs `--input-check` with explicit
+`--allow-dance` and `--allow-skill` gates. It sends UDP `mode=beyond`,
+`mode=track_mimic`, and `mode=final_damping`, verifying that the real-runner
+input path accepts DANCE/SKILL only when the matching gates and YAML paths are
+present, without connecting to the robot.
 
 Baseline closed-loop smoke:
 

@@ -1,5 +1,3 @@
-#include "native_fsm_policy_types.h"
-#include "beyond_mimic_policy.h"
 #include "controller_core.h"
 #include "controller_runtime.h"
 #include "magicbot_loco_core.h"
@@ -952,6 +950,41 @@ void dry_run(const ml::LocoConfig& cfg, ml::OnnxLocoPolicy& policy)
               << "Target sample range: " << range_string(result.target_motor) << std::endl;
 }
 
+ml::RobotSnapshot dry_run_snapshot(const ml::LocoConfig& cfg)
+{
+    ml::RobotSnapshot snapshot;
+    snapshot.q = cfg.default_motor();
+    snapshot.quat = {1.0f, 0.0f, 0.0f, 0.0f};
+    snapshot.counts = {12, 8, 1, 1};
+    return snapshot;
+}
+
+void dry_run_external_policy(
+    ml::ControllerCore& core,
+    const ml::LocoConfig& cfg,
+    ml::ControlMode mode,
+    const std::string& policy_key,
+    const std::filesystem::path& yaml_path,
+    const std::string& label)
+{
+    const auto output = core.step(
+        dry_run_snapshot(cfg),
+        ml::Command{},
+        ml::mode_request_for_control_mode(mode, policy_key),
+        static_cast<float>(cfg.policy_dt));
+    if (output.telemetry.mode != mode) {
+        throw std::runtime_error(label + " dry-run selected unexpected mode");
+    }
+    if (output.telemetry.external_policy != policy_key) {
+        throw std::runtime_error(label + " dry-run selected unexpected external policy");
+    }
+    if (!output.telemetry.policy_evaluated) {
+        throw std::runtime_error(label + " dry-run did not evaluate external policy");
+    }
+    std::cout << "[DryRun] " << label << " loaded through shared registry: "
+              << yaml_path << std::endl;
+}
+
 ml::JointArray stand_interpolation(
     ml::MagicbotSdkAdapter& robot,
     ml::SdkRobotState& state,
@@ -1454,19 +1487,27 @@ int main(int argc, char** argv)
         if (args.dry_run) {
             ml::OnnxLocoPolicy policy(cfg);
             dry_run(cfg, policy);
+            std::unique_ptr<ml::ControllerCore> dry_core;
+            std::unique_ptr<ml::NativeBeyondMimicExternalPolicyRegistry> external_policies;
+            if (!args.beyond_yaml.empty() || !args.track_mimic_yaml.empty()) {
+                ml::ControllerCoreOptions dry_core_options;
+                dry_core_options.safety.enabled = false;
+                dry_core = std::make_unique<ml::ControllerCore>(cfg, dry_core_options);
+                external_policies = std::make_unique<ml::NativeBeyondMimicExternalPolicyRegistry>(
+                    static_cast<float>(cfg.policy_dt));
+            }
             if (!args.beyond_yaml.empty()) {
                 if (!std::filesystem::exists(args.beyond_yaml)) {
                     throw std::runtime_error("BeyondMimic config not found: " + args.beyond_yaml.string());
                 }
-                StateAndCmd external_state(ml::kNumJoints);
-                PolicyOutput external_output(ml::kNumJoints);
-                BeyondMimicPolicy beyond_policy(
-                    external_state,
-                    external_output,
-                    args.beyond_yaml.string(),
-                    static_cast<float>(cfg.policy_dt));
-                beyond_policy.enter();
-                std::cout << "[DryRun] BeyondMimic loaded: " << args.beyond_yaml << std::endl;
+                external_policies->register_dance(*dry_core, args.beyond_yaml.string());
+                dry_run_external_policy(
+                    *dry_core,
+                    cfg,
+                    ml::ControlMode::Dance,
+                    ml::kBeyondMimicPolicyKey,
+                    args.beyond_yaml,
+                    "BeyondMimic");
             }
             if (!args.track_mimic_yaml.empty()) {
                 if (!std::filesystem::exists(args.track_mimic_yaml)) {
@@ -1474,19 +1515,14 @@ int main(int argc, char** argv)
                         "BeyondMimic trajectory/TrackMimic config not found: " +
                         args.track_mimic_yaml.string());
                 }
-                StateAndCmd external_state(ml::kNumJoints);
-                PolicyOutput external_output(ml::kNumJoints);
-                BeyondMimicPolicy track_policy(
-                    external_state,
-                    external_output,
-                    args.track_mimic_yaml.string(),
-                    static_cast<float>(cfg.policy_dt),
-                    FSMStateName::SKILL_TRACK_MIMIC,
-                    "TrackMimic",
-                    false);
-                track_policy.enter();
-                std::cout << "[DryRun] BeyondMimic TrackMimic trajectory loaded: "
-                          << args.track_mimic_yaml << std::endl;
+                external_policies->register_track_mimic(*dry_core, args.track_mimic_yaml.string());
+                dry_run_external_policy(
+                    *dry_core,
+                    cfg,
+                    ml::ControlMode::Skill,
+                    ml::kTrackMimicPolicyKey,
+                    args.track_mimic_yaml,
+                    "BeyondMimic TrackMimic trajectory");
             }
             return 0;
         }
