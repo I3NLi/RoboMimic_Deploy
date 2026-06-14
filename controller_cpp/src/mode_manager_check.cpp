@@ -186,6 +186,20 @@ void check_mode_request_helpers()
     require(desired_loco.requested, "desired helper should request a different mode");
     require(desired_loco.mode == ml::ControlMode::Loco, "desired helper different mode");
 
+    const ml::ModeRequest toggle_from_stand = ml::mode_request_for_loco_toggle(ml::ControlMode::Stand);
+    require(toggle_from_stand.requested, "toggle helper should request from stand");
+    require(toggle_from_stand.mode == ml::ControlMode::Loco, "toggle helper should enter loco from stand");
+    require(toggle_from_stand.external_policy_key.empty(), "toggle helper should clear external key entering loco");
+
+    const ml::ModeRequest toggle_from_loco = ml::mode_request_for_loco_toggle(ml::ControlMode::Loco);
+    require(toggle_from_loco.requested, "toggle helper should request from loco");
+    require(toggle_from_loco.mode == ml::ControlMode::Stand, "toggle helper should return to stand from loco");
+    require(toggle_from_loco.external_policy_key.empty(), "toggle helper should clear external key leaving loco");
+
+    const ml::ModeRequest toggle_from_skill = ml::mode_request_for_loco_toggle(ml::ControlMode::Skill);
+    require(toggle_from_skill.requested, "toggle helper should request from external mode");
+    require(toggle_from_skill.mode == ml::ControlMode::Loco, "toggle helper should enter loco from external mode");
+
     const ml::ModeRequest steady_skill = ml::mode_request_for_desired_control_mode(
         ml::ControlMode::Skill,
         ml::kTrackMimicPolicyKey,

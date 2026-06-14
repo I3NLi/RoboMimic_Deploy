@@ -208,6 +208,9 @@ modes out into runner-specific per-mode booleans.
 The viewer's local keyboard LOCO toggle also routes through the shared text
 action effect, so local keys, HTTP, and UDP no longer maintain separate LOCO
 request semantics.
+The target mode for LOCO toggles now comes from the shared
+`mode_request_for_loco_toggle()` helper in `mode_manager.h`, so viewer and real
+runner do not each encode `LOCO -> STAND, otherwise -> LOCO`.
 The viewer's local reset/re-stand key likewise uses `ResetStand` text action
 semantics instead of directly mutating desired mode/reset fields.
 Repeated viewer DANCE/SKILL keyboard requests fall back through the shared

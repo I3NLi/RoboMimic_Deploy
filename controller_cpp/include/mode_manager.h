@@ -84,6 +84,12 @@ inline ModeRequest mode_request_for_control_mode(ControlMode mode, std::string e
     return ModeRequest::enter_external(mode, std::move(external_policy_key));
 }
 
+inline ModeRequest mode_request_for_loco_toggle(ControlMode current_mode)
+{
+    return mode_request_for_control_mode(
+        current_mode == ControlMode::Loco ? ControlMode::Stand : ControlMode::Loco);
+}
+
 inline ModeRequest mode_request_for_desired_control_mode(
     ControlMode desired_mode,
     std::string external_policy_key,

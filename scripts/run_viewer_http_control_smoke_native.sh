@@ -125,6 +125,12 @@ if "TextControlAction::Stand" not in keyboard_action_body:
 if re.search(r"(desired_mode\s*=(?!=)|desired_external_policy_key\.clear\(\))", keyboard_action_body):
     print("[Smoke][ERROR] viewer keyboard action helper must not set mode fields directly", file=sys.stderr)
     sys.exit(1)
+if "mode_request_for_loco_toggle" not in source:
+    print("[Smoke][ERROR] viewer must use shared mode_request_for_loco_toggle", file=sys.stderr)
+    sys.exit(1)
+if re.search(r"ControlMode::Loco\s*\?\s*.*ControlMode::Stand", source):
+    print("[Smoke][ERROR] viewer must not duplicate LOCO toggle mode mapping", file=sys.stderr)
+    sys.exit(1)
 PY
 
 if [[ -z "${camera_port}" ]]; then

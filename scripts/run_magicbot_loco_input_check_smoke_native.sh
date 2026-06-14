@@ -118,6 +118,13 @@ for field in ("toggle_loco_requested", "reset_stand_requested"):
                 file=sys.stderr,
             )
             sys.exit(1)
+
+if "mode_request_for_loco_toggle" not in source:
+    print("[Smoke][ERROR] real runner must use shared mode_request_for_loco_toggle", file=sys.stderr)
+    sys.exit(1)
+if re.search(r"ControlMode::Loco\s*\?\s*ml::ControlMode::Stand", source):
+    print("[Smoke][ERROR] real runner must not duplicate LOCO toggle mode mapping", file=sys.stderr)
+    sys.exit(1)
 PY
 
 if [[ -z "${udp_port}" ]]; then

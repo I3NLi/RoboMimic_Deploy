@@ -1178,7 +1178,7 @@ int input_check_only(const Args& args)
             break;
         }
         if (state.toggle_loco_requested) {
-            mode = mode == ml::ControlMode::Loco ? ml::ControlMode::Stand : ml::ControlMode::Loco;
+            mode = ml::mode_request_for_loco_toggle(mode).mode;
         }
         if (state.reset_stand_requested) {
             mode = ml::ControlMode::Stand;
@@ -1361,8 +1361,7 @@ int run_robot_with_finally(const Args& args, const ml::LocoConfig& cfg, ml::Cont
                     ml::ControlMode requested_mode = run_mode;
                     bool mode_requested = false;
                     if (input.toggle_loco_requested) {
-                        requested_mode =
-                            run_mode == ml::ControlMode::Loco ? ml::ControlMode::Stand : ml::ControlMode::Loco;
+                        requested_mode = ml::mode_request_for_loco_toggle(run_mode).mode;
                         mode_requested = true;
                     }
                     if (input.mode_request.requested) {

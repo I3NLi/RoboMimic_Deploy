@@ -1445,14 +1445,15 @@ void apply_viewer_text_action(
         reset_requested = true;
     }
     if (effect.toggle_loco) {
-        if (desired_mode == magicbot_loco::ControlMode::Loco) {
-            desired_mode = magicbot_loco::ControlMode::Stand;
+        const magicbot_loco::ModeRequest toggle_request =
+            magicbot_loco::mode_request_for_loco_toggle(desired_mode);
+        if (toggle_request.mode == magicbot_loco::ControlMode::Stand) {
             cmd = {0.0f, 0.0f, 0.0f};
         } else {
             reset_requested = true;
-            desired_mode = magicbot_loco::ControlMode::Loco;
         }
-        desired_external_policy_key.clear();
+        desired_mode = toggle_request.mode;
+        desired_external_policy_key = toggle_request.external_policy_key;
     }
     if (!effect.mode_requested) {
         return;
