@@ -1458,7 +1458,9 @@ void apply_viewer_text_action(
         return;
     }
 
-    const magicbot_loco::ControlMode mode = effect.mode;
+    const magicbot_loco::ModeRequest mode_request =
+        magicbot_loco::mode_request_for_text_control_effect(effect);
+    const magicbot_loco::ControlMode mode = mode_request.mode;
     if (mode == magicbot_loco::ControlMode::Loco && desired_mode != magicbot_loco::ControlMode::Loco) {
         reset_requested = true;
     }
@@ -1466,8 +1468,7 @@ void apply_viewer_text_action(
         reset_requested = true;
     }
     desired_mode = mode;
-    desired_external_policy_key =
-        magicbot_loco::mode_request_for_text_control_effect(effect).external_policy_key;
+    desired_external_policy_key = mode_request.external_policy_key;
 }
 
 class ViewerUdpCommandInput {

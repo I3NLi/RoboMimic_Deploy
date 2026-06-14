@@ -166,7 +166,9 @@ mode, choose the external policy key, clear velocity, pause/resume, stop, toggle
 LOCO, or request a re-stand/reset. Local viewer keyboard shortcuts `M`, `N`,
 `B`, and `T` enter their modes through the same shared action effect; keyboard
 `B`/`T` still preserve the viewer UI convenience of toggling back to `STAND`
-when that external mode is already selected.
+when that external mode is already selected. The viewer derives desired
+mode/external-policy updates from the same shared text-control `ModeRequest`
+helper instead of carrying its own external-policy key mapping.
 The HTTP control endpoint accepts the same mode vocabulary through query
 parameters, for example `POST /control?mode=final_damping` or
 `POST /control?mode=loco&vx=0.2&wz=-0.1`; the main viewer loop consumes those
