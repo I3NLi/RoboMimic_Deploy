@@ -1212,26 +1212,6 @@ void reset_sim(
     mj_forward(model, data);
 }
 
-magicbot_loco::ControlMode control_mode_for_fsm_state(FSMStateName state)
-{
-    switch (state) {
-    case FSMStateName::PASSIVE:
-        return magicbot_loco::ControlMode::Passive;
-    case FSMStateName::FIXEDPOSE:
-        return magicbot_loco::ControlMode::Stand;
-    case FSMStateName::LOCOMODE:
-    case FSMStateName::SKILL_COOLDOWN:
-        return magicbot_loco::ControlMode::Loco;
-    case FSMStateName::SKILL_BEYOND_MIMIC:
-    case FSMStateName::SKILL_DANCE:
-        return magicbot_loco::ControlMode::Dance;
-    case FSMStateName::SKILL_TRACK_MIMIC:
-        return magicbot_loco::ControlMode::Skill;
-    default:
-        return magicbot_loco::ControlMode::Skill;
-    }
-}
-
 std::string body_name(const mjModel* model, int body_id)
 {
     if (body_id <= 0) return "";

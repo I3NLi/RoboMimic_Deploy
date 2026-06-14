@@ -190,6 +190,9 @@ switch trajectory variants without leaving and re-entering the mode first. The
 real runner now also stores its operator/input mode as shared `ControlMode`
 values, so it no longer carries a parallel local `RunMode` enum or duplicate
 mode-name/request mapping.
+The native FSM state names and their `FSMStateName -> ControlMode` completion
+mapper live in `native_fsm_states.h`; viewer and real external-policy adapters
+both use that helper instead of maintaining separate return-mode mappings.
 
 The dual-rate validation tool also uses the helper for LOCO entry requests.
 

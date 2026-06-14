@@ -482,26 +482,6 @@ bool skill_request_allowed(const Args& args, const char* prefix)
     return true;
 }
 
-ml::ControlMode control_mode_for_fsm_state(FSMStateName state)
-{
-    switch (state) {
-    case FSMStateName::PASSIVE:
-        return ml::ControlMode::Passive;
-    case FSMStateName::FIXEDPOSE:
-        return ml::ControlMode::Stand;
-    case FSMStateName::LOCOMODE:
-    case FSMStateName::SKILL_COOLDOWN:
-        return ml::ControlMode::Loco;
-    case FSMStateName::SKILL_BEYOND_MIMIC:
-    case FSMStateName::SKILL_DANCE:
-        return ml::ControlMode::Dance;
-    case FSMStateName::SKILL_TRACK_MIMIC:
-        return ml::ControlMode::Skill;
-    default:
-        return ml::ControlMode::Skill;
-    }
-}
-
 class TerminalKeyboardInput {
 public:
     TerminalKeyboardInput(std::array<float, 3> initial_command, float step)

@@ -1,4 +1,5 @@
 #include "mode_manager.h"
+#include "native_fsm_states.h"
 
 #include <iostream>
 #include <stdexcept>
@@ -173,6 +174,28 @@ void check_mode_request_helpers()
         "default skill helper should select TrackMimic");
 }
 
+void check_native_fsm_mode_mapper()
+{
+    require(
+        control_mode_for_fsm_state(FSMStateName::PASSIVE) == ml::ControlMode::Passive,
+        "native PASSIVE should map to PASSIVE");
+    require(
+        control_mode_for_fsm_state(FSMStateName::FIXEDPOSE) == ml::ControlMode::Stand,
+        "native FIXEDPOSE should map to STAND");
+    require(
+        control_mode_for_fsm_state(FSMStateName::LOCOMODE) == ml::ControlMode::Loco,
+        "native LOCOMODE should map to LOCO");
+    require(
+        control_mode_for_fsm_state(FSMStateName::SKILL_COOLDOWN) == ml::ControlMode::Loco,
+        "native SKILL_COOLDOWN should map back to LOCO");
+    require(
+        control_mode_for_fsm_state(FSMStateName::SKILL_BEYOND_MIMIC) == ml::ControlMode::Dance,
+        "native BeyondMimic should map to DANCE");
+    require(
+        control_mode_for_fsm_state(FSMStateName::SKILL_TRACK_MIMIC) == ml::ControlMode::Skill,
+        "native TrackMimic trajectory should map to SKILL");
+}
+
 }  // namespace
 
 int main()
@@ -182,6 +205,7 @@ int main()
         check_core_transitions();
         check_external_policy_modes();
         check_mode_request_helpers();
+        check_native_fsm_mode_mapper();
     } catch (const std::exception& error) {
         std::cerr << "[mode_manager_check][FAIL] " << error.what() << "\n";
         return 1;
