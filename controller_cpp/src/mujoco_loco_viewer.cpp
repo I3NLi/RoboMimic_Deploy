@@ -226,11 +226,16 @@ struct CameraStreamState {
     int sim_steps{0};
     int policy_steps{0};
     bool push_enabled{false};
+    std::string push_body;
+    int push_body_id{-1};
+    std::string push_body_resolved;
     std::array<double, 3> push_force{0.0, 0.0, 0.0};
     std::array<double, 3> push_impulse{0.0, 0.0, 0.0};
     double push_start_s{0.0};
     double push_duration_s{0.0};
     double push_impulse_time_s{0.0};
+    double push_force_norm{0.0};
+    double push_impulse_norm{0.0};
     int push_force_steps{0};
     int mouse_perturb_steps{0};
     int http_reset_requests{0};
@@ -244,7 +249,12 @@ struct CameraStreamState {
 
 class CameraStreamServer {
 public:
-    CameraStreamServer(std::string host, int port, const Args& args)
+    CameraStreamServer(
+        std::string host,
+        int port,
+        const Args& args,
+        int push_body_id,
+        std::string push_body_resolved)
         : host_(std::move(host)),
           port_(port),
           state_(std::make_shared<CameraStreamState>())
@@ -254,12 +264,20 @@ public:
                 return std::abs(v) > 1e-12;
             });
         };
+        auto vec3_norm = [](const std::array<double, 3>& value) {
+            return std::sqrt(value[0] * value[0] + value[1] * value[1] + value[2] * value[2]);
+        };
         state_->push_enabled = has_nonzero_vec3(args.push_force) || has_nonzero_vec3(args.push_impulse);
+        state_->push_body = args.push_body;
+        state_->push_body_id = push_body_id;
+        state_->push_body_resolved = std::move(push_body_resolved);
         state_->push_force = args.push_force;
         state_->push_impulse = args.push_impulse;
         state_->push_start_s = args.push_start_s;
         state_->push_duration_s = args.push_duration_s;
         state_->push_impulse_time_s = args.push_impulse_time_s;
+        state_->push_force_norm = vec3_norm(args.push_force);
+        state_->push_impulse_norm = vec3_norm(args.push_impulse);
     }
 
     ~CameraStreamServer() { stop(); }
@@ -594,6 +612,9 @@ private:
                  << "\"http_viewer_events\":" << state->http_viewer_events << ","
                  << "\"http_control_commands\":" << state->http_control_commands << ","
                  << "\"push_enabled\":" << (state->push_enabled ? "true" : "false") << ","
+                 << "\"push_body\":\"" << json_escape(state->push_body) << "\","
+                 << "\"push_body_id\":" << state->push_body_id << ","
+                 << "\"push_body_resolved\":\"" << json_escape(state->push_body_resolved) << "\","
                  << "\"push_force\":["
                  << state->push_force[0] << "," << state->push_force[1] << "," << state->push_force[2] << "],"
                  << "\"push_impulse\":["
@@ -601,6 +622,8 @@ private:
                  << "\"push_start_s\":" << state->push_start_s << ","
                  << "\"push_duration_s\":" << state->push_duration_s << ","
                  << "\"push_impulse_time_s\":" << state->push_impulse_time_s << ","
+                 << "\"push_force_norm\":" << state->push_force_norm << ","
+                 << "\"push_impulse_norm\":" << state->push_impulse_norm << ","
                  << "\"push_force_steps\":" << state->push_force_steps << ","
                  << "\"push_impulse_applied\":" << (state->push_impulse_applied ? "true" : "false") << ","
                  << "\"mouse_perturb_steps\":" << state->mouse_perturb_steps
@@ -2555,7 +2578,12 @@ int main(int argc, char** argv)
 
         std::unique_ptr<CameraStreamServer> camera_server;
         if (args.camera_stream) {
-            camera_server = std::make_unique<CameraStreamServer>(args.camera_host, args.camera_port, args);
+            camera_server = std::make_unique<CameraStreamServer>(
+                args.camera_host,
+                args.camera_port,
+                args,
+                push_body_id,
+                body_name(model, push_body_id));
             camera_server->start();
             std::printf("[CameraStream] %s/health\n", camera_server->url().c_str());
             std::printf("[CameraStream] %s/frame.jpg\n", camera_server->url().c_str());

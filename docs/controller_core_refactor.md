@@ -643,8 +643,8 @@ keeps the drag active for a short wall-clock interval, also schedules a
 world-frame push force plus impulse through the viewer CLI, and checks live
 `/status` telemetry plus the summary for `mouse_perturb_steps > 0`, resolved
 perturb and push body metadata, the configured force/impulse vectors and
-timing, nonzero `push_force_steps`, `push_impulse_applied == true`, nonzero
-force and impulse norms, and advancing `sim_steps`.
+timing, nonzero force/impulse norms, nonzero `push_force_steps`,
+`push_impulse_applied == true`, and advancing `sim_steps`.
 
 Python viewer remote perturb smoke:
 

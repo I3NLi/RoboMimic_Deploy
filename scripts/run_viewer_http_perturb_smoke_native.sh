@@ -169,11 +169,16 @@ sleep 0.4
 post_ok "${status_url}" "live perturb status"
 if ! jq -e '
     .push_enabled == true
+    and .push_body == "pelvis"
+    and .push_body_id > 0
+    and .push_body_resolved == "pelvis"
     and .push_force == [35,0,0]
     and .push_impulse == [0,1,0]
     and .push_start_s == 0.25
     and .push_duration_s == 0.12
     and .push_impulse_time_s == 0.55
+    and .push_force_norm == 35
+    and .push_impulse_norm == 1
     and .push_force_steps > 0
     and .push_impulse_applied == true
 ' "${status_body}" >/dev/null; then
