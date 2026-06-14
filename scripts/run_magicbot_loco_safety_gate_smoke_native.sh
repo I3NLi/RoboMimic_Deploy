@@ -14,6 +14,9 @@ Usage: $0 [--keep-log]
 Smoke-test the real runner safety gates without connecting to a robot. The
 script verifies dry-run policy loading, the default dry-run mode, and that
 --run is rejected unless the explicit high-risk --allow-loco gate is present.
+It also checks that --pd-stand-only remains a lower-risk run path that does not
+need --allow-loco, while still stopping at network preflight before any robot
+connection when the local IP is not assigned.
 EOF
 }
 
@@ -51,6 +54,7 @@ fi
 dry_log="$(mktemp /tmp/magicbot_loco_safety_dry_XXXXXX.log)"
 default_log="$(mktemp /tmp/magicbot_loco_safety_default_XXXXXX.log)"
 blocked_log="$(mktemp /tmp/magicbot_loco_safety_blocked_XXXXXX.log)"
+pd_stand_preflight_log="$(mktemp /tmp/magicbot_loco_safety_pd_stand_XXXXXX.log)"
 exclusive_log="$(mktemp /tmp/magicbot_loco_safety_exclusive_XXXXXX.log)"
 input_source_log="$(mktemp /tmp/magicbot_loco_safety_input_source_XXXXXX.log)"
 live_input_log="$(mktemp /tmp/magicbot_loco_safety_live_input_XXXXXX.log)"
@@ -58,7 +62,8 @@ live_input_log="$(mktemp /tmp/magicbot_loco_safety_live_input_XXXXXX.log)"
 cleanup() {
     if [[ "${keep_log}" -eq 0 ]]; then
         rm -f "${dry_log}" "${default_log}" "${blocked_log}" \
-            "${exclusive_log}" "${input_source_log}" "${live_input_log}"
+            "${pd_stand_preflight_log}" "${exclusive_log}" \
+            "${input_source_log}" "${live_input_log}"
     fi
 }
 trap cleanup EXIT
@@ -102,6 +107,24 @@ if ! rg -q 'refusing ONNX loco without --allow-loco' "${blocked_log}"; then
     exit 1
 fi
 assert_no_robot_path "${blocked_log}"
+
+echo "[Smoke] Checking --pd-stand-only bypasses allow-loco but not network preflight"
+if "${RUNNER}" --run --pd-stand-only --duration 0.01 --local-ip 203.0.113.254 >"${pd_stand_preflight_log}" 2>&1; then
+    echo "[Smoke][ERROR] --pd-stand-only unexpectedly passed with an unassigned local IP" >&2
+    sed -n '1,180p' "${pd_stand_preflight_log}" >&2
+    exit 1
+fi
+if rg -q 'refusing ONNX loco without --allow-loco' "${pd_stand_preflight_log}"; then
+    echo "[Smoke][ERROR] --pd-stand-only was incorrectly blocked by the allow-loco gate" >&2
+    sed -n '1,180p' "${pd_stand_preflight_log}" >&2
+    exit 1
+fi
+if ! rg -q 'local IP 203\.0\.113\.254 is not assigned to this machine' "${pd_stand_preflight_log}"; then
+    echo "[Smoke][ERROR] --pd-stand-only did not stop at local-IP preflight" >&2
+    sed -n '1,180p' "${pd_stand_preflight_log}" >&2
+    exit 1
+fi
+assert_no_robot_path "${pd_stand_preflight_log}"
 
 echo "[Smoke] Checking main modes are mutually exclusive before connection"
 if "${RUNNER}" --connect-check --read-state >"${exclusive_log}" 2>&1; then
@@ -147,6 +170,7 @@ if [[ "${keep_log}" -eq 1 ]]; then
     echo "[Smoke] dry_log=${dry_log}"
     echo "[Smoke] default_log=${default_log}"
     echo "[Smoke] blocked_log=${blocked_log}"
+    echo "[Smoke] pd_stand_preflight_log=${pd_stand_preflight_log}"
     echo "[Smoke] exclusive_log=${exclusive_log}"
     echo "[Smoke] input_source_log=${input_source_log}"
     echo "[Smoke] live_input_log=${live_input_log}"
