@@ -1047,53 +1047,41 @@ ml::JointArray stand_interpolation(
 ml::JointArray hold_default_stand(
     ml::MagicbotSdkAdapter& robot,
     ml::SdkRobotState& state,
-    const ml::LocoConfig& cfg,
+    ml::ControllerCore& core,
     const Args& args,
     ml::RateWatchdog& rate_watchdog,
-    ml::MotionSafety& safety,
     ml::JointArray command_target,
     double duration_s,
     const std::string& label,
     bool hold_until_stopped)
 {
-    const ml::JointArray target_default = cfg.default_motor();
-    const ml::JointArray kp_base = cfg.kps_motor();
-    const ml::JointArray kd_base = cfg.kds_motor();
-    const ml::JointArray tau_limit = cfg.tau_limit_motor();
-    ml::JointArray kp_motor{};
-    ml::JointArray kd_motor{};
-    for (int i = 0; i < ml::kNumJoints; ++i) {
-        kp_motor[i] = kp_base[i] * args.kp_scale;
-        kd_motor[i] = kd_base[i] * args.kd_scale;
-    }
-
     std::cout << "[Stage] Holding default stand (" << label << "): "
               << (hold_until_stopped ? "until stopped" : std::to_string(duration_s) + "s") << std::endl;
+    core.seed_target(command_target);
     auto start = std::chrono::steady_clock::now();
     auto next_t = start;
     auto last_log = start - std::chrono::seconds(60);
     const auto period = std::chrono::duration_cast<std::chrono::steady_clock::duration>(
         std::chrono::duration<double>(ml::kControlDt));
     ml::MagicbotRealAdapter real_adapter(robot, state);
+    ml::ControllerRuntime runtime(core, real_adapter);
+    bool first_tick = true;
     while (g_running.load()) {
         const auto now = std::chrono::steady_clock::now();
         if (!hold_until_stopped && std::chrono::duration<double>(now - start).count() >= duration_s) break;
         rate_watchdog.check();
-        const auto snap = state.snapshot();
-        const auto limited =
-            ml::torque_limited_target(target_default, snap.q, snap.dq, kp_motor, kd_motor, tau_limit, cfg.tau_limit_scale);
-        command_target = ml::clamp_and_rate_limit(
-            limited,
-            command_target,
-            args.max_target_rate,
-            static_cast<float>(ml::kControlDt),
-            args.joint_limit_margin);
-        safety.check(snap, &command_target, &target_default, nullptr);
-        real_adapter.write_target(
-            make_position_joint_target(command_target, kp_motor, kd_motor, tau_limit, args.damping_kd));
+        ml::RuntimeTickInput tick_input;
+        tick_input.command.velocity = {0.0f, 0.0f, 0.0f};
+        tick_input.mode_request =
+            first_tick ? ml::mode_request_for_control_mode(ml::ControlMode::Stand) : ml::ModeRequest::none();
+        tick_input.control_dt_s = static_cast<float>(ml::kControlDt);
+        const ml::RuntimeTickOutput tick = runtime.tick(tick_input);
+        first_tick = false;
+        command_target = tick.core.target.q;
         if (std::chrono::duration<double>(now - last_log).count() >= args.log_interval) {
-            std::cout << "[" << label << "] q=" << range_string(snap.q) << " target=" << range_string(command_target)
-                      << " counts=" << ml::counts_string(snap.counts) << std::endl;
+            std::cout << "[" << label << "] q=" << range_string(tick.snapshot.q)
+                      << " target=" << range_string(command_target)
+                      << " counts=" << ml::counts_string(tick.snapshot.counts) << std::endl;
             last_log = now;
         }
         next_t += period;
@@ -1309,10 +1297,9 @@ int run_robot_with_finally(const Args& args, const ml::LocoConfig& cfg, ml::Cont
         command_target = hold_default_stand(
             robot,
             state,
-            cfg,
+            core,
             args,
             rate_watchdog,
-            safety,
             command_target,
             args.pre_stand_hold_s,
             "pre-stand",
@@ -1322,10 +1309,9 @@ int run_robot_with_finally(const Args& args, const ml::LocoConfig& cfg, ml::Cont
             command_target = hold_default_stand(
                 robot,
                 state,
-                cfg,
+                core,
                 args,
                 rate_watchdog,
-                safety,
                 command_target,
                 args.duration > 0.0 ? args.duration : 0.0,
                 "pd-stand",
@@ -1464,10 +1450,9 @@ int run_robot_with_finally(const Args& args, const ml::LocoConfig& cfg, ml::Cont
             (void)hold_default_stand(
                 robot,
                 state,
-                cfg,
+                core,
                 args,
                 rate_watchdog,
-                safety,
                 command_target,
                 args.final_stand_hold_s,
                 "final-stand",

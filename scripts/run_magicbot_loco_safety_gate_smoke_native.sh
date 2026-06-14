@@ -102,6 +102,43 @@ if final_pos < 0:
 if disconnect_pos < 0 or final_pos > disconnect_pos:
     print("[Smoke][ERROR] final_damping() must run before robot.disconnect()", file=sys.stderr)
     sys.exit(1)
+
+hold_marker = "ml::JointArray hold_default_stand"
+hold_start = source.find(hold_marker)
+if hold_start < 0:
+    print("[Smoke][ERROR] could not locate hold_default_stand", file=sys.stderr)
+    sys.exit(1)
+hold_brace = source.find("{", hold_start)
+depth = 0
+hold_end = -1
+for index in range(hold_brace, len(source)):
+    if source[index] == "{":
+        depth += 1
+    elif source[index] == "}":
+        depth -= 1
+        if depth == 0:
+            hold_end = index + 1
+            break
+if hold_end < 0:
+    print("[Smoke][ERROR] could not parse hold_default_stand", file=sys.stderr)
+    sys.exit(1)
+hold_body = source[hold_start:hold_end]
+if "ControllerRuntime runtime(core, real_adapter)" not in hold_body or "runtime.tick(tick_input)" not in hold_body:
+    print("[Smoke][ERROR] stand hold must publish through ControllerRuntime.tick", file=sys.stderr)
+    sys.exit(1)
+for forbidden in (
+    "torque_limited_target",
+    "clamp_and_rate_limit",
+    "safety.check",
+    "real_adapter.write_target",
+):
+    if forbidden in hold_body:
+        print(
+            "[Smoke][ERROR] hold_default_stand must not duplicate ControllerCore safety/limit/write logic: "
+            + forbidden,
+            file=sys.stderr,
+        )
+        sys.exit(1)
 PY
 
 dry_log="$(mktemp /tmp/magicbot_loco_safety_dry_XXXXXX.log)"

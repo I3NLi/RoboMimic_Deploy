@@ -113,9 +113,12 @@ a second place for policy, mode, or safety logic.
 `magicbot_z1_loco_onnx.cpp` now routes the real-robot STAND/LOCO runtime loop
 through `ControllerRuntime` and `MagicbotRealAdapter`; debug/passive damping,
 stand interpolation, PD stand-only writes, and the final damping cleanup also
-write through the real adapter boundary. The existing staged safety flow is
-preserved: dry-run, connect-check, read-state, debug/passive damping, stand
-interpolation, and PD stand-only remain outside high-risk LOCO execution.
+write through the real adapter boundary. PD stand hold stages now generate the
+STAND target through `ControllerCore` via `ControllerRuntime.tick()`, so target
+limiting, gains, and motion safety stay shared even in the lower-risk
+stand-only path. The existing staged safety flow is preserved: dry-run,
+connect-check, read-state, debug/passive damping, stand interpolation, and
+PD stand-only remain outside high-risk LOCO execution.
 LOCO still requires the explicit `--allow-loco` gate; real-runner DANCE requests
 are ignored unless `--allow-dance` is also set with `--beyond-yaml PATH`. When
 `--beyond-yaml PATH` is supplied, the runner registers BeyondMimic as the keyed

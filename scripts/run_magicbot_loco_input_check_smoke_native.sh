@@ -136,7 +136,17 @@ if re.search(r"ControlMode::Loco\s*\?\s*ml::ControlMode::Stand", source):
 if "reset-stand input missing shared mode request" not in source:
     print("[Smoke][ERROR] real runner must require reset-stand shared mode request", file=sys.stderr)
     sys.exit(1)
-if "mode_request_for_control_mode(ml::ControlMode::Stand" in source:
+
+reset_branch_start = source.find("if (input.reset_stand_requested)")
+reset_branch_end = source.find("const std::string requested_external_policy_key", reset_branch_start)
+if reset_branch_start < 0 or reset_branch_end < 0:
+    print("[Smoke][ERROR] could not locate real runner reset branch", file=sys.stderr)
+    sys.exit(1)
+reset_branch = source[reset_branch_start:reset_branch_end]
+if "reset_mode_request = input.mode_request" not in reset_branch:
+    print("[Smoke][ERROR] real runner reset branch must reuse the shared input mode request", file=sys.stderr)
+    sys.exit(1)
+if "mode_request_for_control_mode(ml::ControlMode::Stand" in reset_branch:
     print("[Smoke][ERROR] real runner reset branch must not rebuild stand requests locally", file=sys.stderr)
     sys.exit(1)
 
