@@ -1660,9 +1660,16 @@ void apply_viewer_keyboard_text_action(
     if (effect.mode_requested &&
         (effect.mode == magicbot_loco::ControlMode::Dance || effect.mode == magicbot_loco::ControlMode::Skill) &&
         desired_mode == effect.mode) {
-        desired_mode = magicbot_loco::ControlMode::Stand;
-        desired_external_policy_key.clear();
-        cmd = {0.0f, 0.0f, 0.0f};
+        apply_viewer_text_action(
+            magicbot_loco::TextControlAction::Stand,
+            cmd,
+            desired_mode,
+            desired_external_policy_key,
+            dance_enabled,
+            skill_enabled,
+            paused,
+            running,
+            reset_requested);
         return;
     }
 

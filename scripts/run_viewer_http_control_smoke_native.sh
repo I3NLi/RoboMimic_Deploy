@@ -96,7 +96,7 @@ block = match.group(1)
 if "TextControlAction::ToggleLoco" not in block:
     print("[Smoke][ERROR] viewer L key must route through TextControlAction::ToggleLoco", file=sys.stderr)
     sys.exit(1)
-if re.search(r"desired_mode\s*=", block):
+if re.search(r"desired_mode\s*=(?!=)", block):
     print("[Smoke][ERROR] viewer L key must not set desired_mode directly", file=sys.stderr)
     sys.exit(1)
 r_match = re.search(r"case XK_r:\s*case XK_R:(.*?)case XK_f:", source, re.S)
@@ -107,8 +107,23 @@ r_block = r_match.group(1)
 if "TextControlAction::ResetStand" not in r_block:
     print("[Smoke][ERROR] viewer R key must route through TextControlAction::ResetStand", file=sys.stderr)
     sys.exit(1)
-if re.search(r"(desired_mode\s*=|reset_requested\s*=|desired_external_policy_key\.clear\(\))", r_block):
+if re.search(r"(desired_mode\s*=(?!=)|reset_requested\s*=(?!=)|desired_external_policy_key\.clear\(\))", r_block):
     print("[Smoke][ERROR] viewer R key must not set reset/mode fields directly", file=sys.stderr)
+    sys.exit(1)
+keyboard_action_match = re.search(
+    r"void apply_viewer_keyboard_text_action\((.*?)\n}\n\nvoid handle_key",
+    source,
+    re.S,
+)
+if not keyboard_action_match:
+    print("[Smoke][ERROR] could not locate apply_viewer_keyboard_text_action", file=sys.stderr)
+    sys.exit(1)
+keyboard_action_body = keyboard_action_match.group(1)
+if "TextControlAction::Stand" not in keyboard_action_body:
+    print("[Smoke][ERROR] repeated viewer external keys must fall back through TextControlAction::Stand", file=sys.stderr)
+    sys.exit(1)
+if re.search(r"(desired_mode\s*=(?!=)|desired_external_policy_key\.clear\(\))", keyboard_action_body):
+    print("[Smoke][ERROR] viewer keyboard action helper must not set mode fields directly", file=sys.stderr)
     sys.exit(1)
 PY
 
