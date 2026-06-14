@@ -150,6 +150,7 @@ packets = [
     b"resume",
     b"mode=passive",
     b"mode=stand",
+    b"mode=reset",
     b"mode=final_damping",
 ]
 
