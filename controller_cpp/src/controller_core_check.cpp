@@ -1,5 +1,6 @@
 #include "controller_runtime.h"
 
+#include <algorithm>
 #include <cmath>
 #include <filesystem>
 #include <iostream>
@@ -59,9 +60,10 @@ private:
 
 class FakeExternalPolicy : public ml::ExternalPolicyAdapter {
 public:
-    FakeExternalPolicy(ml::ControlMode mode, const char* name)
+    FakeExternalPolicy(ml::ControlMode mode, const char* name, float target_scale = 0.002f)
         : mode_(mode),
-          name_(name)
+          name_(name),
+          target_scale_(target_scale)
     {
     }
 
@@ -79,7 +81,7 @@ public:
         ++steps;
         last_velocity = input.velocity_command;
         ml::ExternalPolicyOutput out;
-        out.target_motor = offset_target(input.snapshot.q, 0.002f);
+        out.target_motor = offset_target(input.snapshot.q, target_scale_);
         out.complete = complete_next_step;
         out.next_mode = next_mode;
         complete_next_step = false;
@@ -96,6 +98,7 @@ public:
 private:
     ml::ControlMode mode_;
     const char* name_;
+    float target_scale_{0.002f};
 };
 
 void require(bool condition, const std::string& message)
@@ -381,6 +384,36 @@ void check_external_policy_flow(const std::filesystem::path& config_path)
             second.last_velocity,
             {0.0f, 0.0f, 0.0f},
             "same-mode external switch should zero command");
+    }
+
+    {
+        ml::ControllerCoreOptions limited_options = options;
+        limited_options.max_target_rate = 0.02f;
+        ml::ControllerCore core(cfg, limited_options);
+        FakeExternalPolicy dance(ml::ControlMode::Dance, "LimitedDance", 0.08f);
+        core.register_external_policy("LimitedDance", dance, true);
+
+        const ml::JointArray start_q = cfg.default_motor();
+        core.seed_target(start_q);
+        const auto out = core.step(
+            make_snapshot(start_q),
+            ml::Command{},
+            ml::mode_request_for_control_mode(ml::ControlMode::Dance, "LimitedDance"),
+            cfg.policy_dt);
+        require(out.telemetry.mode == ml::ControlMode::Dance, "limited dance mode telemetry");
+        require(out.telemetry.policy_evaluated, "limited dance should evaluate policy");
+
+        const ml::JointArray raw_target = offset_target(start_q, 0.08f);
+        const float max_delta = limited_options.max_target_rate * cfg.policy_dt;
+        require_joint_array_near(out.telemetry.raw_policy_target, raw_target, "limited dance raw target");
+        for (int i = 0; i < ml::kNumJoints; ++i) {
+            const float raw_delta = raw_target[static_cast<size_t>(i)] - start_q[static_cast<size_t>(i)];
+            const float expected =
+                start_q[static_cast<size_t>(i)] + std::clamp(raw_delta, -max_delta, max_delta);
+            if (!near(out.target.q[static_cast<size_t>(i)], expected)) {
+                throw std::runtime_error("external policy target rate limit: joint " + std::to_string(i));
+            }
+        }
     }
 }
 
