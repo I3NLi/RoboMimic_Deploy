@@ -295,8 +295,9 @@ This covers mode aliases, velocity tokens, shared action effects, and their
 conversion into `ModeRequest` objects for LOCO/STAND/PASSIVE/DANCE/SKILL and
 FINAL_DAMPING. It also verifies the shared UI/input intent semantics for
 zero-command, pause/resume, stop, reset-stand, final damping, DANCE/BeyondMimic,
-and SKILL/TrackMimic so entrypoints can reuse one action interpretation instead
-of each keeping local command/mode mutations.
+SKILL/TrackMimic, and shared walk/run-forward velocity presets so entrypoints
+can reuse one action interpretation instead of each keeping local command/mode
+mutations.
 
 Shared mode transition check:
 
@@ -337,10 +338,11 @@ scripts/run_magicbot_loco_input_check_smoke_native.sh
 ```
 
 This sends UDP text-control packets through `--input-check`, verifies LOCO,
-PASSIVE, and FINAL_DAMPING are observed, verifies DANCE/SKILL stay gated by
-default, and guards keyboard/gamepad/UDP absolute mode inputs against bypassing
-the shared text-control action helpers. It also guards that the real live-input
-helper applies `TextControlIntentState` semantics for zero-command,
+PASSIVE, and FINAL_DAMPING are observed, verifies shared walk/run-forward
+velocity presets reach the real-runner input path, verifies DANCE/SKILL stay
+gated by default, and guards keyboard/gamepad/UDP absolute mode inputs against
+bypassing the shared text-control action helpers. It also guards that the real
+live-input helper applies `TextControlIntentState` semantics for zero-command,
 pause/resume, stop, and reset requests instead of reimplementing those mutations
 inside each input source.
 
@@ -456,14 +458,16 @@ scripts/run_viewer_http_control_smoke_native.sh --duration 1.5 --keep-summary
 ```
 
 The script starts the viewer HTTP server, posts reset plus
-`passive -> stand -> loco -> reset -> pause -> resume -> final_damping`,
+`passive -> stand -> walk -> run_forward -> loco -> reset -> pause -> resume -> final_damping`,
 verifies an invalid mode returns
 HTTP 400, checks live `/status` for `mode == FINAL_DAMPING`, `paused == false`,
 `adapter_backend == mujoco-sim`, `adapter_command_published == true`, and
-`http_control_commands >= 7`, then checks the summary for
-`mode == FINAL_DAMPING`, `http_control_commands >= 7`,
+`http_control_commands >= 9`, then checks the summary for
+`mode == FINAL_DAMPING`, `http_control_commands >= 9`,
 `http_reset_requests >= 1`, published adapter commands, and advancing
-`sim_steps`. With the default duration it also checks periodic viewer stdout for
+`sim_steps`. The live `/status` checks also verify the shared walk and
+run-forward presets publish the expected LOCO command vectors before the final
+damping sequence. With the default duration it also checks periodic viewer stdout for
 `mode=FINAL_DAMPING`, covering the display/log path that reports
 `ControllerCore` telemetry. The script also guards the viewer against direct
 MuJoCo `data->ctrl` writes outside `MujocoSimAdapter`, and against duplicating

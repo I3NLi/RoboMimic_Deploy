@@ -16,6 +16,8 @@ namespace magicbot_loco {
 
 enum class TextControlAction {
     Loco,
+    WalkForward,
+    RunForward,
     Stand,
     ResetStand,
     Passive,
@@ -33,6 +35,8 @@ struct TextControlActionEffect {
     bool mode_requested{false};
     ControlMode mode{ControlMode::Stand};
     bool zero_command{false};
+    bool command_requested{false};
+    std::array<float, 3> command{0.0f, 0.0f, 0.0f};
     bool unpause{false};
     bool pause{false};
     bool stop{false};
@@ -54,6 +58,9 @@ struct TextControlIntentOptions {
     bool dance_enabled{true};
     bool skill_enabled{true};
 };
+
+inline constexpr float kTextControlWalkVx = 0.25f;
+inline constexpr float kTextControlRunVx = 0.65f;
 
 enum class TextControlIntentRejectReason {
     None,
@@ -126,6 +133,14 @@ inline bool text_control_action_from_word(const std::string& word, TextControlAc
         action = TextControlAction::Loco;
         return true;
     }
+    if (word == "walk" || word == "walk_forward") {
+        action = TextControlAction::WalkForward;
+        return true;
+    }
+    if (word == "run_forward" || word == "sprint" || word == "fast") {
+        action = TextControlAction::RunForward;
+        return true;
+    }
     if (word == "stand") {
         action = TextControlAction::Stand;
         return true;
@@ -181,6 +196,20 @@ inline TextControlActionEffect text_control_action_effect(TextControlAction acti
     case TextControlAction::Loco:
         effect.mode_requested = true;
         effect.mode = ControlMode::Loco;
+        effect.unpause = true;
+        break;
+    case TextControlAction::WalkForward:
+        effect.mode_requested = true;
+        effect.mode = ControlMode::Loco;
+        effect.command_requested = true;
+        effect.command = {kTextControlWalkVx, 0.0f, 0.0f};
+        effect.unpause = true;
+        break;
+    case TextControlAction::RunForward:
+        effect.mode_requested = true;
+        effect.mode = ControlMode::Loco;
+        effect.command_requested = true;
+        effect.command = {kTextControlRunVx, 0.0f, 0.0f};
         effect.unpause = true;
         break;
     case TextControlAction::Stand:
@@ -264,6 +293,9 @@ inline TextControlIntentApplyResult apply_text_control_effect_to_intent(
 
     if (effect.zero_command) {
         intent.command = {0.0f, 0.0f, 0.0f};
+    }
+    if (effect.command_requested) {
+        intent.command = effect.command;
     }
     if (effect.pause) {
         intent.paused = true;

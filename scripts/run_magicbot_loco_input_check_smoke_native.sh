@@ -6,7 +6,7 @@ PROJECT_ROOT="$( cd "${SCRIPT_DIR}/.." &> /dev/null && pwd )"
 RUNNER="${SCRIPT_DIR}/run_magicbot_loco_native.sh"
 RUNNER_SOURCE="${PROJECT_ROOT}/controller_cpp/src/magicbot_z1_loco_onnx.cpp"
 
-duration="3.0"
+duration="3.5"
 udp_port=""
 keep_log=0
 extra_args=()
@@ -224,6 +224,8 @@ import time
 
 port = int("${udp_port}")
 packets = [
+    b"walk",
+    b"run_forward",
     b"vx=0.25 vy=-0.10 wz=0.05 mode=loco",
     b"pause",
     b"resume",
@@ -248,7 +250,7 @@ if ! wait "${runner_pid}"; then
 fi
 runner_pid=""
 
-for expected in 'mode=LOCO' 'pause-zero' 'mode=PASSIVE' 'reset-stand' 'mode=FINAL_DAMPING'; do
+for expected in 'mode=LOCO' 'cmd=\[0.25 0 0\]' 'cmd=\[0.65 0 0\]' 'pause-zero' 'mode=PASSIVE' 'reset-stand' 'mode=FINAL_DAMPING'; do
     if ! rg -q "${expected}" "${log_path}"; then
         echo "[Smoke][ERROR] missing expected input-check output: ${expected}" >&2
         sed -n '1,220p' "${log_path}" >&2

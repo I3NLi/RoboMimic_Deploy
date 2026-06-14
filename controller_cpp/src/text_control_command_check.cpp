@@ -61,6 +61,12 @@ void check_aliases()
     ml::TextControlAction action{};
     require(ml::text_control_action_from_word("run", action), "run alias");
     require(action == ml::TextControlAction::Loco, "run should map to loco");
+    require(ml::text_control_action_from_word("walk", action), "walk alias");
+    require(action == ml::TextControlAction::WalkForward, "walk should map to walk-forward preset");
+    require(ml::text_control_action_from_word("run_forward", action), "run_forward alias");
+    require(action == ml::TextControlAction::RunForward, "run_forward should map to run-forward preset");
+    require(ml::text_control_action_from_word("sprint", action), "sprint alias");
+    require(action == ml::TextControlAction::RunForward, "sprint should map to run-forward preset");
     require(ml::text_control_action_from_word("damping", action), "damping alias");
     require(action == ml::TextControlAction::Passive, "damping should map to passive");
     require(ml::text_control_action_from_word("beyondmimic", action), "beyondmimic alias");
@@ -76,13 +82,15 @@ void check_aliases()
 
 void check_order_preserved()
 {
-    const auto ops = ml::parse_text_control_operations("zero vx=0.4 pause resume stop");
-    require(ops.size() == 5, "order preserved op count");
+    const auto ops = ml::parse_text_control_operations("zero walk vx=0.4 run_forward pause resume stop");
+    require(ops.size() == 7, "order preserved op count");
     expect_action(ops[0], ml::TextControlAction::Zero);
-    expect_velocity(ops[1], 0, 0.4f);
-    expect_action(ops[2], ml::TextControlAction::Pause);
-    expect_action(ops[3], ml::TextControlAction::Resume);
-    expect_action(ops[4], ml::TextControlAction::Stop);
+    expect_action(ops[1], ml::TextControlAction::WalkForward);
+    expect_velocity(ops[2], 0, 0.4f);
+    expect_action(ops[3], ml::TextControlAction::RunForward);
+    expect_action(ops[4], ml::TextControlAction::Pause);
+    expect_action(ops[5], ml::TextControlAction::Resume);
+    expect_action(ops[6], ml::TextControlAction::Stop);
 }
 
 void check_invalid_tokens_are_ignored()
@@ -109,8 +117,29 @@ void check_action_effects()
     require(loco.mode_requested, "loco effect should request a mode");
     require(loco.mode == ml::ControlMode::Loco, "loco effect mode");
     require(!loco.zero_command, "loco effect should preserve command");
+    require(!loco.command_requested, "loco effect should not set a preset command");
     require(loco.unpause, "loco effect should unpause");
     require_request(loco, ml::ControlMode::Loco, {}, "loco effect");
+
+    const auto walk = ml::text_control_action_effect(ml::TextControlAction::WalkForward);
+    require(walk.mode_requested, "walk effect should request a mode");
+    require(walk.mode == ml::ControlMode::Loco, "walk effect mode");
+    require(walk.command_requested, "walk effect should set a preset command");
+    require(same_float(walk.command[0], ml::kTextControlWalkVx), "walk effect vx");
+    require(same_float(walk.command[1], 0.0f), "walk effect vy");
+    require(same_float(walk.command[2], 0.0f), "walk effect wz");
+    require(walk.unpause, "walk effect should unpause");
+    require_request(walk, ml::ControlMode::Loco, {}, "walk effect");
+
+    const auto run = ml::text_control_action_effect(ml::TextControlAction::RunForward);
+    require(run.mode_requested, "run-forward effect should request a mode");
+    require(run.mode == ml::ControlMode::Loco, "run-forward effect mode");
+    require(run.command_requested, "run-forward effect should set a preset command");
+    require(same_float(run.command[0], ml::kTextControlRunVx), "run-forward effect vx");
+    require(same_float(run.command[1], 0.0f), "run-forward effect vy");
+    require(same_float(run.command[2], 0.0f), "run-forward effect wz");
+    require(run.unpause, "run-forward effect should unpause");
+    require_request(run, ml::ControlMode::Loco, {}, "run-forward effect");
 
     const auto stand = ml::text_control_action_effect(ml::TextControlAction::Stand);
     require(stand.mode_requested, "stand effect should request a mode");
@@ -182,6 +211,26 @@ void check_intent_application()
     result = ml::apply_text_control_action_to_intent(intent, ml::TextControlAction::Resume);
     require(result.applied, "resume intent should apply");
     require(!intent.paused, "resume intent should unpause");
+
+    intent.reset_requested = false;
+    intent.desired_mode = ml::ControlMode::Stand;
+    intent.command = {0.0f, 0.0f, 0.0f};
+    result = ml::apply_text_control_action_to_intent(intent, ml::TextControlAction::WalkForward);
+    require(result.applied, "walk intent should apply");
+    require(intent.desired_mode == ml::ControlMode::Loco, "walk intent mode");
+    require(intent.reset_requested, "walk intent should request reset entering loco");
+    require(same_float(intent.command[0], ml::kTextControlWalkVx), "walk intent vx");
+    require(same_float(intent.command[1], 0.0f), "walk intent vy");
+    require(same_float(intent.command[2], 0.0f), "walk intent wz");
+
+    intent.reset_requested = false;
+    result = ml::apply_text_control_action_to_intent(intent, ml::TextControlAction::RunForward);
+    require(result.applied, "run-forward intent should apply");
+    require(intent.desired_mode == ml::ControlMode::Loco, "run-forward intent mode");
+    require(!intent.reset_requested, "run-forward intent should not reset while already loco");
+    require(same_float(intent.command[0], ml::kTextControlRunVx), "run-forward intent vx");
+    require(same_float(intent.command[1], 0.0f), "run-forward intent vy");
+    require(same_float(intent.command[2], 0.0f), "run-forward intent wz");
 
     intent.command = {0.6f, -0.2f, 0.4f};
     result = ml::apply_text_control_action_to_intent(intent, ml::TextControlAction::Zero);
