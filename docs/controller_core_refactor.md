@@ -64,8 +64,9 @@ such as Dance and BeyondMimic. It copies `RobotSnapshot` / velocity command into
 the old `StateAndCmd`, runs the wrapped `FSMState`, then converts `PolicyOutput`
 back into `ExternalPolicyOutput` for the shared core. TrackMimic is treated as a
 BeyondMimic trajectory variant: the same `BeyondMimicPolicy` implementation is
-registered under the shared `SKILL` mode/key, and can consume a `motion_file`
-trajectory from its YAML when that artifact is available.
+registered under the shared `SKILL` mode/key, and its YAML must provide a
+`motion_file` trajectory so it remains the trajectory-conditioned BeyondMimic
+path rather than a second policy family.
 
 `native_fsm_policy_types.h` provides the small FSM type surface needed by those
 legacy policy headers without pulling in the old monolithic controller.
@@ -127,10 +128,10 @@ are ignored unless `--allow-dance` is also set with `--beyond-yaml PATH`. When
 shared `DANCE` external policy and accepts gated `mode=beyond` / `mode=dance`
 from UDP, `B` from keyboard input, or an explicitly configured gamepad dance
 button. When `--track-mimic-yaml PATH` is supplied, the runner registers the
-BeyondMimic trajectory variant as the keyed shared `SKILL` external policy;
-`mode=skill` / `mode=track_mimic`, `T` from keyboard input, or an explicitly
-configured gamepad skill button still require the separate `--allow-skill` gate
-on real hardware.
+BeyondMimic trajectory variant as the keyed shared `SKILL` external policy. That
+YAML must include `motion_file`; `mode=skill` / `mode=track_mimic`, `T` from
+keyboard input, or an explicitly configured gamepad skill button still require
+the separate `--allow-skill` gate on real hardware.
 The same UDP input now accepts `mode=passive` / `mode=damping` for shared
 `PASSIVE` and `mode=final`, `mode=finaldamping`, or `mode=final_damping` for
 shared `FINAL_DAMPING`; both clear velocity commands and route through
@@ -157,12 +158,14 @@ When `--beyond-yaml PATH` is supplied, the viewer registers BeyondMimic as the
 same keyed shared `DANCE` external policy used by the real runner; `B` and UDP
 `mode=beyond` / `mode=dance` enter it.
 When `--track-mimic-yaml PATH` is supplied, the viewer registers the BeyondMimic
-trajectory variant as the keyed shared `SKILL` external policy; `T`, UDP text,
-or HTTP `mode=skill` / `mode=track_mimic` enter it.
+trajectory variant as the keyed shared `SKILL` external policy. That YAML must
+include `motion_file`; `T`, UDP text, or HTTP `mode=skill` / `mode=track_mimic`
+enter it.
 The `scripts/run_mujoco_loco_viewer_native.sh --control-station` preset now
-auto-registers both default YAML files when they are present, so the remote
-operation station starts with camera streaming, HTTP control, UDP control,
-DANCE/BeyondMimic, and SKILL/TrackMimic trajectory entrypoints together.
+auto-registers the default BeyondMimic YAML when it is present, and only
+auto-registers the default TrackMimic YAML when it already includes
+`motion_file`, so the remote operation station does not expose a trajectory mode
+without a trajectory.
 `scripts/run_python_mujoco_viewer.py` is the Python-facing compatibility
 entrypoint for that same native shared-runtime viewer; it does not reimplement
 MuJoCo stepping, policy execution, mode switching, or safety logic in Python.
@@ -366,8 +369,10 @@ shared external-policy registry, then runs `--input-check` with explicit
 `--allow-dance` and `--allow-skill` gates. It also statically guards that
 `register_track_mimic()` still creates a `BeyondMimicPolicy` registered as the
 shared `SKILL/TrackMimic` key, rather than introducing a separate TrackMimic
-policy family. The live UDP portion sends `mode=beyond`, `mode=track_mimic`,
-and `mode=final_damping`, verifying that the real-runner input path accepts
+policy family, and that the TrackMimic registration requires `motion_file`. The
+smoke helper generates a temporary minimal trajectory YAML for this test. The
+live UDP portion sends `mode=beyond`, `mode=track_mimic`, and
+`mode=final_damping`, verifying that the real-runner input path accepts
 DANCE/SKILL only when the matching gates and YAML paths are present, without
 connecting to the robot.
 
@@ -461,10 +466,11 @@ Viewer HTTP SKILL / TrackMimic smoke:
 scripts/run_viewer_http_skill_smoke_native.sh --duration 0.8 --keep-summary
 ```
 
-The script registers the BeyondMimic trajectory variant as the shared `SKILL`
-external policy in the viewer, posts `mode=track_mimic` through `/control`, then
-checks live `/status` and the summary for `mode == SKILL`, advancing
-`sim_steps` and `policy_steps`, active `external_policy == TrackMimic`,
+The script generates a temporary `motion_file` trajectory YAML, registers the
+BeyondMimic trajectory variant as the shared `SKILL` external policy in the
+viewer, posts `mode=track_mimic` through `/control`, then checks live `/status`
+and the summary for `mode == SKILL`, advancing `sim_steps` and `policy_steps`,
+active `external_policy == TrackMimic`,
 `adapter_backend == mujoco-sim`, `adapter_command_published == true`, and at
 least one HTTP control command. This is an entry-path smoke, not a stability
 acceptance test.
@@ -555,7 +561,8 @@ entrypoint, keeping the Python command aligned with the native shared runtime.
 ## Next cuts
 
 1. Register additional BeyondMimic trajectory variants through
-   `FsmExternalPolicyAdapter` as distinct keys; do not introduce a separate
-   TrackMimic policy family for the same trained architecture.
+   `FsmExternalPolicyAdapter` as distinct keys with their own `motion_file`
+   YAMLs; do not introduce a separate TrackMimic policy family for the same
+   trained architecture.
 2. Move viewer mode/control API code to send requests only; it must not duplicate
    core policy or safety logic.

@@ -2,6 +2,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+PROJECT_ROOT="$( cd "${SCRIPT_DIR}/.." &> /dev/null && pwd )"
 RUNNER="${SCRIPT_DIR}/run_mujoco_loco_viewer_native.sh"
 
 duration="1.8"
@@ -88,6 +89,14 @@ for tool in curl jq python3 ss rg; do
     fi
 done
 
+resolve_repo_path() {
+    if [[ "$1" == /* ]]; then
+        printf '%s\n' "$1"
+    else
+        printf '%s\n' "${PROJECT_ROOT}/$1"
+    fi
+}
+
 if [[ -z "${udp_port}" ]]; then
     udp_port="$(python3 - <<'PY'
 import socket
@@ -116,7 +125,14 @@ fi
 
 viewer_log="$(mktemp /tmp/magicbot_viewer_udp_external_XXXXXX.log)"
 status_body="$(mktemp /tmp/magicbot_viewer_udp_external_status_XXXXXX.json)"
+track_tmp_dir="$(mktemp -d /tmp/magicbot_track_mimic_XXXXXX)"
+track_mimic_runtime_yaml="${track_tmp_dir}/BeyondMimic.yaml"
 viewer_pid=""
+
+python3 "${SCRIPT_DIR}/make_track_mimic_motion_yaml.py" \
+    --base-yaml "$(resolve_repo_path "${track_mimic_yaml}")" \
+    --output-yaml "${track_mimic_runtime_yaml}" \
+    >/dev/null
 
 cleanup() {
     if [[ -n "${viewer_pid}" ]] && kill -0 "${viewer_pid}" >/dev/null 2>&1; then
@@ -124,6 +140,7 @@ cleanup() {
         wait "${viewer_pid}" >/dev/null 2>&1 || true
     fi
     rm -f "${status_body}" "${viewer_log}"
+    rm -rf "${track_tmp_dir}"
     if [[ "${keep_summary}" -eq 0 ]]; then
         rm -f "${summary_json}"
     fi
@@ -144,7 +161,7 @@ echo "[Smoke] Starting viewer UDP external-policy smoke on 127.0.0.1:${udp_port}
     --udp-bind 127.0.0.1 \
     --udp-port "${udp_port}" \
     --beyond-yaml "${beyond_yaml}" \
-    --track-mimic-yaml "${track_mimic_yaml}" \
+    --track-mimic-yaml "${track_mimic_runtime_yaml}" \
     --summary-json "${summary_json}" \
     "${extra_args[@]}" \
     >"${viewer_log}" 2>&1 &

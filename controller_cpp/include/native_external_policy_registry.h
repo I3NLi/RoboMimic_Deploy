@@ -50,7 +50,7 @@ public:
             policy_dt_,
             ::FSMStateName::SKILL_TRACK_MIMIC,
             "TrackMimic",
-            false);
+            /*require_motion_file=*/true);
         track_adapter_ = std::make_unique<BeyondAdapter>(
             ControlMode::Skill,
             kTrackMimicPolicyKey,

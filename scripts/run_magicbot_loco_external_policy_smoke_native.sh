@@ -108,6 +108,7 @@ required = [
     "::FSMStateName::SKILL_TRACK_MIMIC",
     "ControlMode::Skill",
     "kTrackMimicPolicyKey",
+    "/*require_motion_file=*/true",
     "core.register_external_policy(kTrackMimicPolicyKey",
 ]
 missing = [item for item in required if item not in body]
@@ -132,6 +133,13 @@ if [[ ! -f "${track_mimic_yaml}" ]]; then
     exit 1
 fi
 
+track_tmp_dir="$(mktemp -d /tmp/magicbot_track_mimic_XXXXXX)"
+track_mimic_runtime_yaml="${track_tmp_dir}/BeyondMimic.yaml"
+python3 "${SCRIPT_DIR}/make_track_mimic_motion_yaml.py" \
+    --base-yaml "${track_mimic_yaml}" \
+    --output-yaml "${track_mimic_runtime_yaml}" \
+    >/dev/null
+
 if [[ -z "${udp_port}" ]]; then
     udp_port="$(python3 - <<'PY'
 import socket
@@ -155,6 +163,7 @@ cleanup() {
     if [[ "${keep_log}" -eq 0 ]]; then
         rm -f "${dry_log}" "${input_log}"
     fi
+    rm -rf "${track_tmp_dir}"
 }
 trap cleanup EXIT
 
@@ -162,7 +171,7 @@ echo "[Smoke] Checking dry-run external policy YAML loading"
 "${RUNNER}" \
     --dry-run \
     --beyond-yaml "${beyond_yaml}" \
-    --track-mimic-yaml "${track_mimic_yaml}" \
+    --track-mimic-yaml "${track_mimic_runtime_yaml}" \
     >"${dry_log}" 2>&1
 
 for expected in '[DryRun] BeyondMimic loaded' '[DryRun] BeyondMimic trajectory/TrackMimic key loaded'; do
@@ -184,7 +193,7 @@ echo "[Smoke] Starting allowed external-policy input-check on UDP 127.0.0.1:${ud
     --allow-dance \
     --allow-skill \
     --beyond-yaml "${beyond_yaml}" \
-    --track-mimic-yaml "${track_mimic_yaml}" \
+    --track-mimic-yaml "${track_mimic_runtime_yaml}" \
     >"${input_log}" 2>&1 &
 runner_pid=$!
 

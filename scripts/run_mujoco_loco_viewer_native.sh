@@ -34,6 +34,11 @@ has_arg() {
     return 1
 }
 
+yaml_has_motion_file() {
+    local yaml="$1"
+    [[ -f "${yaml}" ]] && grep -Eq '^[[:space:]]*motion_file[[:space:]]*:' "${yaml}"
+}
+
 CONTROL_STATION=0
 args=()
 for arg in "$@"; do
@@ -69,7 +74,7 @@ if [[ "${CONTROL_STATION}" == "1" ]]; then
     if ! has_arg "--beyond-yaml" "${args[@]}" && [[ -f "${DEFAULT_BEYOND_YAML}" ]]; then
         args+=(--beyond-yaml "${DEFAULT_BEYOND_YAML}")
     fi
-    if ! has_arg "--track-mimic-yaml" "${args[@]}" && [[ -f "${DEFAULT_TRACK_MIMIC_YAML}" ]]; then
+    if ! has_arg "--track-mimic-yaml" "${args[@]}" && yaml_has_motion_file "${DEFAULT_TRACK_MIMIC_YAML}"; then
         args+=(--track-mimic-yaml "${DEFAULT_TRACK_MIMIC_YAML}")
     fi
 fi
