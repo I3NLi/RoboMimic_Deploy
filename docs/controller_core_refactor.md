@@ -213,6 +213,9 @@ The target mode for LOCO toggles now comes from the shared
 runner do not each encode `LOCO -> STAND, otherwise -> LOCO`.
 The viewer's local reset/re-stand key likewise uses `ResetStand` text action
 semantics instead of directly mutating desired mode/reset fields.
+`ResetStand` now carries both the shared `STAND` mode request and the reset flag,
+so entrypoints can preserve re-stand interpolation/reset behavior without
+hard-coding the target mode locally.
 Repeated viewer DANCE/SKILL keyboard requests fall back through the shared
 `Stand` text action instead of hand-writing local mode fields.
 The real runner keyboard LOCO toggle now uses the same `ToggleLoco` text action

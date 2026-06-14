@@ -165,6 +165,8 @@ inline TextControlActionEffect text_control_action_effect(TextControlAction acti
         effect.unpause = true;
         break;
     case TextControlAction::ResetStand:
+        effect.mode_requested = true;
+        effect.mode = ControlMode::Stand;
         effect.zero_command = true;
         effect.unpause = true;
         effect.reset_stand = true;

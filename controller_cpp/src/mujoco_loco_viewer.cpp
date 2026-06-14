@@ -1440,9 +1440,14 @@ void apply_viewer_text_action(
         running = false;
     }
     if (effect.reset_stand) {
-        desired_mode = magicbot_loco::ControlMode::Stand;
-        desired_external_policy_key.clear();
+        const magicbot_loco::ModeRequest reset_request =
+            magicbot_loco::mode_request_for_text_control_effect(effect);
+        if (reset_request.requested) {
+            desired_mode = reset_request.mode;
+            desired_external_policy_key = reset_request.external_policy_key;
+        }
         reset_requested = true;
+        return;
     }
     if (effect.toggle_loco) {
         const magicbot_loco::ModeRequest toggle_request =

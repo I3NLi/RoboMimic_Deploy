@@ -149,9 +149,11 @@ void check_action_effects()
     require(!zero_request.requested, "non-mode effect should not build a mode request");
 
     const auto reset = ml::text_control_action_effect(ml::TextControlAction::ResetStand);
-    require(!reset.mode_requested, "reset effect should leave mode handling to entrypoint");
+    require(reset.mode_requested, "reset effect should request stand mode");
+    require(reset.mode == ml::ControlMode::Stand, "reset effect mode");
     require(reset.zero_command, "reset effect should zero command");
     require(reset.reset_stand, "reset effect should request re-stand/reset");
+    require_request(reset, ml::ControlMode::Stand, {}, "reset effect");
 
     const auto pause = ml::text_control_action_effect(ml::TextControlAction::Pause);
     require(pause.pause, "pause effect should pause");

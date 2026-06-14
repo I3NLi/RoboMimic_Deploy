@@ -1181,7 +1181,7 @@ int input_check_only(const Args& args)
             mode = ml::mode_request_for_loco_toggle(mode).mode;
         }
         if (state.reset_stand_requested) {
-            mode = ml::ControlMode::Stand;
+            mode = state.mode_request.requested ? state.mode_request.mode : ml::ControlMode::Stand;
         }
         if (state.mode_request.requested) {
             bool allowed = true;
@@ -1378,13 +1378,16 @@ int run_robot_with_finally(const Args& args, const ml::LocoConfig& cfg, ml::Cont
                     }
                     if (input.reset_stand_requested) {
                         std::cout << "[Input] Re-stand requested" << std::endl;
+                        const ml::ModeRequest reset_mode_request = input.mode_request.requested
+                            ? input.mode_request
+                            : ml::mode_request_for_control_mode(ml::ControlMode::Stand);
                         raw_cmd = {0.0f, 0.0f, 0.0f};
-                        run_mode = ml::ControlMode::Stand;
-                        run_external_policy_key.clear();
+                        run_mode = reset_mode_request.mode;
+                        run_external_policy_key = reset_mode_request.external_policy_key;
                         command_target = stand_interpolation(robot, state, cfg, args, rate_watchdog);
                         core.seed_target(command_target);
                         core.reset_policy();
-                        pending_mode_request = ml::mode_request_for_control_mode(ml::ControlMode::Stand);
+                        pending_mode_request = reset_mode_request;
                         next_control_t = std::chrono::steady_clock::now();
                         last_log = next_control_t - std::chrono::seconds(60);
                         continue;
