@@ -223,6 +223,12 @@ void check_runtime_adapter_flow(const std::filesystem::path& config_path)
     require(adapter.reads == 2, "runtime should still read when publish_target=false");
     require(adapter.writes == 1, "runtime should not write when publish_target=false");
 
+    ml::JointTarget held_target = adapter.last_target;
+    held_target.q = offset_target(held_target.q, 0.003f);
+    runtime.write_target(held_target);
+    require(adapter.writes == 2, "runtime write_target should call adapter");
+    require_joint_array_near(adapter.last_target.q, held_target.q, "runtime write_target target");
+
     runtime.write_damping(4.5f);
     require(adapter.damping_writes == 1, "runtime write_damping should call adapter");
     require(near(adapter.last_damping_kd, 4.5f), "runtime write_damping kd");

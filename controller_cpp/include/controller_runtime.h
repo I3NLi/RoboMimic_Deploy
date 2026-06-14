@@ -38,6 +38,11 @@ public:
         return out;
     }
 
+    void write_target(const JointTarget& target)
+    {
+        adapter_.write_target(target);
+    }
+
     void write_damping(float damping_kd)
     {
         adapter_.write_damping(damping_kd);

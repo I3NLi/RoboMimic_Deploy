@@ -971,7 +971,7 @@ Summary run_rate_loop(
 
             if (!(real && args.real_forward_only)) {
                 if (real) {
-                    sim_adapter.write_target(local_sim_target);
+                    sim_runtime.write_target(local_sim_target);
                     max_abs_tau = std::max(max_abs_tau, max_abs_ctrl(sim.model, sim.data));
                 } else {
                     max_abs_tau = std::max(max_abs_tau, max_abs_ctrl(sim.model, sim.data));

@@ -105,6 +105,10 @@ if rg -n 'data->ctrl\[[^]]+\]\s*=' "${DUAL_SOURCE}"; then
     echo "[Smoke][ERROR] dual_inference_rate.cpp must not write MuJoCo ctrl directly; use MujocoSimAdapter" >&2
     exit 1
 fi
+if rg -n 'sim_adapter\.write_target' "${DUAL_SOURCE}"; then
+    echo "[Smoke][ERROR] dual_inference_rate.cpp should publish held sim targets through ControllerRuntime" >&2
+    exit 1
+fi
 
 if [[ -z "${summary_json}" ]]; then
     summary_json="$(mktemp /tmp/magicbot_dual_push_XXXXXX.json)"
