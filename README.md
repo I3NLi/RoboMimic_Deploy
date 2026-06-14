@@ -90,8 +90,10 @@ scripts/run_mujoco_loco_viewer_native.sh --camera-stream --camera-port 18080
 ```
 
 Control-station mode opens the camera HTTP stream, the viewer HTTP control API,
-UDP velocity/mode control, and the BeyondMimic DANCE plus TrackMimic trajectory
-entrypoints when their YAML files exist:
+UDP velocity/mode control, and the BeyondMimic DANCE plus trajectory-conditioned
+TrackMimic entrypoints when their YAML files exist. TrackMimic is a
+BeyondMimic-trained path with an extra trajectory input, not a separate control
+architecture:
 
 ```bash
 scripts/run_mujoco_loco_viewer_native.sh --control-station
