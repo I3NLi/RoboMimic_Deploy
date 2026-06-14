@@ -1417,64 +1417,33 @@ void apply_viewer_text_action(
     bool& running,
     bool& reset_requested)
 {
-    const magicbot_loco::TextControlActionEffect effect = magicbot_loco::text_control_action_effect(action);
-    if (effect.mode_requested && effect.mode == magicbot_loco::ControlMode::Dance && !dance_enabled) {
+    magicbot_loco::TextControlIntentState intent;
+    intent.command = cmd;
+    intent.desired_mode = desired_mode;
+    intent.desired_external_policy_key = desired_external_policy_key;
+    intent.paused = paused;
+    intent.running = running;
+    intent.reset_requested = reset_requested;
+
+    const auto result = magicbot_loco::apply_text_control_action_to_intent(
+        intent,
+        action,
+        magicbot_loco::TextControlIntentOptions{dance_enabled, skill_enabled});
+    if (result.reject_reason == magicbot_loco::TextControlIntentRejectReason::DanceDisabled) {
         std::fprintf(stderr, "[Viewer] DANCE ignored; start with --beyond-yaml PATH to enable BeyondMimic\n");
         return;
     }
-    if (effect.mode_requested && effect.mode == magicbot_loco::ControlMode::Skill && !skill_enabled) {
+    if (result.reject_reason == magicbot_loco::TextControlIntentRejectReason::SkillDisabled) {
         std::fprintf(stderr, "[Viewer] SKILL ignored; start with --track-mimic-yaml PATH to enable SKILL/TrackMimic trajectory\n");
         return;
     }
 
-    if (effect.zero_command) {
-        cmd = {0.0f, 0.0f, 0.0f};
-    }
-    if (effect.pause) {
-        paused = true;
-    }
-    if (effect.unpause) {
-        paused = false;
-    }
-    if (effect.stop) {
-        running = false;
-    }
-    if (effect.reset_stand) {
-        const magicbot_loco::ModeRequest reset_request =
-            magicbot_loco::mode_request_for_text_control_effect(effect);
-        if (reset_request.requested) {
-            desired_mode = reset_request.mode;
-            desired_external_policy_key = reset_request.external_policy_key;
-        }
-        reset_requested = true;
-        return;
-    }
-    if (effect.toggle_loco) {
-        const magicbot_loco::ModeRequest toggle_request =
-            magicbot_loco::mode_request_for_loco_toggle(desired_mode);
-        if (toggle_request.mode == magicbot_loco::ControlMode::Stand) {
-            cmd = {0.0f, 0.0f, 0.0f};
-        } else {
-            reset_requested = true;
-        }
-        desired_mode = toggle_request.mode;
-        desired_external_policy_key = toggle_request.external_policy_key;
-    }
-    if (!effect.mode_requested) {
-        return;
-    }
-
-    const magicbot_loco::ModeRequest mode_request =
-        magicbot_loco::mode_request_for_text_control_effect(effect);
-    const magicbot_loco::ControlMode mode = mode_request.mode;
-    if (mode == magicbot_loco::ControlMode::Loco && desired_mode != magicbot_loco::ControlMode::Loco) {
-        reset_requested = true;
-    }
-    if (mode == magicbot_loco::ControlMode::Stand) {
-        reset_requested = true;
-    }
-    desired_mode = mode;
-    desired_external_policy_key = mode_request.external_policy_key;
+    cmd = intent.command;
+    desired_mode = intent.desired_mode;
+    desired_external_policy_key = intent.desired_external_policy_key;
+    paused = intent.paused;
+    running = intent.running;
+    reset_requested = intent.reset_requested;
 }
 
 class ViewerUdpCommandInput {

@@ -159,16 +159,16 @@ MuJoCo stepping, policy execution, mode switching, or safety logic in Python.
 Viewer UDP and the real runner UDP input now share `text_control_command.h` for
 text command tokenization and mode aliases (`loco`, `stand`, `passive`,
 `final_damping`, `beyond`, `track_mimic`, `pause`, `resume`, `stop`, and
-`zero`). The consumers still apply those parsed operations to their own input
-state; the parser does not own policy, safety, or adapter behavior. It does own
-the shared action effect for parsed text controls: which controls request a
-mode, choose the external policy key, clear velocity, pause/resume, stop, toggle
-LOCO, or request a re-stand/reset. Local viewer keyboard shortcuts `M`, `N`,
-`B`, and `T` enter their modes through the same shared action effect; keyboard
-`B`/`T` still preserve the viewer UI convenience of toggling back to `STAND`
-when that external mode is already selected. The viewer derives desired
-mode/external-policy updates from the same shared text-control `ModeRequest`
-helper instead of carrying its own external-policy key mapping.
+`zero`). The parser and shared intent helper do not own policy, safety, or
+adapter behavior, but they do own the input semantics for parsed text controls:
+which controls request a mode, choose the external policy key, clear velocity,
+pause/resume, stop, toggle LOCO, or request a re-stand/reset. The viewer applies
+text, HTTP, UDP, and keyboard text actions through that shared intent helper
+before passing the resulting request to the shared runtime; it no longer carries
+local reset/toggle/mode mutation rules. Local viewer keyboard shortcuts `M`,
+`N`, `B`, and `T` enter their modes through the same shared action effect;
+keyboard `B`/`T` still preserve the viewer UI convenience of toggling back to
+`STAND` when that external mode is already selected.
 The HTTP control endpoint accepts the same mode vocabulary through query
 parameters, for example `POST /control?mode=final_damping` or
 `POST /control?mode=loco&vx=0.2&wz=-0.1`; the main viewer loop consumes those
@@ -220,6 +220,10 @@ The real runner treats that shared reset mode request as required, rather than
 rebuilding a local stand request in the re-stand branch.
 Repeated viewer DANCE/SKILL keyboard requests fall back through the shared
 `Stand` text action instead of hand-writing local mode fields.
+Viewer text/HTTP/UDP/keyboard actions now apply through the shared
+`TextControlIntentState` helper, keeping local operation-station code to request
+translation and user-facing rejection messages instead of duplicating
+reset/toggle/mode mutation rules.
 The real runner keyboard LOCO toggle now uses the same `ToggleLoco` text action
 effect before the run loop turns it into a shared desired-mode request.
 Real-runner relative input flags such as LOCO toggle and re-stand are assigned

@@ -41,6 +41,31 @@ struct TextControlActionEffect {
     std::string external_policy_key;
 };
 
+struct TextControlIntentState {
+    std::array<float, 3> command{0.0f, 0.0f, 0.0f};
+    ControlMode desired_mode{ControlMode::Stand};
+    std::string desired_external_policy_key;
+    bool paused{false};
+    bool running{true};
+    bool reset_requested{false};
+};
+
+struct TextControlIntentOptions {
+    bool dance_enabled{true};
+    bool skill_enabled{true};
+};
+
+enum class TextControlIntentRejectReason {
+    None,
+    DanceDisabled,
+    SkillDisabled,
+};
+
+struct TextControlIntentApplyResult {
+    bool applied{true};
+    TextControlIntentRejectReason reject_reason{TextControlIntentRejectReason::None};
+};
+
 struct TextControlOperation {
     enum class Type {
         Velocity,
@@ -223,6 +248,73 @@ inline ModeRequest mode_request_for_text_control_effect(const TextControlActionE
         return ModeRequest::none();
     }
     return mode_request_for_control_mode(effect.mode, effect.external_policy_key);
+}
+
+inline TextControlIntentApplyResult apply_text_control_effect_to_intent(
+    TextControlIntentState& intent,
+    const TextControlActionEffect& effect,
+    const TextControlIntentOptions& options = TextControlIntentOptions{})
+{
+    if (effect.mode_requested && effect.mode == ControlMode::Dance && !options.dance_enabled) {
+        return {false, TextControlIntentRejectReason::DanceDisabled};
+    }
+    if (effect.mode_requested && effect.mode == ControlMode::Skill && !options.skill_enabled) {
+        return {false, TextControlIntentRejectReason::SkillDisabled};
+    }
+
+    if (effect.zero_command) {
+        intent.command = {0.0f, 0.0f, 0.0f};
+    }
+    if (effect.pause) {
+        intent.paused = true;
+    }
+    if (effect.unpause) {
+        intent.paused = false;
+    }
+    if (effect.stop) {
+        intent.running = false;
+    }
+    if (effect.reset_stand) {
+        const ModeRequest reset_request = mode_request_for_text_control_effect(effect);
+        if (reset_request.requested) {
+            intent.desired_mode = reset_request.mode;
+            intent.desired_external_policy_key = reset_request.external_policy_key;
+        }
+        intent.reset_requested = true;
+        return {};
+    }
+    if (effect.toggle_loco) {
+        const ModeRequest toggle_request = mode_request_for_loco_toggle(intent.desired_mode);
+        if (toggle_request.mode == ControlMode::Stand) {
+            intent.command = {0.0f, 0.0f, 0.0f};
+        } else {
+            intent.reset_requested = true;
+        }
+        intent.desired_mode = toggle_request.mode;
+        intent.desired_external_policy_key = toggle_request.external_policy_key;
+    }
+    if (!effect.mode_requested) {
+        return {};
+    }
+
+    const ModeRequest mode_request = mode_request_for_text_control_effect(effect);
+    if (mode_request.mode == ControlMode::Loco && intent.desired_mode != ControlMode::Loco) {
+        intent.reset_requested = true;
+    }
+    if (mode_request.mode == ControlMode::Stand) {
+        intent.reset_requested = true;
+    }
+    intent.desired_mode = mode_request.mode;
+    intent.desired_external_policy_key = mode_request.external_policy_key;
+    return {};
+}
+
+inline TextControlIntentApplyResult apply_text_control_action_to_intent(
+    TextControlIntentState& intent,
+    TextControlAction action,
+    const TextControlIntentOptions& options = TextControlIntentOptions{})
+{
+    return apply_text_control_effect_to_intent(intent, text_control_action_effect(action), options);
 }
 
 inline std::vector<TextControlOperation> parse_text_control_operations(std::string message)

@@ -163,6 +163,79 @@ void check_action_effects()
     require(stop.stop, "stop effect should request stop");
 }
 
+void check_intent_application()
+{
+    ml::TextControlIntentState intent;
+    intent.command = {0.2f, -0.1f, 0.05f};
+
+    auto result = ml::apply_text_control_action_to_intent(intent, ml::TextControlAction::Loco);
+    require(result.applied, "loco intent should apply");
+    require(intent.desired_mode == ml::ControlMode::Loco, "loco intent mode");
+    require(intent.reset_requested, "entering loco should request reset");
+    require(same_float(intent.command[0], 0.2f), "loco intent should preserve vx");
+
+    result = ml::apply_text_control_action_to_intent(intent, ml::TextControlAction::Pause);
+    require(result.applied, "pause intent should apply");
+    require(intent.paused, "pause intent should pause");
+    require(same_float(intent.command[0], 0.2f), "pause intent should preserve stored command");
+
+    result = ml::apply_text_control_action_to_intent(intent, ml::TextControlAction::Resume);
+    require(result.applied, "resume intent should apply");
+    require(!intent.paused, "resume intent should unpause");
+
+    intent.reset_requested = false;
+    result = ml::apply_text_control_action_to_intent(intent, ml::TextControlAction::Stand);
+    require(result.applied, "stand intent should apply");
+    require(intent.desired_mode == ml::ControlMode::Stand, "stand intent mode");
+    require(intent.reset_requested, "stand intent should request reset");
+    require(intent.command == std::array<float, 3>{0.0f, 0.0f, 0.0f}, "stand intent should zero command");
+
+    intent.reset_requested = false;
+    intent.command = {0.3f, 0.0f, 0.0f};
+    result = ml::apply_text_control_action_to_intent(intent, ml::TextControlAction::ToggleLoco);
+    require(result.applied, "toggle-to-loco intent should apply");
+    require(intent.desired_mode == ml::ControlMode::Loco, "toggle-to-loco intent mode");
+    require(intent.reset_requested, "toggle-to-loco should request reset");
+    require(same_float(intent.command[0], 0.3f), "toggle-to-loco should preserve command");
+
+    intent.reset_requested = false;
+    result = ml::apply_text_control_action_to_intent(intent, ml::TextControlAction::ToggleLoco);
+    require(result.applied, "toggle-to-stand intent should apply");
+    require(intent.desired_mode == ml::ControlMode::Stand, "toggle-to-stand intent mode");
+    require(!intent.reset_requested, "toggle-to-stand should not force reset");
+    require(intent.command == std::array<float, 3>{0.0f, 0.0f, 0.0f}, "toggle-to-stand should zero command");
+
+    intent.command = {0.1f, 0.2f, 0.3f};
+    result = ml::apply_text_control_action_to_intent(intent, ml::TextControlAction::ResetStand);
+    require(result.applied, "reset intent should apply");
+    require(intent.desired_mode == ml::ControlMode::Stand, "reset intent mode");
+    require(intent.reset_requested, "reset intent should set reset flag");
+    require(intent.command == std::array<float, 3>{0.0f, 0.0f, 0.0f}, "reset intent should zero command");
+
+    const auto before_disabled = intent;
+    result = ml::apply_text_control_action_to_intent(
+        intent,
+        ml::TextControlAction::Dance,
+        ml::TextControlIntentOptions{false, true});
+    require(!result.applied, "disabled dance should be rejected");
+    require(
+        result.reject_reason == ml::TextControlIntentRejectReason::DanceDisabled,
+        "disabled dance reject reason");
+    require(intent.command == before_disabled.command, "disabled dance should not change command");
+    require(intent.desired_mode == before_disabled.desired_mode, "disabled dance should not change mode");
+
+    result = ml::apply_text_control_action_to_intent(
+        intent,
+        ml::TextControlAction::Skill,
+        ml::TextControlIntentOptions{true, false});
+    require(!result.applied, "disabled skill should be rejected");
+    require(
+        result.reject_reason == ml::TextControlIntentRejectReason::SkillDisabled,
+        "disabled skill reject reason");
+    require(intent.command == before_disabled.command, "disabled skill should not change command");
+    require(intent.desired_mode == before_disabled.desired_mode, "disabled skill should not change mode");
+}
+
 }  // namespace
 
 int main()
@@ -174,6 +247,7 @@ int main()
         check_order_preserved();
         check_invalid_tokens_are_ignored();
         check_action_effects();
+        check_intent_application();
     } catch (const std::exception& error) {
         std::cerr << "[text_control_command_check][FAIL] " << error.what() << "\n";
         return 1;

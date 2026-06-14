@@ -125,9 +125,16 @@ if "TextControlAction::Stand" not in keyboard_action_body:
 if re.search(r"(desired_mode\s*=(?!=)|desired_external_policy_key\.clear\(\))", keyboard_action_body):
     print("[Smoke][ERROR] viewer keyboard action helper must not set mode fields directly", file=sys.stderr)
     sys.exit(1)
-if "mode_request_for_loco_toggle" not in source:
-    print("[Smoke][ERROR] viewer must use shared mode_request_for_loco_toggle", file=sys.stderr)
+if "apply_text_control_action_to_intent" not in source:
+    print("[Smoke][ERROR] viewer text actions must apply through the shared text-control intent helper", file=sys.stderr)
     sys.exit(1)
+for local_helper in ("mode_request_for_loco_toggle", "mode_request_for_text_control_effect"):
+    if local_helper in source:
+        print(
+            f"[Smoke][ERROR] viewer must not apply text-control mode details locally: {local_helper}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 if re.search(r"ControlMode::Loco\s*\?\s*.*ControlMode::Stand", source):
     print("[Smoke][ERROR] viewer must not duplicate LOCO toggle mode mapping", file=sys.stderr)
     sys.exit(1)
