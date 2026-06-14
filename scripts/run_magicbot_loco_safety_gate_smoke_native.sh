@@ -2,8 +2,10 @@
 set -euo pipefail
 
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+PROJECT_ROOT="$( cd "${SCRIPT_DIR}/.." &> /dev/null && pwd )"
 RUNNER="${SCRIPT_DIR}/run_magicbot_loco_native.sh"
 RUNNER_SOURCE="${SCRIPT_DIR}/../controller_cpp/src/magicbot_z1_loco_onnx.cpp"
+README_PATH="${PROJECT_ROOT}/README.md"
 
 keep_log=0
 
@@ -58,6 +60,44 @@ if rg -n 'MotionSafety[[:space:]]+[A-Za-z_]|safety\.check' "${RUNNER_SOURCE}"; t
     echo "[Smoke][ERROR] magicbot_z1_loco_onnx.cpp must run motion safety through ControllerCore" >&2
     exit 1
 fi
+
+echo "[Smoke] Checking README real safety ladder order"
+python3 - "${README_PATH}" <<'PY'
+import sys
+from pathlib import Path
+
+readme = Path(sys.argv[1]).read_text(encoding="utf-8")
+start = readme.find("## Real-Robot Safety Ladder")
+end = readme.find("## Runtime Notes", start)
+if start < 0 or end < 0:
+    print("[Smoke][ERROR] README is missing the Real-Robot Safety Ladder section", file=sys.stderr)
+    sys.exit(1)
+
+section = readme[start:end]
+required = [
+    "--dry-run",
+    "--connect-check",
+    "--read-state",
+    "--debug-entry-only",
+    "--pd-stand-only",
+    "scripts/run_dual_push_smoke_native.sh",
+    "--allow-loco",
+]
+offset = 0
+for item in required:
+    next_pos = section.find(item, offset)
+    if next_pos < 0:
+        print(f"[Smoke][ERROR] README safety ladder missing or misordered step: {item}", file=sys.stderr)
+        sys.exit(1)
+    offset = next_pos + len(item)
+
+if section.count("--pd-stand-only") != 1:
+    print("[Smoke][ERROR] README safety ladder should contain exactly one PD stand step", file=sys.stderr)
+    sys.exit(1)
+if "--allow-loco" in section[: section.find("scripts/run_dual_push_smoke_native.sh")]:
+    print("[Smoke][ERROR] README safety ladder must not allow LOCO before sim closed-loop smoke", file=sys.stderr)
+    sys.exit(1)
+PY
 
 echo "[Smoke] Checking safety-wall final damping path"
 python3 - "${RUNNER_SOURCE}" <<'PY'

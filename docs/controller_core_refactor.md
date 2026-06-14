@@ -344,7 +344,10 @@ This verifies explicit dry-run policy loading, the default dry-run mode, and
 that `--run` is rejected before any robot connection path unless
 `--allow-loco` is present. It also verifies that `--run --pd-stand-only` is not
 blocked by the high-risk LOCO gate, but still stops at local-IP preflight before
-any SDK connection when the local IP is not assigned. It also checks that the
+any SDK connection when the local IP is not assigned. The smoke also checks that
+`README.md` keeps the real-robot ladder ordered as dry-run, connect-check,
+read-state, passive damping, PD stand, sim closed-loop perturb smoke, then the
+explicitly allowed short real LOCO run. It also checks that the
 real runner does not publish robot commands directly from the main entrypoint;
 SDK writes must stay behind `MagicbotRealAdapter`, independent of the local
 variable name used for the SDK object. A static safety-wall guard verifies that

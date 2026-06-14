@@ -210,9 +210,24 @@ scripts/run_magicbot_loco_native.sh \
   --debug-entry-wait-s 1 \
   --debug-entry-passive-s 2 \
   --debug-entry-tts "Native passive damping test. Please keep clear."
+
+scripts/run_magicbot_loco_native.sh \
+  --run \
+  --pd-stand-only \
+  --duration 3 \
+  --vx 0 --vy 0 --wz 0 \
+  --local-ip 192.168.54.119 \
+  --debug-entry \
+  --debug-entry-wait-s 1 \
+  --debug-entry-passive-s 2 \
+  --stand-time 2 \
+  --final-stand-time 1 \
+  --final-stand-hold-s 0.5
+
+scripts/run_dual_push_smoke_native.sh --duration 1.0
 ```
 
-Only after the above is clean:
+Only after the above is clean, start with a short zero-command LOCO run:
 
 ```bash
 scripts/run_magicbot_loco_native.sh \
