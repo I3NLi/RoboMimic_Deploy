@@ -206,7 +206,8 @@ The real-runner dry-run path uses the same registry and steps the shared core
 once through each requested external mode, so YAML/model checks also cover the
 registered DANCE/BeyondMimic and SKILL/TrackMimic trajectory selection path.
 
-The dual-rate validation tool also uses the helper for LOCO entry requests.
+The dual-rate validation tool also uses the shared desired-mode helper for LOCO
+entry requests instead of carrying its own one-shot requested flag.
 
 The first `ControllerCore` implementation supports `PASSIVE`, `STAND`, `LOCO`,
 and `FINAL_DAMPING`. `DANCE` and `SKILL` are represented in the shared mode enum

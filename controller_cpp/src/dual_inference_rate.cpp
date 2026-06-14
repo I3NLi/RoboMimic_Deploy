@@ -854,7 +854,6 @@ Summary run_rate_loop(
     const double root_y0 = sim.data->qpos[1];
     ml::JointArray previous_policy_target = policy_target;
     bool have_previous_policy_target = false;
-    bool requested_loco = false;
 
 #ifdef ENABLE_MAGICBOT_SDK
     ml::MagicbotSdkAdapter robot;
@@ -895,9 +894,10 @@ Summary run_rate_loop(
                     const double age = robot_state.state_age_ms();
                     if (age >= 0.0) state_age_ms.push_back(age);
                     const auto t0 = std::chrono::steady_clock::now();
-                    const auto mode_request = requested_loco
-                                                  ? ml::ModeRequest::none()
-                                                  : ml::mode_request_for_control_mode(ml::ControlMode::Loco);
+                    const auto mode_request = ml::mode_request_for_desired_control_mode(
+                        ml::ControlMode::Loco,
+                        {},
+                        core.mode());
                     tick.snapshot = snap;
                     tick.core = core.step(snap, command, mode_request, static_cast<float>(control_dt));
                     tick.adapter.backend = "real-state-sim";
@@ -910,9 +910,10 @@ Summary run_rate_loop(
                 {
                     ml::RuntimeTickInput tick_input;
                     tick_input.command = command;
-                    tick_input.mode_request = requested_loco
-                                                  ? ml::ModeRequest::none()
-                                                  : ml::mode_request_for_control_mode(ml::ControlMode::Loco);
+                    tick_input.mode_request = ml::mode_request_for_desired_control_mode(
+                        ml::ControlMode::Loco,
+                        {},
+                        core.mode());
                     tick_input.control_dt_s = static_cast<float>(sim.model->opt.timestep);
                     tick_input.publish_target = true;
                     const auto t0 = std::chrono::steady_clock::now();
@@ -928,7 +929,6 @@ Summary run_rate_loop(
                     max_gravity_xy,
                     std::sqrt(static_cast<double>(gravity[0]) * gravity[0] +
                               static_cast<double>(gravity[1]) * gravity[1]));
-                requested_loco = true;
                 if (tick.core.telemetry.policy_evaluated && have_previous_policy_target) {
                     double jump = 0.0;
                     for (int i = 0; i < ml::kNumJoints; ++i) {
