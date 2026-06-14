@@ -169,7 +169,7 @@ post_ok "${control_url}?mode=final_damping" "final_damping"
 status_ready=0
 for _ in $(seq 1 40); do
     if curl -sf "${status_url}" -o "${status_body}" &&
-       jq -e '.mode == "FINAL_DAMPING" and .paused == false and .http_control_commands >= 6 and .sim_steps > 0 and (.cmd | length) == 3' "${status_body}" >/dev/null; then
+       jq -e '.mode == "FINAL_DAMPING" and .paused == false and .adapter_backend == "mujoco-sim" and .adapter_command_published == true and .http_control_commands >= 6 and .sim_steps > 0 and (.cmd | length) == 3' "${status_body}" >/dev/null; then
         status_ready=1
         break
     fi
@@ -206,6 +206,8 @@ mode="$(jq -r '.mode' "${summary_json}")"
 http_control_commands="$(jq -r '.http_control_commands' "${summary_json}")"
 http_reset_requests="$(jq -r '.http_reset_requests' "${summary_json}")"
 sim_steps="$(jq -r '.sim_steps' "${summary_json}")"
+adapter_backend="$(jq -r '.adapter_backend' "${summary_json}")"
+adapter_command_published="$(jq -r '.adapter_command_published' "${summary_json}")"
 
 if [[ "${mode}" != "FINAL_DAMPING" ]]; then
     echo "[Smoke][ERROR] expected final mode FINAL_DAMPING, got ${mode}" >&2
@@ -227,7 +229,17 @@ if [[ "${sim_steps}" -le 0 ]]; then
     cat "${summary_json}" >&2
     exit 1
 fi
+if [[ "${adapter_backend}" != "mujoco-sim" ]]; then
+    echo "[Smoke][ERROR] expected adapter_backend=mujoco-sim, got ${adapter_backend}" >&2
+    cat "${summary_json}" >&2
+    exit 1
+fi
+if [[ "${adapter_command_published}" != "true" ]]; then
+    echo "[Smoke][ERROR] expected adapter_command_published=true, got ${adapter_command_published}" >&2
+    cat "${summary_json}" >&2
+    exit 1
+fi
 
 echo "[Smoke] PASSED viewer HTTP control API"
 echo "[Smoke] summary=${summary_json}"
-jq '{mode, paused, sim_steps, http_reset_requests, http_control_commands}' "${summary_json}"
+jq '{mode, paused, adapter_backend, adapter_command_published, sim_steps, http_reset_requests, http_control_commands}' "${summary_json}"

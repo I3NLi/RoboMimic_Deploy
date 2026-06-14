@@ -194,6 +194,9 @@ struct CameraStreamState {
     std::vector<ViewerControlCommand> control_commands;
     std::string mode{"STAND"};
     std::string external_policy;
+    std::string adapter_backend;
+    double adapter_state_age_ms{-1.0};
+    bool adapter_command_published{false};
     std::array<float, 3> command{0.0f, 0.0f, 0.0f};
     double timestamp{0.0};
     double sim_time_s{0.0};
@@ -256,6 +259,7 @@ public:
     void update_status(
         std::string mode,
         std::string external_policy,
+        const magicbot_loco::AdapterTelemetry& adapter,
         bool paused,
         const std::array<float, 3>& command,
         int sim_steps,
@@ -269,6 +273,9 @@ public:
         std::lock_guard<std::mutex> lock(state_->mutex);
         state_->mode = std::move(mode);
         state_->external_policy = std::move(external_policy);
+        state_->adapter_backend = adapter.backend;
+        state_->adapter_state_age_ms = adapter.state_age_ms;
+        state_->adapter_command_published = adapter.command_published;
         state_->paused = paused;
         state_->command = command;
         state_->sim_steps = sim_steps;
@@ -534,6 +541,10 @@ private:
                  << "\"timestamp\":" << state->timestamp << ","
                  << "\"mode\":\"" << state->mode << "\","
                  << "\"external_policy\":\"" << json_escape(state->external_policy) << "\","
+                 << "\"adapter_backend\":\"" << json_escape(state->adapter_backend) << "\","
+                 << "\"adapter_state_age_ms\":" << state->adapter_state_age_ms << ","
+                 << "\"adapter_command_published\":"
+                 << (state->adapter_command_published ? "true" : "false") << ","
                  << "\"paused\":" << (state->paused ? "true" : "false") << ","
                  << "\"cmd\":[" << state->command[0] << "," << state->command[1] << "," << state->command[2] << "],"
                  << "\"sim_time_s\":" << state->sim_time_s << ","
@@ -1307,6 +1318,7 @@ std::string viewer_summary_json(
     int policy_step,
     magicbot_loco::ControlMode current_core_mode,
     const std::string& external_policy,
+    const magicbot_loco::AdapterTelemetry& adapter,
     bool paused,
     double wall_s,
     int push_body_id)
@@ -1316,6 +1328,9 @@ std::string viewer_summary_json(
         << "{"
         << "\"mode\":\"" << magicbot_loco::control_mode_name(current_core_mode) << "\","
         << "\"external_policy\":\"" << json_escape(external_policy) << "\","
+        << "\"adapter_backend\":\"" << json_escape(adapter.backend) << "\","
+        << "\"adapter_state_age_ms\":" << adapter.state_age_ms << ","
+        << "\"adapter_command_published\":" << (adapter.command_published ? "true" : "false") << ","
         << "\"paused\":" << (paused ? "true" : "false") << ","
         << "\"wall_s\":" << wall_s << ","
         << "\"sim_time_s\":" << data->time << ","
@@ -2416,6 +2431,7 @@ int main(int argc, char** argv)
         std::string last_requested_external_policy_key;
         magicbot_loco::ControlMode current_core_mode = core.mode();
         std::string current_external_policy;
+        magicbot_loco::AdapterTelemetry current_adapter_telemetry = sim_adapter.telemetry();
         bool paused = args.paused;
         bool follow = args.follow;
         bool reset_requested = false;
@@ -2601,6 +2617,7 @@ int main(int argc, char** argv)
                     const auto tick = runtime.tick(tick_input);
                     current_core_mode = tick.core.telemetry.mode;
                     current_external_policy = tick.core.telemetry.external_policy;
+                    current_adapter_telemetry = tick.adapter;
                     sync_viewer_mode_flags(
                         tick.core.telemetry.mode,
                         loco_active,
@@ -2659,6 +2676,7 @@ int main(int argc, char** argv)
                 camera_server->update_status(
                     magicbot_loco::control_mode_name(current_core_mode),
                     current_external_policy,
+                    current_adapter_telemetry,
                     paused,
                     cmd,
                     sim_step,
@@ -2772,6 +2790,7 @@ int main(int argc, char** argv)
                 policy_step,
                 current_core_mode,
                 current_external_policy,
+                current_adapter_telemetry,
                 paused,
                 wall_s,
                 push_body_id);

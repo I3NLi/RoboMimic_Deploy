@@ -162,9 +162,10 @@ builds a `ModeRequest` only when the operator-desired mode differs from
 does not continuously re-command the mode manager.
 The same HTTP server exposes `GET /status` for control-station telemetry:
 current `ControllerCore` mode, active external policy key/name, pause state,
-velocity command, sim/policy steps, base pose, queue depths, and
-disturbance/control counters. This is display/telemetry only; it does not move
-policy or safety logic out of `ControllerCore`.
+adapter backend/command-published telemetry from `ControllerRuntime`, velocity
+command, sim/policy steps, base pose, queue depths, and disturbance/control
+counters. This is display/telemetry only; it does not move policy or safety
+logic out of `ControllerCore`.
 Both the viewer and real runner now build `ModeRequest` objects through the
 shared mode helper, including the default `DANCE -> BeyondMimic` external policy
 key and default `SKILL -> TrackMimic` external policy key, so entrypoints no
@@ -300,9 +301,11 @@ scripts/run_viewer_http_control_smoke_native.sh --duration 1.5 --keep-summary
 The script starts the viewer HTTP server, posts reset plus
 `passive -> stand -> loco -> pause -> resume -> final_damping`, verifies an invalid mode returns
 HTTP 400, checks live `/status` for `mode == FINAL_DAMPING`, `paused == false`,
-and `http_control_commands >= 6`, then checks the summary for
+`adapter_backend == mujoco-sim`, `adapter_command_published == true`, and
+`http_control_commands >= 6`, then checks the summary for
 `mode == FINAL_DAMPING`, `http_control_commands >= 6`,
-`http_reset_requests >= 1`, and advancing `sim_steps`.
+`http_reset_requests >= 1`, published adapter commands, and advancing
+`sim_steps`.
 
 Viewer HTTP SKILL / TrackMimic smoke:
 
