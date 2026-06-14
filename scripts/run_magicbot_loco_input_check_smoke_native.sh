@@ -72,6 +72,25 @@ if rg -n 'set_live_input_mode_request\(out, ml::mode_request_for_control_mode' "
     exit 1
 fi
 
+echo "[Smoke] Checking real keyboard LOCO uses shared text action"
+python3 - "${RUNNER_SOURCE}" <<'PY'
+import re
+import sys
+
+source = open(sys.argv[1], encoding="utf-8").read()
+match = re.search(r"case 'l':\s*case 'L':(.*?)case 'b':", source, re.S)
+if not match:
+    print("[Smoke][ERROR] could not locate real keyboard L key block", file=sys.stderr)
+    sys.exit(1)
+block = match.group(1)
+if "TextControlAction::ToggleLoco" not in block:
+    print("[Smoke][ERROR] real keyboard L key must route through TextControlAction::ToggleLoco", file=sys.stderr)
+    sys.exit(1)
+if re.search(r"out\\.toggle_loco_requested\\s*=", block):
+    print("[Smoke][ERROR] real keyboard L key must not set toggle_loco_requested directly", file=sys.stderr)
+    sys.exit(1)
+PY
+
 if [[ -z "${udp_port}" ]]; then
     udp_port="$(python3 - <<'PY'
 import socket

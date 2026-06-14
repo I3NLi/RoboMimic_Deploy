@@ -208,6 +208,8 @@ modes out into runner-specific per-mode booleans.
 The viewer's local keyboard LOCO toggle also routes through the shared text
 action effect, so local keys, HTTP, and UDP no longer maintain separate LOCO
 request semantics.
+The real runner keyboard LOCO toggle now uses the same `ToggleLoco` text action
+effect before the run loop turns it into a shared desired-mode request.
 The native FSM state names and their `FSMStateName -> ControlMode` completion
 mapper live in `native_fsm_states.h`; viewer and real external-policy adapters
 both use that helper instead of maintaining separate return-mode mappings.

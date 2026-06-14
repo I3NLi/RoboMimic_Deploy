@@ -452,6 +452,9 @@ void set_live_input_mode_request(LiveInputState& out, ml::ModeRequest request)
 void set_live_input_action_mode_request(LiveInputState& out, ml::TextControlAction action)
 {
     const ml::TextControlActionEffect effect = ml::text_control_action_effect(action);
+    if (effect.toggle_loco) {
+        out.toggle_loco_requested = true;
+    }
     set_live_input_mode_request(out, ml::mode_request_for_text_control_effect(effect));
 }
 
@@ -561,7 +564,8 @@ private:
             return;
         case 'l':
         case 'L':
-            out.toggle_loco_requested = true;
+            set_live_input_action_mode_request(out, ml::TextControlAction::ToggleLoco);
+            paused_ = false;
             break;
         case 'b':
         case 'B':
