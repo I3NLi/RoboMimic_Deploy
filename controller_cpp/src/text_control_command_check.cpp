@@ -94,34 +94,55 @@ void check_invalid_tokens_are_ignored()
 
 void check_action_effects()
 {
+    auto require_request = [](
+        const ml::TextControlActionEffect& effect,
+        ml::ControlMode mode,
+        const std::string& external_policy_key,
+        const char* label) {
+        const auto request = ml::mode_request_for_text_control_effect(effect);
+        require(request.requested, std::string(label) + " should build a mode request");
+        require(request.mode == mode, std::string(label) + " request mode");
+        require(request.external_policy_key == external_policy_key, std::string(label) + " request external key");
+    };
+
     const auto loco = ml::text_control_action_effect(ml::TextControlAction::Loco);
     require(loco.mode_requested, "loco effect should request a mode");
     require(loco.mode == ml::ControlMode::Loco, "loco effect mode");
     require(!loco.zero_command, "loco effect should preserve command");
     require(loco.unpause, "loco effect should unpause");
+    require_request(loco, ml::ControlMode::Loco, {}, "loco effect");
+
+    const auto stand = ml::text_control_action_effect(ml::TextControlAction::Stand);
+    require(stand.mode_requested, "stand effect should request a mode");
+    require(stand.mode == ml::ControlMode::Stand, "stand effect mode");
+    require(stand.zero_command, "stand effect should zero command");
+    require_request(stand, ml::ControlMode::Stand, {}, "stand effect");
 
     const auto passive = ml::text_control_action_effect(ml::TextControlAction::Passive);
     require(passive.mode_requested, "passive effect should request a mode");
     require(passive.mode == ml::ControlMode::Passive, "passive effect mode");
     require(passive.zero_command, "passive effect should zero command");
     require(passive.unpause, "passive effect should unpause");
+    require_request(passive, ml::ControlMode::Passive, {}, "passive effect");
 
     const auto dance = ml::text_control_action_effect(ml::TextControlAction::Dance);
     require(dance.mode_requested, "dance effect should request a mode");
     require(dance.mode == ml::ControlMode::Dance, "dance effect mode");
     require(dance.external_policy_key == ml::kBeyondMimicPolicyKey, "dance effect external key");
+    require_request(dance, ml::ControlMode::Dance, ml::kBeyondMimicPolicyKey, "dance effect");
 
     const auto skill = ml::text_control_action_effect(ml::TextControlAction::Skill);
     require(skill.mode_requested, "skill effect should request a mode");
     require(skill.mode == ml::ControlMode::Skill, "skill effect mode");
     require(skill.zero_command, "skill effect should zero command");
     require(skill.external_policy_key == ml::kTrackMimicPolicyKey, "skill effect external key");
-    const auto skill_request = ml::mode_request_for_text_control_effect(skill);
-    require(skill_request.requested, "skill effect should build a mode request");
-    require(skill_request.mode == ml::ControlMode::Skill, "skill effect request mode");
-    require(
-        skill_request.external_policy_key == ml::kTrackMimicPolicyKey,
-        "skill effect request external key");
+    require_request(skill, ml::ControlMode::Skill, ml::kTrackMimicPolicyKey, "skill effect");
+
+    const auto final_damping = ml::text_control_action_effect(ml::TextControlAction::FinalDamping);
+    require(final_damping.mode_requested, "final damping effect should request a mode");
+    require(final_damping.mode == ml::ControlMode::FinalDamping, "final damping effect mode");
+    require(final_damping.zero_command, "final damping effect should zero command");
+    require_request(final_damping, ml::ControlMode::FinalDamping, {}, "final damping effect");
 
     const auto zero = ml::text_control_action_effect(ml::TextControlAction::Zero);
     const auto zero_request = ml::mode_request_for_text_control_effect(zero);

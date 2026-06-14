@@ -253,6 +253,10 @@ Shared text-control parser check:
 scripts/run_text_control_parser_check_native.sh
 ```
 
+This covers mode aliases, velocity tokens, shared action effects, and their
+conversion into `ModeRequest` objects for LOCO/STAND/PASSIVE/DANCE/SKILL and
+FINAL_DAMPING.
+
 Shared mode transition check:
 
 ```bash
