@@ -1662,6 +1662,39 @@ void apply_viewer_control_command(
         reset_requested);
 }
 
+void apply_viewer_keyboard_text_action(
+    magicbot_loco::TextControlAction action,
+    std::array<float, 3>& cmd,
+    magicbot_loco::ControlMode& desired_mode,
+    std::string& desired_external_policy_key,
+    bool dance_enabled,
+    bool skill_enabled,
+    bool& paused,
+    bool& running,
+    bool& reset_requested)
+{
+    const magicbot_loco::TextControlActionEffect effect = magicbot_loco::text_control_action_effect(action);
+    if (effect.mode_requested &&
+        (effect.mode == magicbot_loco::ControlMode::Dance || effect.mode == magicbot_loco::ControlMode::Skill) &&
+        desired_mode == effect.mode) {
+        desired_mode = magicbot_loco::ControlMode::Stand;
+        desired_external_policy_key.clear();
+        cmd = {0.0f, 0.0f, 0.0f};
+        return;
+    }
+
+    apply_viewer_text_action(
+        action,
+        cmd,
+        desired_mode,
+        desired_external_policy_key,
+        dance_enabled,
+        skill_enabled,
+        paused,
+        running,
+        reset_requested);
+}
+
 void handle_key(
     KeySym sym,
     bool& running,
@@ -1691,57 +1724,55 @@ void handle_key(
         break;
     case XK_m:
     case XK_M:
-        cmd = {0.0f, 0.0f, 0.0f};
-        desired_mode = magicbot_loco::ControlMode::Passive;
-        desired_external_policy_key.clear();
-        paused = false;
+        apply_viewer_keyboard_text_action(
+            magicbot_loco::TextControlAction::Passive,
+            cmd,
+            desired_mode,
+            desired_external_policy_key,
+            dance_enabled,
+            skill_enabled,
+            paused,
+            running,
+            reset_requested);
         break;
     case XK_n:
     case XK_N:
-        cmd = {0.0f, 0.0f, 0.0f};
-        desired_mode = magicbot_loco::ControlMode::FinalDamping;
-        desired_external_policy_key.clear();
-        paused = false;
+        apply_viewer_keyboard_text_action(
+            magicbot_loco::TextControlAction::FinalDamping,
+            cmd,
+            desired_mode,
+            desired_external_policy_key,
+            dance_enabled,
+            skill_enabled,
+            paused,
+            running,
+            reset_requested);
         break;
     case XK_b:
     case XK_B:
-        if (!dance_enabled) {
-            std::fprintf(stderr, "[Viewer] DANCE ignored; start with --beyond-yaml PATH to enable BeyondMimic\n");
-            return;
-        }
-        if (desired_mode == magicbot_loco::ControlMode::Dance) {
-            desired_mode = magicbot_loco::ControlMode::Stand;
-            desired_external_policy_key.clear();
-            cmd = {0.0f, 0.0f, 0.0f};
-        } else {
-            desired_mode = magicbot_loco::ControlMode::Dance;
-            cmd = {0.0f, 0.0f, 0.0f};
-            desired_external_policy_key =
-                magicbot_loco::mode_request_for_text_control_effect(
-                    magicbot_loco::text_control_action_effect(magicbot_loco::TextControlAction::Dance))
-                    .external_policy_key;
-            paused = false;
-        }
+        apply_viewer_keyboard_text_action(
+            magicbot_loco::TextControlAction::Dance,
+            cmd,
+            desired_mode,
+            desired_external_policy_key,
+            dance_enabled,
+            skill_enabled,
+            paused,
+            running,
+            reset_requested);
         break;
     case XK_t:
     case XK_T:
-        if (!skill_enabled) {
-            std::fprintf(stderr, "[Viewer] SKILL ignored; start with --track-mimic-yaml PATH to enable BeyondMimic trajectory/TrackMimic\n");
-            return;
-        }
-        if (desired_mode == magicbot_loco::ControlMode::Skill) {
-            desired_mode = magicbot_loco::ControlMode::Stand;
-            desired_external_policy_key.clear();
-            cmd = {0.0f, 0.0f, 0.0f};
-        } else {
-            desired_mode = magicbot_loco::ControlMode::Skill;
-            cmd = {0.0f, 0.0f, 0.0f};
-            desired_external_policy_key =
-                magicbot_loco::mode_request_for_text_control_effect(
-                    magicbot_loco::text_control_action_effect(magicbot_loco::TextControlAction::Skill))
-                    .external_policy_key;
-            paused = false;
-        }
+        apply_viewer_keyboard_text_action(
+            magicbot_loco::TextControlAction::Skill,
+            cmd,
+            desired_mode,
+            desired_external_policy_key,
+            dance_enabled,
+            skill_enabled,
+            paused,
+            running,
+            reset_requested);
         break;
     case XK_r:
     case XK_R:

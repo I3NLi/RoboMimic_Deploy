@@ -158,8 +158,10 @@ text command tokenization and mode aliases (`loco`, `stand`, `passive`,
 state; the parser does not own policy, safety, or adapter behavior. It does own
 the shared action effect for parsed text controls: which controls request a
 mode, choose the external policy key, clear velocity, pause/resume, stop, toggle
-LOCO, or request a re-stand/reset. Local viewer keyboard shortcuts `M` / `N`
-request the same shared passive and final-damping modes.
+LOCO, or request a re-stand/reset. Local viewer keyboard shortcuts `M`, `N`,
+`B`, and `T` enter their modes through the same shared action effect; keyboard
+`B`/`T` still preserve the viewer UI convenience of toggling back to `STAND`
+when that external mode is already selected.
 The HTTP control endpoint accepts the same mode vocabulary through query
 parameters, for example `POST /control?mode=final_damping` or
 `POST /control?mode=loco&vx=0.2&wz=-0.1`; the main viewer loop consumes those
