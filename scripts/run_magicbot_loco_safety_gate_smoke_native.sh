@@ -43,7 +43,7 @@ for tool in rg; do
 done
 
 echo "[Smoke] Checking real runner writes through adapter boundary"
-if rg -n '\brobot\.publish_(sdk24_command|damping)\(' "${RUNNER_SOURCE}"; then
+if rg -n 'publish_(sdk24_command|damping)\(' "${RUNNER_SOURCE}"; then
     echo "[Smoke][ERROR] magicbot_z1_loco_onnx.cpp must not publish robot commands directly; use MagicbotRealAdapter" >&2
     exit 1
 fi
