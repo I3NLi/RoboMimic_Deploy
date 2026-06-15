@@ -20,6 +20,58 @@ def without_root_motion_file(text: str) -> str:
     return "\n".join(kept).rstrip()
 
 
+def yaml_scalar(value: str) -> str:
+    return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def parse_top_level_scalar(text: str, key: str) -> str | None:
+    prefix = f"{key}:"
+    for line in text.splitlines():
+        if line.lstrip() != line or not line.startswith(prefix):
+            continue
+        value = line[len(prefix):].strip()
+        if (value.startswith('"') and value.endswith('"')) or (
+            value.startswith("'") and value.endswith("'")
+        ):
+            return value[1:-1]
+        return value or None
+    return None
+
+
+def resolve_onnx_path(base_yaml: Path, base_text: str) -> Path | None:
+    raw = parse_top_level_scalar(base_text, "onnx_path")
+    if not raw:
+        return None
+    onnx_path = Path(raw).expanduser()
+    if onnx_path.is_absolute():
+        return onnx_path.resolve()
+
+    yaml_dir = base_yaml.parent
+    candidate_model = yaml_dir.parent / "model" / onnx_path
+    candidate_same_dir = yaml_dir / onnx_path
+    if candidate_model.exists():
+        return candidate_model.resolve()
+    if candidate_same_dir.exists():
+        return candidate_same_dir.resolve()
+    return candidate_model.resolve()
+
+
+def with_absolute_onnx_path(text: str, onnx_path: Path | None) -> str:
+    if onnx_path is None:
+        return text
+    lines: list[str] = []
+    replaced = False
+    for line in text.splitlines():
+        if line.lstrip() == line and line.startswith("onnx_path:"):
+            lines.append(f"onnx_path: {yaml_scalar(onnx_path.as_posix())}")
+            replaced = True
+        else:
+            lines.append(line)
+    if not replaced:
+        lines.insert(0, f"onnx_path: {yaml_scalar(onnx_path.as_posix())}")
+    return "\n".join(lines).rstrip()
+
+
 def npy_f32(shape: tuple[int, ...], values: list[float]) -> bytes:
     count = 1
     for dim in shape:
@@ -83,7 +135,11 @@ def main() -> int:
 
     write_motion_npz(motion_file)
 
-    base_text = without_root_motion_file(base_yaml.read_text())
+    base_text_raw = base_yaml.read_text()
+    base_text = with_absolute_onnx_path(
+        without_root_motion_file(base_text_raw),
+        resolve_onnx_path(base_yaml, base_text_raw),
+    )
     output_yaml.write_text(
         base_text
         + "\n\n# Generated for smoke tests; TrackMimic requires an external trajectory.\n"
