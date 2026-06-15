@@ -69,7 +69,7 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-for tool in curl jq python3 rg mkfifo; do
+for tool in curl jq python3 mkfifo; do
     if ! command -v "${tool}" >/dev/null 2>&1; then
         echo "[Smoke][ERROR] required tool not found: ${tool}" >&2
         exit 1
