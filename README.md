@@ -233,8 +233,9 @@ modes, LOCO exits to non-policy modes, ControllerRuntime, and backend-free
 shared headers. `--sim-only` checks
 MuJoCo adapter `JointTargetMode` translation, then runs the pure-sim closed-loop
 force/impulse smoke. `--viewer-only` checks native viewer HTTP/UDP/gamepad,
-video stream, DANCE/SKILL, safety wall, and perturb APIs. `--python-only` runs
-the same viewer smokes through the Python-facing launcher. `--real-only` does
+video stream, DANCE/SKILL, HTTP and gamepad safety-wall controls, and perturb
+APIs. `--python-only` runs the same viewer smokes through the Python-facing
+launcher. `--real-only` does
 not connect to the robot; it checks MagicBot real-adapter target-mode
 translation, the real operator loop's `ControllerRuntime.tick` boundary, plus
 dry/input/gamepad-safety/allow-gate behavior.

@@ -223,10 +223,10 @@ LOCO 退出到非策略模式、ControllerRuntime，以及不依赖后端的共�
 `--sim-only` 检查
 MuJoCo adapter 的 `JointTargetMode` 翻译，然后运行 pure-sim 闭环外力/impulse
 烟测。`--viewer-only` 检查 native viewer 的 HTTP/UDP/手柄、视频流、
-DANCE/SKILL、安全墙和扰动 API。`--python-only` 通过 Python-facing launcher
-运行同一组 viewer 烟测。`--real-only` 不连接机器人；它检查 MagicBot
-real adapter target-mode 翻译、real operator loop 的 `ControllerRuntime.tick`
-边界，以及 dry/input/手柄安全墙/allow-gate 行为。
+DANCE/SKILL、HTTP 和手柄安全墙控制，以及扰动 API。`--python-only` 通过
+Python-facing launcher 运行同一组 viewer 烟测。`--real-only` 不连接机器人；
+它检查 MagicBot real adapter target-mode 翻译、real operator loop 的
+`ControllerRuntime.tick` 边界，以及 dry/input/手柄安全墙/allow-gate 行为。
 
 手动构建：
 

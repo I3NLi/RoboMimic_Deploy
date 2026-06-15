@@ -17,8 +17,8 @@ usage() {
 Usage: $0 [options] [-- extra viewer runner args]
 
 Smoke-test the MuJoCo viewer HTTP control API. The script starts the viewer
-runner with camera/control streaming, posts reset and mode/velocity commands,
-then validates the JSON summary.
+runner with camera/control streaming, posts reset, mode/velocity, and safety
+commands, then validates the JSON summary.
 
 Options:
   --duration S       Viewer wall-clock duration, default ${duration}
@@ -348,10 +348,61 @@ post_ok "${control_url}?pause=1" "pause"
 post_ok "${control_url}?pause=0" "resume"
 post_ok "${control_url}?mode=final_damping" "final_damping"
 
+post_ok "${control_url}?safety=on" "safety on"
+safety_on_ready=0
+for _ in $(seq 1 40); do
+    if curl -sf "${status_url}" -o "${status_body}" &&
+       jq -e '.mode == "DAMPING" and .target_mode == "Damping" and .paused == false and .safety_enabled == true and .adapter_backend == "mujoco-sim" and .adapter_command_published == true' "${status_body}" >/dev/null; then
+        safety_on_ready=1
+        break
+    fi
+    sleep 0.1
+done
+
+if [[ "${safety_on_ready}" -ne 1 ]]; then
+    echo "[Smoke][ERROR] viewer /control safety=on did not enable safety wall" >&2
+    cat "${status_body}" >&2 || true
+    exit 1
+fi
+
+post_ok "${control_url}?safety=off" "safety off"
+safety_off_ready=0
+for _ in $(seq 1 40); do
+    if curl -sf "${status_url}" -o "${status_body}" &&
+       jq -e '.mode == "DAMPING" and .target_mode == "Damping" and .paused == false and .safety_enabled == false and .adapter_backend == "mujoco-sim" and .adapter_command_published == true' "${status_body}" >/dev/null; then
+        safety_off_ready=1
+        break
+    fi
+    sleep 0.1
+done
+
+if [[ "${safety_off_ready}" -ne 1 ]]; then
+    echo "[Smoke][ERROR] viewer /control safety=off did not disable safety wall" >&2
+    cat "${status_body}" >&2 || true
+    exit 1
+fi
+
+post_ok "${control_url}?safety=toggle" "safety toggle"
+safety_toggle_ready=0
+for _ in $(seq 1 40); do
+    if curl -sf "${status_url}" -o "${status_body}" &&
+       jq -e '.mode == "DAMPING" and .target_mode == "Damping" and .paused == false and .safety_enabled == true and .adapter_backend == "mujoco-sim" and .adapter_command_published == true' "${status_body}" >/dev/null; then
+        safety_toggle_ready=1
+        break
+    fi
+    sleep 0.1
+done
+
+if [[ "${safety_toggle_ready}" -ne 1 ]]; then
+    echo "[Smoke][ERROR] viewer /control safety=toggle did not toggle safety wall" >&2
+    cat "${status_body}" >&2 || true
+    exit 1
+fi
+
 status_ready=0
 for _ in $(seq 1 40); do
     if curl -sf "${status_url}" -o "${status_body}" &&
-       jq -e '.mode == "DAMPING" and .target_mode == "Damping" and .paused == false and .adapter_backend == "mujoco-sim" and .adapter_command_published == true and .http_control_commands >= 10 and .sim_steps > 0 and (.cmd | length) == 3' "${status_body}" >/dev/null; then
+       jq -e '.mode == "DAMPING" and .target_mode == "Damping" and .paused == false and .safety_enabled == true and .adapter_backend == "mujoco-sim" and .adapter_command_published == true and .http_control_commands >= 13 and .sim_steps > 0 and (.cmd | length) == 3' "${status_body}" >/dev/null; then
         status_ready=1
         break
     fi
@@ -388,6 +439,7 @@ mode="$(jq -r '.mode' "${summary_json}")"
 target_mode="$(jq -r '.target_mode' "${summary_json}")"
 http_control_commands="$(jq -r '.http_control_commands' "${summary_json}")"
 http_reset_requests="$(jq -r '.http_reset_requests' "${summary_json}")"
+safety_enabled="$(jq -r '.safety_enabled' "${summary_json}")"
 sim_steps="$(jq -r '.sim_steps' "${summary_json}")"
 adapter_backend="$(jq -r '.adapter_backend' "${summary_json}")"
 adapter_command_published="$(jq -r '.adapter_command_published' "${summary_json}")"
@@ -402,13 +454,18 @@ if [[ "${target_mode}" != "Damping" ]]; then
     cat "${summary_json}" >&2
     exit 1
 fi
-if [[ "${http_control_commands}" -lt 10 ]]; then
-    echo "[Smoke][ERROR] expected at least 10 HTTP control commands, got ${http_control_commands}" >&2
+if [[ "${http_control_commands}" -lt 13 ]]; then
+    echo "[Smoke][ERROR] expected at least 13 HTTP control commands, got ${http_control_commands}" >&2
     cat "${summary_json}" >&2
     exit 1
 fi
 if [[ "${http_reset_requests}" -lt 2 ]]; then
     echo "[Smoke][ERROR] expected at least 2 HTTP reset requests, got ${http_reset_requests}" >&2
+    cat "${summary_json}" >&2
+    exit 1
+fi
+if [[ "${safety_enabled}" != "true" ]]; then
+    echo "[Smoke][ERROR] expected final safety_enabled=true after safety toggle, got ${safety_enabled}" >&2
     cat "${summary_json}" >&2
     exit 1
 fi
@@ -445,4 +502,4 @@ fi
 
 echo "[Smoke] PASSED viewer HTTP control API"
 echo "[Smoke] summary=${summary_json}"
-jq '{mode, target_mode, paused, adapter_backend, adapter_command_published, sim_steps, http_reset_requests, http_control_commands}' "${summary_json}"
+jq '{mode, target_mode, paused, safety_enabled, adapter_backend, adapter_command_published, sim_steps, http_reset_requests, http_control_commands}' "${summary_json}"
