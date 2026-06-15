@@ -190,6 +190,7 @@ struct ViewerStats {
     std::string last_perturb_body_name;
     std::string last_viewer_event_type;
     int last_viewer_event_button{0};
+    std::string last_viewer_perturb_action;
     double last_viewer_drag_dx{0.0};
     double last_viewer_drag_dy{0.0};
     double last_viewer_drag_norm_dx{0.0};
@@ -273,6 +274,7 @@ struct CameraStreamState {
     int http_control_commands{0};
     std::string last_viewer_event_type;
     int last_viewer_event_button{0};
+    std::string last_viewer_perturb_action;
     double last_viewer_drag_dx{0.0};
     double last_viewer_drag_dy{0.0};
     double last_viewer_drag_norm_dx{0.0};
@@ -396,6 +398,7 @@ public:
         state_->http_control_commands = stats.http_control_commands;
         state_->last_viewer_event_type = stats.last_viewer_event_type;
         state_->last_viewer_event_button = stats.last_viewer_event_button;
+        state_->last_viewer_perturb_action = stats.last_viewer_perturb_action;
         state_->last_viewer_drag_dx = stats.last_viewer_drag_dx;
         state_->last_viewer_drag_dy = stats.last_viewer_drag_dy;
         state_->last_viewer_drag_norm_dx = stats.last_viewer_drag_norm_dx;
@@ -729,6 +732,7 @@ private:
                  << "\"mouse_perturb_steps\":" << state->mouse_perturb_steps << ","
                  << "\"last_viewer_event_type\":\"" << json_escape(state->last_viewer_event_type) << "\","
                  << "\"last_viewer_event_button\":" << state->last_viewer_event_button << ","
+                 << "\"last_viewer_perturb_action\":\"" << json_escape(state->last_viewer_perturb_action) << "\","
                  << "\"last_viewer_drag_dx\":" << state->last_viewer_drag_dx << ","
                  << "\"last_viewer_drag_dy\":" << state->last_viewer_drag_dy << ","
                  << "\"last_viewer_drag_norm_dx\":" << state->last_viewer_drag_norm_dx << ","
@@ -1597,6 +1601,7 @@ std::string viewer_summary_json(
         << "\"last_perturb_body_name\":\"" << json_escape(stats.last_perturb_body_name) << "\","
         << "\"last_viewer_event_type\":\"" << json_escape(stats.last_viewer_event_type) << "\","
         << "\"last_viewer_event_button\":" << stats.last_viewer_event_button << ","
+        << "\"last_viewer_perturb_action\":\"" << json_escape(stats.last_viewer_perturb_action) << "\","
         << "\"last_viewer_drag_dx\":" << stats.last_viewer_drag_dx << ","
         << "\"last_viewer_drag_dy\":" << stats.last_viewer_drag_dy << ","
         << "\"last_viewer_drag_norm_dx\":" << stats.last_viewer_drag_norm_dx << ","
@@ -2515,6 +2520,7 @@ void process_events(
             mouse.last_y = event.xmotion.y;
             if (mouse.perturb && perturb->active) {
                 const int action = mouse.perturb_button == Button2 ? mjMOUSE_MOVE_V : mjMOUSE_MOVE_H;
+                stats.last_viewer_perturb_action = action == mjMOUSE_MOVE_V ? "move_v" : "move_h";
                 mjv_movePerturb(model, data, action, dx, -dy, scene, perturb);
             } else if (mouse.left) {
                 mjv_moveCamera(model, mjMOUSE_ROTATE_H, dx, dy, scene, cam);
@@ -2615,6 +2621,7 @@ void process_http_viewer_events(
             stats.last_viewer_drag_norm_dy = dy;
             if (remote_drag.perturb && perturb->active) {
                 const int action = remote_drag.button == 1 ? mjMOUSE_MOVE_V : mjMOUSE_MOVE_H;
+                stats.last_viewer_perturb_action = action == mjMOUSE_MOVE_V ? "move_v" : "move_h";
                 mjv_movePerturb(model, data, action, dx, -dy, scene, perturb);
             } else if (remote_drag.camera) {
                 int action = mjMOUSE_ROTATE_H;

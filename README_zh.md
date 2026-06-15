@@ -140,6 +140,10 @@ viewer 开启 `--gamepad-control` 时，button 9/R3 会切换运行时 safety wa
 /viewer-event   POST: 遥控器拖拽扰动/相机事件
 ```
 
+`/status` 和 `--summary-json` 会包含 `last_viewer_perturb_action`
+（`move_h` 或 `move_v`），用于确认远程拖拽实际进入 MuJoCo 的水平或垂直扰动
+方向，而不只是记录鼠标位移。
+
 `scripts/run_viewer_stream_smoke_native.sh` 会验证 `/frame.jpg` 和虚拟遥控器使用的
 multipart MJPEG `/stream.mjpg` 端点。
 

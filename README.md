@@ -150,6 +150,10 @@ Endpoints:
 /viewer-event   POST: forward remote pointer drag events for perturb/camera control
 ```
 
+`/status` and `--summary-json` include `last_viewer_perturb_action`
+(`move_h` or `move_v`) so remote drag perturb tests can verify the actual
+MuJoCo perturb direction, not only the pointer delta.
+
 `scripts/run_viewer_stream_smoke_native.sh` validates `/frame.jpg` plus the
 multipart MJPEG `/stream.mjpg` endpoint used by the virtual remote.
 
