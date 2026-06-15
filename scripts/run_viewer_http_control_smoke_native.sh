@@ -69,7 +69,7 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-for tool in curl jq python3 rg; do
+for tool in curl jq python3 grep; do
     if ! command -v "${tool}" >/dev/null 2>&1; then
         echo "[Smoke][ERROR] required tool not found: ${tool}" >&2
         exit 1
@@ -77,11 +77,11 @@ for tool in curl jq python3 rg; do
 done
 
 echo "[Smoke] Checking viewer sim writes through adapter boundary"
-if rg -n 'data->ctrl\[[^]]+\]\s*=' "${VIEWER_SOURCE}"; then
+if grep -En 'data->ctrl\[[^]]+\][[:space:]]*=' "${VIEWER_SOURCE}"; then
     echo "[Smoke][ERROR] mujoco_loco_viewer.cpp must not write MuJoCo ctrl directly; use MujocoSimAdapter" >&2
     exit 1
 fi
-if rg -n 'OnnxLocoPolicy|\.infer\(|MotionSafety|safety\.check|torque_limited_target|clamp_and_rate_limit' "${VIEWER_SOURCE}"; then
+if grep -En 'OnnxLocoPolicy|\.infer\(|MotionSafety|safety\.check|torque_limited_target|clamp_and_rate_limit' "${VIEWER_SOURCE}"; then
     echo "[Smoke][ERROR] mujoco_loco_viewer.cpp must keep policy, safety, and target limiting inside ControllerCore" >&2
     exit 1
 fi
@@ -436,7 +436,7 @@ except ValueError:
 sys.exit(0 if duration >= 1.1 else 1)
 PY
 then
-    if ! rg -q '\[Viewer\].*mode=DAMPING' "${viewer_log}"; then
+    if ! grep -Eq '\[Viewer\].*mode=DAMPING' "${viewer_log}"; then
         echo "[Smoke][ERROR] viewer stdout did not report core mode DAMPING" >&2
         sed -n '1,220p' "${viewer_log}" >&2
         exit 1

@@ -94,7 +94,7 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-for tool in jq rg; do
+for tool in jq grep; do
     if ! command -v "${tool}" >/dev/null 2>&1; then
         echo "[Smoke][ERROR] required tool not found: ${tool}" >&2
         exit 1
@@ -102,15 +102,15 @@ for tool in jq rg; do
 done
 
 echo "[Smoke] Checking dual-rate sim writes through adapter boundary"
-if rg -n 'data->ctrl\[[^]]+\]\s*=' "${DUAL_SOURCE}"; then
+if grep -En 'data->ctrl\[[^]]+\][[:space:]]*=' "${DUAL_SOURCE}"; then
     echo "[Smoke][ERROR] dual_inference_rate.cpp must not write MuJoCo ctrl directly; use MujocoSimAdapter" >&2
     exit 1
 fi
-if rg -n 'OnnxLocoPolicy|\.infer\(|MotionSafety|safety\.check|torque_limited_target|clamp_and_rate_limit' "${DUAL_SOURCE}"; then
+if grep -En 'OnnxLocoPolicy|\.infer\(|MotionSafety|safety\.check|torque_limited_target|clamp_and_rate_limit' "${DUAL_SOURCE}"; then
     echo "[Smoke][ERROR] dual_inference_rate.cpp must keep policy, safety, and target limiting inside ControllerCore" >&2
     exit 1
 fi
-if rg -n 'sim_adapter\.write_target' "${DUAL_SOURCE}"; then
+if grep -En 'sim_adapter\.write_target' "${DUAL_SOURCE}"; then
     echo "[Smoke][ERROR] dual_inference_rate.cpp should publish held sim targets through ControllerRuntime" >&2
     exit 1
 fi

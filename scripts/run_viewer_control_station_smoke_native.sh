@@ -84,7 +84,7 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-for tool in curl jq python3 rg ss; do
+for tool in curl jq python3 grep ss; do
     if ! command -v "${tool}" >/dev/null 2>&1; then
         echo "[Smoke][ERROR] required tool not found: ${tool}" >&2
         exit 1
@@ -180,7 +180,7 @@ for _ in $(seq 1 720); do
         sed -n '1,220p' "${viewer_log}" >&2
         exit 1
     fi
-    if curl -fsS "${health_url}" >/dev/null 2>&1 && ss -lun | rg -q ":${udp_port}\\b"; then
+    if curl -fsS "${health_url}" >/dev/null 2>&1 && ss -lun | grep -Eq ":${udp_port}([[:space:]]|$)"; then
         ready=1
         break
     fi

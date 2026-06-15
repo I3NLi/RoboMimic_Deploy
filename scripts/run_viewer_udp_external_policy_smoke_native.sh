@@ -87,7 +87,7 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-for tool in curl jq python3 ss rg; do
+for tool in curl jq python3 ss grep; do
     if ! command -v "${tool}" >/dev/null 2>&1; then
         echo "[Smoke][ERROR] required tool not found: ${tool}" >&2
         exit 1
@@ -177,7 +177,7 @@ status_url="http://127.0.0.1:${camera_port}/status"
 
 ready=0
 for _ in $(seq 1 360); do
-    if curl -sf "${health_url}" >/dev/null && ss -lun | rg -q ":${udp_port}\\b"; then
+    if curl -sf "${health_url}" >/dev/null && ss -lun | grep -Eq ":${udp_port}([[:space:]]|$)"; then
         ready=1
         break
     fi
