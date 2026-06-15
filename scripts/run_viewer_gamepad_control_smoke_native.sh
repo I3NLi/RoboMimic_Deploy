@@ -95,6 +95,8 @@ required = [
     "apply_viewer_text_action",
     "TextControlAction::Loco",
     "TextControlAction::Stand",
+    "TextControlAction::Passive",
+    "TextControlAction::Zero",
     "TextControlAction::Pause",
     "TextControlAction::ResetStand",
     "TextControlAction::Dance",
@@ -222,6 +224,8 @@ if sequence == "loco_axis":
     ]
 elif sequence == "pause":
     packets = [event(1, JS_EVENT_BUTTON, 7)]
+elif sequence == "passive":
+    packets = [event(1, JS_EVENT_BUTTON, 1)]
 else:
     raise SystemExit(f"unknown sequence: {sequence}")
 
@@ -248,6 +252,44 @@ if [[ "${loco_ready}" -ne 1 ]]; then
     echo "[Smoke][ERROR] viewer /status did not report fake gamepad LOCO axis command" >&2
     cat "${status_body}" >&2 || true
     sed -n '1,240p' "${viewer_log}" >&2
+    exit 1
+fi
+
+send_gamepad_events "passive"
+
+passive_ready=0
+for _ in $(seq 1 80); do
+    if curl -sf "${status_url}" -o "${status_body}" &&
+       jq -e '.mode == "PASSIVE" and .paused == false and .cmd[0] == 0 and .cmd[1] == 0 and .cmd[2] == 0 and .adapter_backend == "mujoco-sim" and .adapter_command_published == true and .reset_pending == false' "${status_body}" >/dev/null; then
+        passive_ready=1
+        break
+    fi
+    sleep 0.1
+done
+
+if [[ "${passive_ready}" -ne 1 ]]; then
+    echo "[Smoke][ERROR] viewer /status did not report fake gamepad B as PASSIVE without reset" >&2
+    cat "${status_body}" >&2 || true
+    sed -n '1,260p' "${viewer_log}" >&2
+    exit 1
+fi
+
+send_gamepad_events "loco_axis"
+
+loco_again_ready=0
+for _ in $(seq 1 80); do
+    if curl -sf "${status_url}" -o "${status_body}" &&
+       jq -e '.mode == "LOCO" and .paused == false and (.cmd[0] > 0.49 and .cmd[0] < 0.51) and .cmd[1] == 0 and .cmd[2] == 0 and .adapter_backend == "mujoco-sim" and .adapter_command_published == true' "${status_body}" >/dev/null; then
+        loco_again_ready=1
+        break
+    fi
+    sleep 0.1
+done
+
+if [[ "${loco_again_ready}" -ne 1 ]]; then
+    echo "[Smoke][ERROR] viewer /status did not return to fake gamepad LOCO after PASSIVE" >&2
+    cat "${status_body}" >&2 || true
+    sed -n '1,300p' "${viewer_log}" >&2
     exit 1
 fi
 

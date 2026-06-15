@@ -117,12 +117,13 @@ struct Args {
     float gamepad_axis_vy_sign = -1.0f;
     float gamepad_axis_wz_sign = -1.0f;
     int gamepad_deadman_button = 4;
-    int gamepad_stop_button = 1;
+    int gamepad_stop_button = -1;
     int gamepad_loco_button = 0;
     int gamepad_stand_button = 3;
     int gamepad_zero_button = 2;
     int gamepad_pause_button = 7;
     int gamepad_reset_button = 6;
+    int gamepad_passive_button = 1;
     int gamepad_dance_button = -1;
     int gamepad_skill_button = -1;
     bool ground_correction = false;
@@ -890,6 +891,10 @@ void usage(const char* argv0)
         "          [--summary-json PATH]\n"
         "          [--udp-control] [--udp-bind IP] [--udp-port N] [--udp-timeout-s SEC]\n"
         "          [--gamepad-control] [--gamepad-device PATH]\n"
+        "          [--gamepad-loco-button N] [--gamepad-stand-button N]\n"
+        "          [--gamepad-zero-button N] [--gamepad-passive-button N]\n"
+        "          [--gamepad-pause-button N] [--gamepad-reset-button N]\n"
+        "          [--gamepad-stop-button N] [--gamepad-dance-button N] [--gamepad-skill-button N]\n"
         "          [--push-body NAME] [--push-force X,Y,Z] [--push-start SEC] [--push-duration SEC]\n"
         "          [--push-impulse X,Y,Z] [--push-impulse-time SEC]\n"
         "          [--camera-stream] [--camera-port N] [--camera-name NAME]\n"
@@ -1039,6 +1044,8 @@ Args parse_args(int argc, char** argv)
             args.gamepad_pause_button = std::atoi(need_value(i, argc, argv).c_str());
         } else if (arg == "--gamepad-reset-button") {
             args.gamepad_reset_button = std::atoi(need_value(i, argc, argv).c_str());
+        } else if (arg == "--gamepad-passive-button") {
+            args.gamepad_passive_button = std::atoi(need_value(i, argc, argv).c_str());
         } else if (arg == "--gamepad-dance-button") {
             args.gamepad_dance_button = std::atoi(need_value(i, argc, argv).c_str());
         } else if (arg == "--gamepad-skill-button") {
@@ -1591,8 +1598,10 @@ void apply_viewer_text_action(
     bool& paused,
     bool& running,
     bool& reset_requested,
-    std::string external_policy_key = {})
+    std::string external_policy_key = {},
+    bool allow_implicit_reset = true)
 {
+    const bool old_reset_requested = reset_requested;
     const magicbot_loco::TextControlActionEffect effect =
         magicbot_loco::text_control_action_effect(action, std::move(external_policy_key));
     if (effect.mode_requested && effect.mode == magicbot_loco::ControlMode::Skill &&
@@ -1612,10 +1621,11 @@ void apply_viewer_text_action(
     intent.running = running;
     intent.reset_requested = reset_requested;
 
-    const auto result = magicbot_loco::apply_text_control_effect_to_intent(
+    const auto result = magicbot_loco::apply_text_control_action_to_intent(
         intent,
-        effect,
-        magicbot_loco::TextControlIntentOptions{dance_enabled, !skill_policy_keys.empty()});
+        action,
+        magicbot_loco::TextControlIntentOptions{dance_enabled, !skill_policy_keys.empty()},
+        effect.external_policy_key);
     if (result.reject_reason == magicbot_loco::TextControlIntentRejectReason::DanceDisabled) {
         std::fprintf(stderr, "[Viewer] DANCE ignored; start with --beyond-yaml PATH to enable BeyondMimic\n");
         return;
@@ -1634,6 +1644,9 @@ void apply_viewer_text_action(
     paused = intent.paused;
     running = intent.running;
     reset_requested = intent.reset_requested;
+    if (!allow_implicit_reset && action != magicbot_loco::TextControlAction::ResetStand) {
+        reset_requested = old_reset_requested;
+    }
 }
 
 class ViewerGamepadInput {
@@ -1758,7 +1771,18 @@ private:
                 reset_requested);
         } else if (args_.gamepad_zero_button >= 0 && event.number == args_.gamepad_zero_button) {
             apply_action(
-                magicbot_loco::TextControlAction::Pause,
+                magicbot_loco::TextControlAction::Zero,
+                cmd,
+                desired_mode,
+                desired_external_policy_key,
+                dance_enabled,
+                skill_policy_keys,
+                paused,
+                running,
+                reset_requested);
+        } else if (args_.gamepad_passive_button >= 0 && event.number == args_.gamepad_passive_button) {
+            apply_action(
+                magicbot_loco::TextControlAction::Passive,
                 cmd,
                 desired_mode,
                 desired_external_policy_key,
@@ -1835,7 +1859,9 @@ private:
             skill_policy_keys,
             paused,
             running,
-            reset_requested);
+            reset_requested,
+            {},
+            action == magicbot_loco::TextControlAction::ResetStand);
     }
 
     bool button_pressed(int index) const
@@ -1983,7 +2009,8 @@ private:
                     paused,
                     running,
                     reset_requested,
-                    op.external_policy_key);
+                    op.external_policy_key,
+                    op.action == magicbot_loco::TextControlAction::ResetStand);
             }
         }
     }
@@ -2037,7 +2064,8 @@ void apply_viewer_control_command(
         paused,
         running,
         reset_requested,
-        control.external_policy_key);
+        control.external_policy_key,
+        control.action == magicbot_loco::TextControlAction::ResetStand);
 }
 
 void apply_viewer_keyboard_text_action(
@@ -2064,7 +2092,9 @@ void apply_viewer_keyboard_text_action(
             skill_policy_keys,
             paused,
             running,
-            reset_requested);
+            reset_requested,
+            {},
+            false);
         return;
     }
 
@@ -2077,7 +2107,9 @@ void apply_viewer_keyboard_text_action(
         skill_policy_keys,
         paused,
         running,
-        reset_requested);
+        reset_requested,
+        {},
+        action == magicbot_loco::TextControlAction::ResetStand);
 }
 
 void handle_key(
@@ -2763,7 +2795,7 @@ int main(int argc, char** argv)
         if (gamepad_input) {
             std::printf(
                 "Gamepad: device=%s axes(vx,vy,wz)=[%d %d %d] deadman_button=%d "
-                "loco=%d stand=%d zero=%d pause=%d reset=%d dance=%d skill=%d\n",
+                "loco=%d stand=%d zero=%d passive=%d pause=%d reset=%d stop=%d dance=%d skill=%d\n",
                 args.gamepad_device.c_str(),
                 args.gamepad_axis_vx,
                 args.gamepad_axis_vy,
@@ -2772,8 +2804,10 @@ int main(int argc, char** argv)
                 args.gamepad_loco_button,
                 args.gamepad_stand_button,
                 args.gamepad_zero_button,
+                args.gamepad_passive_button,
                 args.gamepad_pause_button,
                 args.gamepad_reset_button,
+                args.gamepad_stop_button,
                 args.gamepad_dance_button,
                 args.gamepad_skill_button);
         }
