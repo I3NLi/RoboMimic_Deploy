@@ -86,7 +86,21 @@ start = source.find("class ViewerGamepadInput")
 if start < 0:
     print("[Smoke][ERROR] viewer is missing ViewerGamepadInput", file=sys.stderr)
     sys.exit(1)
-end = source.find("class ViewerUdpCommandInput", start)
+open_brace = source.find("{", start)
+if open_brace < 0:
+    print("[Smoke][ERROR] could not locate ViewerGamepadInput body", file=sys.stderr)
+    sys.exit(1)
+depth = 0
+end = -1
+for idx in range(open_brace, len(source)):
+    char = source[idx]
+    if char == "{":
+        depth += 1
+    elif char == "}":
+        depth -= 1
+        if depth == 0:
+            end = idx + 1
+            break
 if end < 0:
     print("[Smoke][ERROR] could not locate ViewerGamepadInput boundary", file=sys.stderr)
     sys.exit(1)

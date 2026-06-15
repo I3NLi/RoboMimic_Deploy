@@ -496,17 +496,17 @@ scripts/run_viewer_http_control_smoke_native.sh --duration 1.5 --keep-summary
 The script starts the viewer HTTP server, posts reset plus
 `passive -> stand -> stand velocity-only -> walk -> run_forward -> loco -> /reset -> reset -> pause -> resume -> final_damping`,
 verifies an invalid mode returns
-HTTP 400, checks live `/status` for `mode == FINAL_DAMPING`, `paused == false`,
+HTTP 400, checks live `/status` for `mode == DAMPING`, `paused == false`,
 `adapter_backend == mujoco-sim`, `adapter_command_published == true`, and
 `http_control_commands >= 10`, then checks the summary for
-`mode == FINAL_DAMPING`, `http_control_commands >= 10`,
+`mode == DAMPING`, `http_control_commands >= 10`,
 `http_reset_requests >= 2`, published adapter commands, and advancing
 `sim_steps`. The live `/status` checks also verify a velocity-only request while
 still in STAND is sanitized back to zero, that the shared walk and run-forward
 presets publish the expected LOCO command vectors, and that the HTTP `/reset`
 endpoint returns LOCO to STAND with a zero command before the final damping
 sequence. With the default duration it also checks periodic viewer stdout for
-`mode=FINAL_DAMPING`, covering the display/log path that reports
+`mode=DAMPING`, covering the display/log path that reports
 `ControllerCore` telemetry. The script also guards the viewer against direct
 MuJoCo `data->ctrl` writes outside `MujocoSimAdapter`, and against duplicating
 policy inference, motion safety, or target limiting outside `ControllerCore`.
@@ -562,7 +562,7 @@ scripts/run_viewer_udp_control_smoke_native.sh --duration 1.5 --keep-summary
 The script sends viewer UDP text-control packets for `walk`, `run_forward`,
 `loco -> pause -> resume -> passive -> stand -> reset -> final_damping`, checks
 live `/status` for the shared walk/run-forward preset command vectors, then
-checks the summary for `mode == FINAL_DAMPING`, `paused == false`,
+checks the summary for `mode == DAMPING`, `paused == false`,
 `adapter_backend == mujoco-sim`, `adapter_command_published == true`, and
 advancing `sim_steps`.
 
@@ -621,6 +621,19 @@ scripts/run_viewer_gamepad_control_smoke_native.sh \
 ```
 
 This repeats the fake joystick check through the Python-facing viewer launcher.
+
+Viewer camera stream smoke:
+
+```bash
+scripts/run_viewer_stream_smoke_native.sh --duration 1.5 --keep-summary
+```
+
+The script starts the shared-runtime viewer with HTTP camera streaming, waits
+for `/health`, validates that `/frame.jpg` returns a JPEG frame, then opens
+`/stream.mjpg` long enough to verify multipart MJPEG headers and at least one
+JPEG part. The aggregate shared-runtime suite runs this in both native and
+Python-facing viewer modes so the virtual remote's video panel stays covered by
+standard no-hardware validation.
 
 Viewer control-station preset smoke:
 

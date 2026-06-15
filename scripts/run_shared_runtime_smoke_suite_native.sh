@@ -185,6 +185,7 @@ if [[ "${RUN_SIM}" -eq 1 ]]; then
 fi
 
 if [[ "${RUN_VIEWER}" -eq 1 ]]; then
+    run_step "${SCRIPT_DIR}/run_viewer_stream_smoke_native.sh" --duration 1.5
     run_step "${SCRIPT_DIR}/run_viewer_http_control_smoke_native.sh" --duration 1.5
     run_step "${SCRIPT_DIR}/run_viewer_udp_control_smoke_native.sh" --duration 1.5
     run_step "${SCRIPT_DIR}/run_viewer_http_dance_smoke_native.sh" --duration 0.8
@@ -199,6 +200,7 @@ if [[ "${RUN_PYTHON}" -eq 1 ]]; then
     run_step check_python_viewer_delegates
     run_step check_python_viewer_print_command
     run_step python3 -m py_compile "${PYTHON_VIEWER}"
+    run_step "${SCRIPT_DIR}/run_viewer_stream_smoke_native.sh" --runner "${PYTHON_VIEWER}" --duration 1.5
     run_step "${SCRIPT_DIR}/run_viewer_http_control_smoke_native.sh" --runner "${PYTHON_VIEWER}" --duration 1.5
     run_step "${SCRIPT_DIR}/run_viewer_udp_control_smoke_native.sh" --runner "${PYTHON_VIEWER}" --duration 1.5
     run_step "${SCRIPT_DIR}/run_viewer_http_dance_smoke_native.sh" --runner "${PYTHON_VIEWER}" --duration 0.8

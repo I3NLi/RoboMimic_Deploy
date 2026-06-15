@@ -342,7 +342,7 @@ if ! wait "${runner_pid}"; then
 fi
 runner_pid=""
 
-for expected in 'mode=DANCE' 'mode=SKILL' 'external=ClipA' 'mode=FINAL_DAMPING'; do
+for expected in 'mode=DANCE' 'mode=SKILL' 'external=ClipA' 'mode=DAMPING'; do
     if ! rg -q "${expected}" "${input_log}"; then
         echo "[Smoke][ERROR] missing expected input-check output: ${expected}" >&2
         sed -n '1,260p' "${input_log}" >&2
@@ -364,4 +364,4 @@ if [[ "${keep_log}" -eq 1 ]]; then
     echo "[Smoke] blocked_log=${blocked_log}"
     echo "[Smoke] input_log=${input_log}"
 fi
-rg 'DryRun|DANCE ignored|SKILL ignored|mode=(DANCE|SKILL|FINAL_DAMPING)' "${dry_log}" "${blocked_log}" "${input_log}"
+rg 'DryRun|DANCE ignored|SKILL ignored|mode=(DANCE|SKILL|DAMPING)' "${dry_log}" "${blocked_log}" "${input_log}"

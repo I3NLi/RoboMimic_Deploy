@@ -230,8 +230,8 @@ sim_steps="$(jq -r '.sim_steps' "${summary_json}")"
 adapter_backend="$(jq -r '.adapter_backend' "${summary_json}")"
 adapter_command_published="$(jq -r '.adapter_command_published' "${summary_json}")"
 
-if [[ "${mode}" != "FINAL_DAMPING" ]]; then
-    echo "[Smoke][ERROR] expected final mode FINAL_DAMPING, got ${mode}" >&2
+if [[ "${mode}" != "DAMPING" ]]; then
+    echo "[Smoke][ERROR] expected final mode DAMPING, got ${mode}" >&2
     cat "${summary_json}" >&2
     exit 1
 fi

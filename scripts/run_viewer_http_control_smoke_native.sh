@@ -351,7 +351,7 @@ post_ok "${control_url}?mode=final_damping" "final_damping"
 status_ready=0
 for _ in $(seq 1 40); do
     if curl -sf "${status_url}" -o "${status_body}" &&
-       jq -e '.mode == "FINAL_DAMPING" and .paused == false and .adapter_backend == "mujoco-sim" and .adapter_command_published == true and .http_control_commands >= 10 and .sim_steps > 0 and (.cmd | length) == 3' "${status_body}" >/dev/null; then
+       jq -e '.mode == "DAMPING" and .paused == false and .adapter_backend == "mujoco-sim" and .adapter_command_published == true and .http_control_commands >= 10 and .sim_steps > 0 and (.cmd | length) == 3' "${status_body}" >/dev/null; then
         status_ready=1
         break
     fi
@@ -391,8 +391,8 @@ sim_steps="$(jq -r '.sim_steps' "${summary_json}")"
 adapter_backend="$(jq -r '.adapter_backend' "${summary_json}")"
 adapter_command_published="$(jq -r '.adapter_command_published' "${summary_json}")"
 
-if [[ "${mode}" != "FINAL_DAMPING" ]]; then
-    echo "[Smoke][ERROR] expected final mode FINAL_DAMPING, got ${mode}" >&2
+if [[ "${mode}" != "DAMPING" ]]; then
+    echo "[Smoke][ERROR] expected final mode DAMPING, got ${mode}" >&2
     cat "${summary_json}" >&2
     exit 1
 fi
@@ -430,8 +430,8 @@ except ValueError:
 sys.exit(0 if duration >= 1.1 else 1)
 PY
 then
-    if ! rg -q '\[Viewer\].*mode=FINAL_DAMPING' "${viewer_log}"; then
-        echo "[Smoke][ERROR] viewer stdout did not report core mode FINAL_DAMPING" >&2
+    if ! rg -q '\[Viewer\].*mode=DAMPING' "${viewer_log}"; then
+        echo "[Smoke][ERROR] viewer stdout did not report core mode DAMPING" >&2
         sed -n '1,220p' "${viewer_log}" >&2
         exit 1
     fi
