@@ -4,6 +4,26 @@ Native C++ deployment workspace for MagicBot Z1 ONNX policies.
 
 The active runtime is `controller_cpp/build_native/magicbot_z1_loco_onnx`. The old interpreted reference stack has been removed from this branch. Real-robot execution must go through the staged safety flow below.
 
+## Project Goal
+
+This branch is moving toward a single shared sim/real control stack:
+
+- `ControllerCore` consumes `RobotSnapshot + Command + ModeRequest` and emits
+  `JointTarget + Gains + Telemetry`.
+- PASSIVE, STAND, LOCO, DANCE, SKILL, and FINAL_DAMPING share policy stepping,
+  mode transitions, safety checks, and target limiting in `ControllerCore`.
+- `SimAdapter` and `RealAdapter` only translate between the shared target/state
+  types and MuJoCo or MagicBot SDK I/O.
+- Viewer/control-station code is an operator surface: rendering, keyboard,
+  gamepad, UDP/HTTP control, camera/video display, telemetry, and perturbation
+  injection. It must not fork control-brain logic from `ControllerCore`.
+- Python MuJoCo viewer support must stay aligned with the native shared-runtime
+  viewer: pause/reset, mode switching, UDP/control API, camera stream, and
+  drag/force/impulse disturbance checks with JSON summaries.
+
+High-risk real-robot modes stay gated. LOCO, DANCE, and SKILL require explicit
+allow flags and must be preceded by the safety ladder in this README.
+
 ## Layout
 
 ```text

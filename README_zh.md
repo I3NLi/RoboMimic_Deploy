@@ -10,6 +10,26 @@ controller_cpp/build_native/magicbot_z1_loco_onnx
 
 真机测试必须按下面的安全阶梯走。
 
+## 项目目标
+
+这个分支的目标是一套 sim/real 共用的控制栈：
+
+- `ControllerCore` 输入 `RobotSnapshot + Command + ModeRequest`，输出
+  `JointTarget + Gains + Telemetry`。
+- PASSIVE、STAND、LOCO、DANCE、SKILL、FINAL_DAMPING 共享 `ControllerCore`
+  里的策略步进、模式切换、安全检查和 target limit。
+- `SimAdapter` 和 `RealAdapter` 只负责共享 target/state 与 MuJoCo 或
+  MagicBot SDK I/O 之间的翻译。
+- Viewer/control station 只做操作台：渲染、键盘、手柄、UDP/HTTP 控制、
+  相机/视频显示、telemetry 和扰动注入；不能复制或分叉
+  `ControllerCore` 的控制脑逻辑。
+- Python MuJoCo viewer 要和 native shared-runtime viewer 对齐：支持
+  pause/reset、模式切换、UDP/control API、camera stream，以及拖拽、外力、
+  impulse 扰动检查和 JSON summary。
+
+真机高风险模式继续显式 gated。LOCO、DANCE、SKILL 必须带 explicit allow，
+并且必须先走完本 README 的安全阶梯。
+
 ## 目录
 
 ```text
