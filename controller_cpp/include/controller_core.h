@@ -24,10 +24,16 @@ struct JointGains {
     JointArray tau_limit{};
 };
 
+enum class JointTargetMode {
+    Position,
+    ZeroTorque,
+    Damping,
+};
+
 struct JointTarget {
     JointArray q{};
     JointGains gains{};
-    bool damping_only{false};
+    JointTargetMode mode{JointTargetMode::Position};
     float damping_kd{3.0f};
 };
 
@@ -364,9 +370,14 @@ private:
         ControllerCoreOutput out;
         out.target.q = command_target_;
         out.target.gains = command_gains_;
-        out.target.damping_only =
-            mode_manager_.mode() == ControlMode::Passive || mode_manager_.mode() == ControlMode::FinalDamping;
-        out.target.damping_kd = mode_manager_.mode() == ControlMode::Passive ? 0.0f : options_.damping_kd;
+        out.target.mode = JointTargetMode::Position;
+        out.target.damping_kd = options_.damping_kd;
+        if (mode_manager_.mode() == ControlMode::Passive) {
+            out.target.mode = JointTargetMode::ZeroTorque;
+            out.target.damping_kd = 0.0f;
+        } else if (mode_manager_.mode() == ControlMode::FinalDamping) {
+            out.target.mode = JointTargetMode::Damping;
+        }
         out.telemetry.mode = mode_manager_.mode();
         if (is_external_policy_mode(mode_manager_.mode())) {
             ExternalPolicyAdapter* policy = external_policy(mode_manager_.mode());

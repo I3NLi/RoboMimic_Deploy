@@ -24,6 +24,15 @@ scripts/
   run_dual_inference_rate_native.sh     # native sim / real-state rate test
 ```
 
+## Shared Runtime Contract
+
+`ControllerCore` owns observation, policy stepping, mode transitions, motion
+safety, and target limiting. It emits a `JointTarget` with an explicit
+`JointTargetMode`: `Position` for STAND/LOCO/DANCE/SKILL PD targets,
+`ZeroTorque` for PASSIVE, and `Damping` for FINAL_DAMPING/safety-exit light
+damping. Sim and real adapters only translate that target mode into MuJoCo or
+MagicBot SDK I/O; they must not duplicate mode, policy, safety, or limit logic.
+
 ## Dependencies
 
 - CMake 3.14+

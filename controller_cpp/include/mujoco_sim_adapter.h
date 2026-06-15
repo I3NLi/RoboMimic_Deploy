@@ -63,7 +63,14 @@ public:
 
     void write_target(const JointTarget& target) override
     {
-        if (target.damping_only) {
+        if (target.mode == JointTargetMode::ZeroTorque) {
+            for (int i = 0; i < kNumJoints && i < model_->nu; ++i) {
+                data_->ctrl[i] = 0.0;
+            }
+            command_published_ = true;
+            return;
+        }
+        if (target.mode == JointTargetMode::Damping) {
             write_damping(target.damping_kd);
             return;
         }

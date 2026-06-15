@@ -123,6 +123,14 @@ bool near(float lhs, float rhs)
     return std::fabs(lhs - rhs) < 1e-5f;
 }
 
+void require_target_mode(
+    const ml::JointTarget& target,
+    ml::JointTargetMode expected,
+    const std::string& label)
+{
+    require(target.mode == expected, label + ": unexpected target mode");
+}
+
 void require_joint_array_near(
     const ml::JointArray& lhs,
     const ml::JointArray& rhs,
@@ -182,7 +190,7 @@ void check_stand_passive_final_modes(const std::filesystem::path& config_path)
         ml::mode_request_for_control_mode(ml::ControlMode::Stand),
         static_cast<float>(ml::kControlDt));
     require(stand.telemetry.mode == ml::ControlMode::Stand, "stand mode telemetry");
-    require(!stand.target.damping_only, "stand should publish position target");
+    require_target_mode(stand.target, ml::JointTargetMode::Position, "stand should publish position target");
     require(!stand.telemetry.policy_evaluated, "stand should not evaluate policy");
 
     const auto passive = core.step(
@@ -191,7 +199,8 @@ void check_stand_passive_final_modes(const std::filesystem::path& config_path)
         ml::mode_request_for_control_mode(ml::ControlMode::Passive),
         static_cast<float>(ml::kControlDt));
     require(passive.telemetry.mode == ml::ControlMode::Passive, "passive mode telemetry");
-    require(passive.target.damping_only, "passive should be damping-only");
+    require_target_mode(passive.target, ml::JointTargetMode::ZeroTorque, "passive should publish zero torque");
+    require(near(passive.target.damping_kd, 0.0f), "passive zero-torque kd should be zero");
     require(!passive.telemetry.policy_evaluated, "passive should not evaluate policy");
     require_joint_array_near(passive.target.q, shifted_q, "passive target should seed from state");
 
@@ -202,7 +211,8 @@ void check_stand_passive_final_modes(const std::filesystem::path& config_path)
         ml::mode_request_for_control_mode(ml::ControlMode::FinalDamping),
         static_cast<float>(ml::kControlDt));
     require(final_damping.telemetry.mode == ml::ControlMode::FinalDamping, "final damping mode telemetry");
-    require(final_damping.target.damping_only, "final damping should be damping-only");
+    require_target_mode(final_damping.target, ml::JointTargetMode::Damping, "final damping should publish damping");
+    require(near(final_damping.target.damping_kd, options.damping_kd), "final damping kd should use options");
     require(!final_damping.telemetry.policy_evaluated, "final damping should not evaluate policy");
     require_joint_array_near(final_damping.target.q, final_q, "final damping target should seed from state");
 }
@@ -227,7 +237,10 @@ void check_runtime_adapter_flow(const std::filesystem::path& config_path)
     require(tick.adapter.backend == "fake", "runtime should return adapter telemetry");
     require(tick.adapter.command_published, "adapter telemetry should report command published");
     require(tick.core.telemetry.mode == ml::ControlMode::Passive, "runtime core mode telemetry");
-    require(adapter.last_target.damping_only, "runtime should publish damping-only passive target");
+    require_target_mode(
+        adapter.last_target,
+        ml::JointTargetMode::ZeroTorque,
+        "runtime should publish zero-torque passive target");
     require_joint_array_near(adapter.last_target.q, q, "runtime published target should come from snapshot");
 
     tick_input.mode_request = ml::ModeRequest::none();
@@ -308,7 +321,7 @@ void check_shared_motion_safety(const std::filesystem::path& config_path)
         require(threw, std::string("ControllerCore should run shared motion safety checks in ") + label);
     };
 
-    auto require_damping_mode_runs = [&](ml::ControlMode mode, const char* label) {
+    auto require_unchecked_passive_mode_runs = [&](ml::ControlMode mode, ml::JointTargetMode expected, const char* label) {
         ml::ControllerCoreOptions options;
         options.safety.enabled = true;
         options.safety.max_gravity_xy = 0.01f;
@@ -319,12 +332,12 @@ void check_shared_motion_safety(const std::filesystem::path& config_path)
             ml::Command{},
             ml::mode_request_for_control_mode(mode),
             static_cast<float>(ml::kControlDt));
-        require(out.target.damping_only, std::string(label) + " should publish damping-only output");
+        require_target_mode(out.target, expected, std::string(label) + " target mode");
     };
 
     require_unsafe_rejected(ml::ControlMode::Stand, "STAND");
-    require_damping_mode_runs(ml::ControlMode::Passive, "PASSIVE");
-    require_damping_mode_runs(ml::ControlMode::FinalDamping, "DAMPING");
+    require_unchecked_passive_mode_runs(ml::ControlMode::Passive, ml::JointTargetMode::ZeroTorque, "PASSIVE");
+    require_unchecked_passive_mode_runs(ml::ControlMode::FinalDamping, ml::JointTargetMode::Damping, "DAMPING");
 }
 
 void check_external_policy_flow(const std::filesystem::path& config_path)
@@ -386,7 +399,7 @@ void check_external_policy_flow(const std::filesystem::path& config_path)
             ml::ModeRequest::none(),
             cfg.policy_dt);
         require(completed.telemetry.mode == ml::ControlMode::FinalDamping, "completed dance next mode");
-        require(completed.target.damping_only, "completed dance should enter damping target");
+        require_target_mode(completed.target, ml::JointTargetMode::Damping, "completed dance should enter damping");
         require_joint_array_near(completed.target.q, q, "completed dance should seed target from state");
     }
 
@@ -412,7 +425,7 @@ void check_external_policy_flow(const std::filesystem::path& config_path)
             ml::mode_request_for_control_mode(ml::ControlMode::Passive),
             cfg.policy_dt);
         require(passive.telemetry.mode == ml::ControlMode::Passive, "external to passive mode telemetry");
-        require(passive.target.damping_only, "external to passive should be damping-only");
+        require_target_mode(passive.target, ml::JointTargetMode::ZeroTorque, "external to passive should be zero torque");
         require(!passive.telemetry.policy_evaluated, "external to passive should not evaluate policy");
         require(dance.steps == 1, "external to passive should stop stepping external policy");
         require_joint_array_near(passive.target.q, passive_q, "external to passive should seed from state");

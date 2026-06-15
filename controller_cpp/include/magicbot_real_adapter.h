@@ -20,7 +20,12 @@ public:
     void write_target(const JointTarget& target) override
     {
         const auto snap = state_.snapshot();
-        if (target.damping_only) {
+        if (target.mode == JointTargetMode::ZeroTorque) {
+            robot_.publish_damping(snap.counts, 0.0f);
+            command_published_ = true;
+            return;
+        }
+        if (target.mode == JointTargetMode::Damping) {
             robot_.publish_damping(snap.counts, target.damping_kd);
             command_published_ = true;
             return;

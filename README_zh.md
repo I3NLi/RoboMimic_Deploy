@@ -30,6 +30,15 @@ scripts/
   run_dual_inference_rate_native.sh     # 原生仿真/真机状态速率测试
 ```
 
+## 共享运行时契约
+
+`ControllerCore` 负责 observation、策略步进、模式切换、运动安全墙和
+target limit。它输出带显式 `JointTargetMode` 的 `JointTarget`：
+`Position` 用于 STAND/LOCO/DANCE/SKILL 的 PD 目标，`ZeroTorque` 用于
+PASSIVE 零力矩，`Damping` 用于 FINAL_DAMPING/安全退出时的轻阻尼。sim 和
+real adapter 只把这个 target mode 翻译成 MuJoCo 或 MagicBot SDK I/O，
+不能复制 mode、policy、safety 或 limit 逻辑。
+
 ## 依赖
 
 - CMake 3.14+
