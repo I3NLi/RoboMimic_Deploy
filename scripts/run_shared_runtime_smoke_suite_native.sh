@@ -23,7 +23,7 @@ Default groups:
   sim             pure-sim closed-loop scheduled force + impulse
   viewer          native viewer HTTP/UDP/mode/external-policy/perturb controls
   python          Python-facing viewer launcher over the same native runtime
-  real-no-robot   real-runner dry/input/safety gates without connecting robot
+  real-no-robot   real-adapter target modes plus real-runner dry/input/safety gates without connecting robot
 
 Options:
   --core-only       Run only core checks
@@ -212,6 +212,7 @@ if [[ "${RUN_PYTHON}" -eq 1 ]]; then
 fi
 
 if [[ "${RUN_REAL_NO_ROBOT}" -eq 1 ]]; then
+    run_step "${SCRIPT_DIR}/run_real_adapter_target_mode_check_native.sh"
     run_step "${SCRIPT_DIR}/run_magicbot_loco_safety_gate_smoke_native.sh"
     run_step "${SCRIPT_DIR}/run_magicbot_loco_input_check_smoke_native.sh"
     run_step "${SCRIPT_DIR}/run_magicbot_loco_gamepad_input_smoke_native.sh"
