@@ -94,12 +94,30 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-for tool in jq grep; do
+for tool in jq grep python3; do
     if ! command -v "${tool}" >/dev/null 2>&1; then
         echo "[Smoke][ERROR] required tool not found: ${tool}" >&2
         exit 1
     fi
 done
+
+python3 - "${duration}" "${push_start}" "${push_duration}" "${push_impulse_time}" <<'PY'
+import sys
+
+labels = ("--duration", "--push-start", "--push-duration", "--push-impulse-time")
+try:
+    duration, push_start, push_duration, push_impulse_time = map(float, sys.argv[1:])
+except ValueError as exc:
+    raise SystemExit(f"[Smoke][ERROR] invalid numeric timing argument: {exc}")
+
+required = max(push_start + push_duration, push_impulse_time)
+if duration + 1e-9 < required:
+    raise SystemExit(
+        "[Smoke][ERROR] --duration must cover the full disturbance window: "
+        f"duration={duration:g}s required>={required:g}s "
+        f"({labels[1]} + {labels[2]} or {labels[3]})"
+    )
+PY
 
 echo "[Smoke] Checking dual-rate sim writes through adapter boundary"
 if grep -En 'data->ctrl\[[^]]+\][[:space:]]*=' "${DUAL_SOURCE}"; then

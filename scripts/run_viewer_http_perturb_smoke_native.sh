@@ -8,6 +8,9 @@ duration="1.5"
 camera_port=""
 summary_json=""
 keep_summary=0
+push_start="0.25"
+push_duration="0.12"
+push_impulse_time="0.55"
 extra_args=()
 
 usage() {
@@ -75,6 +78,24 @@ for tool in curl jq python3; do
     fi
 done
 
+python3 - "${duration}" "${push_start}" "${push_duration}" "${push_impulse_time}" <<'PY'
+import sys
+
+labels = ("--duration", "--push-start", "--push-duration", "--push-impulse-time")
+try:
+    duration, push_start, push_duration, push_impulse_time = map(float, sys.argv[1:])
+except ValueError as exc:
+    raise SystemExit(f"[Smoke][ERROR] invalid numeric timing argument: {exc}")
+
+required = max(push_start + push_duration, push_impulse_time)
+if duration + 1e-9 < required:
+    raise SystemExit(
+        "[Smoke][ERROR] --duration must cover the full disturbance window: "
+        f"duration={duration:g}s required>={required:g}s "
+        f"({labels[1]} + {labels[2]} or {labels[3]})"
+    )
+PY
+
 if [[ -z "${camera_port}" ]]; then
     camera_port="$(python3 - <<'PY'
 import socket
@@ -118,10 +139,10 @@ echo "[Smoke] Starting viewer HTTP perturb smoke via ${RUNNER} on 127.0.0.1:${ca
     --camera-port "${camera_port}" \
     --push-body pelvis \
     --push-force 35,0,0 \
-    --push-start 0.25 \
-    --push-duration 0.12 \
+    --push-start "${push_start}" \
+    --push-duration "${push_duration}" \
     --push-impulse 0,1,0 \
-    --push-impulse-time 0.55 \
+    --push-impulse-time "${push_impulse_time}" \
     --summary-json "${summary_json}" \
     "${extra_args[@]}" \
     >"${viewer_log}" 2>&1 &
