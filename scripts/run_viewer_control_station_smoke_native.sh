@@ -285,28 +285,28 @@ post_control_query "pause=off" "pause=off"
 wait_status '.paused == false and .safety_enabled == false and .http_control_commands >= 4' "control-station resumed after safety wall check"
 
 send_udp "mode=loco vx=0.10 vy=-0.02 wz=0.04"
-wait_status '.mode == "LOCO" and .adapter_backend == "mujoco-sim" and .adapter_command_published == true and .paused == false and (.cmd[0] > 0.09 and .cmd[0] < 0.11) and (.cmd[1] > -0.03 and .cmd[1] < -0.01) and (.cmd[2] > 0.03 and .cmd[2] < 0.05) and .sim_steps > 0' "control-station UDP LOCO velocity"
+wait_status '.mode == "LOCO" and .target_mode == "Position" and .adapter_backend == "mujoco-sim" and .adapter_command_published == true and .paused == false and (.cmd[0] > 0.09 and .cmd[0] < 0.11) and (.cmd[1] > -0.03 and .cmd[1] < -0.01) and (.cmd[2] > 0.03 and .cmd[2] < 0.05) and .sim_steps > 0' "control-station UDP LOCO velocity"
 
 post_control "passive"
-wait_status '.mode == "PASSIVE" and .adapter_backend == "mujoco-sim" and .adapter_command_published == true and .paused == false and .cmd[0] == 0 and .cmd[1] == 0 and .cmd[2] == 0 and .sim_steps > 0' "control-station PASSIVE"
+wait_status '.mode == "PASSIVE" and .target_mode == "ZeroTorque" and .adapter_backend == "mujoco-sim" and .adapter_command_published == true and .paused == false and .cmd[0] == 0 and .cmd[1] == 0 and .cmd[2] == 0 and .sim_steps > 0' "control-station PASSIVE"
 
 post_control "stand"
-wait_status '.mode == "STAND" and .adapter_backend == "mujoco-sim" and .adapter_command_published == true and .paused == false and .cmd[0] == 0 and .cmd[1] == 0 and .cmd[2] == 0 and .sim_steps > 0' "control-station STAND"
+wait_status '.mode == "STAND" and .target_mode == "Position" and .adapter_backend == "mujoco-sim" and .adapter_command_published == true and .paused == false and .cmd[0] == 0 and .cmd[1] == 0 and .cmd[2] == 0 and .sim_steps > 0' "control-station STAND"
 
 post_control_query "mode=loco&vx=0.12&vy=0.03&wz=-0.04" "mode=loco velocity"
-wait_status '.mode == "LOCO" and .adapter_backend == "mujoco-sim" and .adapter_command_published == true and .paused == false and (.cmd[0] > 0.11 and .cmd[0] < 0.13) and (.cmd[1] > 0.02 and .cmd[1] < 0.04) and (.cmd[2] > -0.05 and .cmd[2] < -0.03) and .sim_steps > 0' "control-station LOCO velocity"
+wait_status '.mode == "LOCO" and .target_mode == "Position" and .adapter_backend == "mujoco-sim" and .adapter_command_published == true and .paused == false and (.cmd[0] > 0.11 and .cmd[0] < 0.13) and (.cmd[1] > 0.02 and .cmd[1] < 0.04) and (.cmd[2] > -0.05 and .cmd[2] < -0.03) and .sim_steps > 0' "control-station LOCO velocity"
 
 post_reset
-wait_status '.mode == "LOCO" and .adapter_backend == "mujoco-sim" and .adapter_command_published == true and .paused == false and (.cmd[0] > 0.11 and .cmd[0] < 0.13) and (.cmd[1] > 0.02 and .cmd[1] < 0.04) and (.cmd[2] > -0.05 and .cmd[2] < -0.03) and .http_reset_requests >= 1 and .sim_steps > 0' "control-station /reset preserves LOCO"
+wait_status '.mode == "LOCO" and .target_mode == "Position" and .adapter_backend == "mujoco-sim" and .adapter_command_published == true and .paused == false and (.cmd[0] > 0.11 and .cmd[0] < 0.13) and (.cmd[1] > 0.02 and .cmd[1] < 0.04) and (.cmd[2] > -0.05 and .cmd[2] < -0.03) and .http_reset_requests >= 1 and .sim_steps > 0' "control-station /reset preserves LOCO"
 
 post_control "final_damping"
-wait_status '.mode == "DAMPING" and .adapter_backend == "mujoco-sim" and .adapter_command_published == true and .paused == false and .cmd[0] == 0 and .cmd[1] == 0 and .cmd[2] == 0 and .sim_steps > 0' "control-station DAMPING"
+wait_status '.mode == "DAMPING" and .target_mode == "Damping" and .adapter_backend == "mujoco-sim" and .adapter_command_published == true and .paused == false and .cmd[0] == 0 and .cmd[1] == 0 and .cmd[2] == 0 and .sim_steps > 0' "control-station DAMPING"
 
 post_control "beyond"
-wait_status '.mode == "DANCE" and .external_policy == "BeyondMimic" and .adapter_backend == "mujoco-sim" and .adapter_command_published == true and .paused == false and .policy_steps > 0 and .sim_steps > 0' "control-station DANCE/BeyondMimic"
+wait_status '.mode == "DANCE" and .target_mode == "Position" and .external_policy == "BeyondMimic" and .adapter_backend == "mujoco-sim" and .adapter_command_published == true and .paused == false and .policy_steps > 0 and .sim_steps > 0' "control-station DANCE/BeyondMimic"
 
 post_control "track_mimic"
-wait_status '.mode == "SKILL" and .external_policy == "TrackMimic" and .adapter_backend == "mujoco-sim" and .adapter_command_published == true and .paused == false and .safety_enabled == false and .policy_steps > 0 and .sim_steps > 0 and .http_control_commands >= 10 and .http_reset_requests >= 1' "control-station SKILL/TrackMimic trajectory"
+wait_status '.mode == "SKILL" and .target_mode == "Position" and .external_policy == "TrackMimic" and .adapter_backend == "mujoco-sim" and .adapter_command_published == true and .paused == false and .safety_enabled == false and .policy_steps > 0 and .sim_steps > 0 and .http_control_commands >= 10 and .http_reset_requests >= 1' "control-station SKILL/TrackMimic trajectory"
 
 if ! wait "${viewer_pid}"; then
     echo "[Smoke][ERROR] viewer exited with failure" >&2
@@ -321,7 +321,7 @@ if [[ ! -s "${summary_json}" ]]; then
     exit 1
 fi
 
-if ! jq -e '.mode == "SKILL" and .external_policy == "TrackMimic" and .adapter_backend == "mujoco-sim" and .adapter_command_published == true and .paused == false and .safety_enabled == false and .policy_steps > 0 and .sim_steps > 0 and .http_control_commands >= 10 and .http_reset_requests >= 1' "${summary_json}" >/dev/null; then
+if ! jq -e '.mode == "SKILL" and .target_mode == "Position" and .external_policy == "TrackMimic" and .adapter_backend == "mujoco-sim" and .adapter_command_published == true and .paused == false and .safety_enabled == false and .policy_steps > 0 and .sim_steps > 0 and .http_control_commands >= 10 and .http_reset_requests >= 1' "${summary_json}" >/dev/null; then
     echo "[Smoke][ERROR] summary did not report final control-station SKILL/TrackMimic trajectory" >&2
     cat "${summary_json}" >&2
     exit 1
@@ -329,4 +329,4 @@ fi
 
 echo "[Smoke] PASSED viewer control-station modes and external policies"
 echo "[Smoke] summary=${summary_json}"
-jq '{mode, external_policy, adapter_backend, adapter_command_published, safety_enabled, paused, sim_steps, policy_steps, http_control_commands, http_reset_requests}' "${summary_json}"
+jq '{mode, target_mode, external_policy, adapter_backend, adapter_command_published, safety_enabled, paused, sim_steps, policy_steps, http_control_commands, http_reset_requests}' "${summary_json}"

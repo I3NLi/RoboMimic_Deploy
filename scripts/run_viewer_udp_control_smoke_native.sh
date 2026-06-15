@@ -225,6 +225,7 @@ if [[ ! -s "${summary_json}" ]]; then
 fi
 
 mode="$(jq -r '.mode' "${summary_json}")"
+target_mode="$(jq -r '.target_mode' "${summary_json}")"
 paused="$(jq -r '.paused' "${summary_json}")"
 sim_steps="$(jq -r '.sim_steps' "${summary_json}")"
 adapter_backend="$(jq -r '.adapter_backend' "${summary_json}")"
@@ -232,6 +233,11 @@ adapter_command_published="$(jq -r '.adapter_command_published' "${summary_json}
 
 if [[ "${mode}" != "DAMPING" ]]; then
     echo "[Smoke][ERROR] expected final mode DAMPING, got ${mode}" >&2
+    cat "${summary_json}" >&2
+    exit 1
+fi
+if [[ "${target_mode}" != "Damping" ]]; then
+    echo "[Smoke][ERROR] expected final target_mode Damping, got ${target_mode}" >&2
     cat "${summary_json}" >&2
     exit 1
 fi
@@ -258,4 +264,4 @@ fi
 
 echo "[Smoke] PASSED viewer UDP control path"
 echo "[Smoke] summary=${summary_json}"
-jq '{mode, paused, adapter_backend, adapter_command_published, sim_steps}' "${summary_json}"
+jq '{mode, target_mode, paused, adapter_backend, adapter_command_published, sim_steps}' "${summary_json}"

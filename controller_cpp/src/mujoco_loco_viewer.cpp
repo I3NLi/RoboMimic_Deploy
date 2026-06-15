@@ -222,6 +222,7 @@ struct CameraStreamState {
     std::vector<ViewerHttpEvent> viewer_events;
     std::vector<ViewerControlCommand> control_commands;
     std::string mode{"STAND"};
+    std::string target_mode{"Position"};
     std::string external_policy;
     std::vector<std::string> skill_policy_keys;
     std::string adapter_backend;
@@ -326,6 +327,7 @@ public:
 
     void update_status(
         std::string mode,
+        std::string target_mode,
         std::string external_policy,
         const magicbot_loco::AdapterTelemetry& adapter,
         bool safety_enabled,
@@ -341,6 +343,7 @@ public:
     {
         std::lock_guard<std::mutex> lock(state_->mutex);
         state_->mode = std::move(mode);
+        state_->target_mode = std::move(target_mode);
         state_->external_policy = std::move(external_policy);
         state_->adapter_backend = adapter.backend;
         state_->adapter_state_age_ms = adapter.state_age_ms;
@@ -634,6 +637,7 @@ private:
                  << "\"seq\":" << state->seq << ","
                  << "\"timestamp\":" << state->timestamp << ","
                  << "\"mode\":\"" << state->mode << "\","
+                 << "\"target_mode\":\"" << json_escape(state->target_mode) << "\","
                  << "\"external_policy\":\"" << json_escape(state->external_policy) << "\","
                  << "\"skill_policy_keys\":[";
             for (size_t i = 0; i < state->skill_policy_keys.size(); ++i) {
@@ -1478,6 +1482,7 @@ std::string viewer_summary_json(
     int sim_step,
     int policy_step,
     magicbot_loco::ControlMode current_core_mode,
+    magicbot_loco::JointTargetMode current_target_mode,
     const std::string& external_policy,
     const magicbot_loco::AdapterTelemetry& adapter,
     bool safety_enabled,
@@ -1489,6 +1494,7 @@ std::string viewer_summary_json(
     out << std::fixed << std::setprecision(6)
         << "{"
         << "\"mode\":\"" << magicbot_loco::control_mode_name(current_core_mode) << "\","
+        << "\"target_mode\":\"" << magicbot_loco::joint_target_mode_name(current_target_mode) << "\","
         << "\"external_policy\":\"" << json_escape(external_policy) << "\","
         << "\"adapter_backend\":\"" << json_escape(adapter.backend) << "\","
         << "\"adapter_state_age_ms\":" << adapter.state_age_ms << ","
@@ -2798,6 +2804,7 @@ int main(int argc, char** argv)
         std::string desired_external_policy_key;
         std::string last_requested_external_policy_key;
         magicbot_loco::ControlMode current_core_mode = core.mode();
+        magicbot_loco::JointTargetMode current_target_mode = magicbot_loco::JointTargetMode::Position;
         std::string current_external_policy;
         magicbot_loco::AdapterTelemetry current_adapter_telemetry = sim_adapter.telemetry();
         bool paused = args.paused;
@@ -3031,6 +3038,7 @@ int main(int argc, char** argv)
                     tick_input.publish_target = true;
                     const auto tick = runtime.tick(tick_input);
                     current_core_mode = tick.core.telemetry.mode;
+                    current_target_mode = tick.core.target.mode;
                     current_external_policy = tick.core.telemetry.external_policy;
                     current_adapter_telemetry = tick.adapter;
                     desired_mode = tick.core.telemetry.mode;
@@ -3084,6 +3092,7 @@ int main(int argc, char** argv)
             if (camera_server) {
                 camera_server->update_status(
                     magicbot_loco::control_mode_name(current_core_mode),
+                    magicbot_loco::joint_target_mode_name(current_target_mode),
                     current_external_policy,
                     current_adapter_telemetry,
                     core.safety_enabled(),
@@ -3199,6 +3208,7 @@ int main(int argc, char** argv)
                 sim_step,
                 policy_step,
                 current_core_mode,
+                current_target_mode,
                 current_external_policy,
                 current_adapter_telemetry,
                 core.safety_enabled(),

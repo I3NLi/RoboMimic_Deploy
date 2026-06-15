@@ -258,7 +258,7 @@ post_ok "${control_url}?vx=0.40&vy=-0.20&wz=0.10" "stand velocity should sanitiz
 stand_zero_ready=0
 for _ in $(seq 1 40); do
     if curl -sf "${status_url}" -o "${status_body}" &&
-       jq -e '.mode == "STAND" and .paused == false and .cmd[0] == 0 and .cmd[1] == 0 and .cmd[2] == 0 and .adapter_backend == "mujoco-sim" and .adapter_command_published == true' "${status_body}" >/dev/null; then
+       jq -e '.mode == "STAND" and .target_mode == "Position" and .paused == false and .cmd[0] == 0 and .cmd[1] == 0 and .cmd[2] == 0 and .adapter_backend == "mujoco-sim" and .adapter_command_published == true' "${status_body}" >/dev/null; then
         stand_zero_ready=1
         break
     fi
@@ -276,7 +276,7 @@ post_ok "${control_url}?mode=walk" "walk preset"
 walk_ready=0
 for _ in $(seq 1 40); do
     if curl -sf "${status_url}" -o "${status_body}" &&
-       jq -e '.mode == "LOCO" and .paused == false and (.cmd[0] > 0.24 and .cmd[0] < 0.26) and .cmd[1] == 0 and .cmd[2] == 0 and .adapter_backend == "mujoco-sim" and .adapter_command_published == true' "${status_body}" >/dev/null; then
+       jq -e '.mode == "LOCO" and .target_mode == "Position" and .paused == false and (.cmd[0] > 0.24 and .cmd[0] < 0.26) and .cmd[1] == 0 and .cmd[2] == 0 and .adapter_backend == "mujoco-sim" and .adapter_command_published == true' "${status_body}" >/dev/null; then
         walk_ready=1
         break
     fi
@@ -294,7 +294,7 @@ post_ok "${control_url}?mode=run_forward" "run-forward preset"
 run_ready=0
 for _ in $(seq 1 40); do
     if curl -sf "${status_url}" -o "${status_body}" &&
-       jq -e '.mode == "LOCO" and .paused == false and (.cmd[0] > 0.64 and .cmd[0] < 0.66) and .cmd[1] == 0 and .cmd[2] == 0 and .adapter_backend == "mujoco-sim" and .adapter_command_published == true' "${status_body}" >/dev/null; then
+       jq -e '.mode == "LOCO" and .target_mode == "Position" and .paused == false and (.cmd[0] > 0.64 and .cmd[0] < 0.66) and .cmd[1] == 0 and .cmd[2] == 0 and .adapter_backend == "mujoco-sim" and .adapter_command_published == true' "${status_body}" >/dev/null; then
         run_ready=1
         break
     fi
@@ -312,7 +312,7 @@ post_ok "${control_url}?mode=loco&vx=0.15&vy=0.05&wz=-0.05" "loco"
 loco_ready=0
 for _ in $(seq 1 40); do
     if curl -sf "${status_url}" -o "${status_body}" &&
-       jq -e '.mode == "LOCO" and .paused == false and (.cmd[0] > 0.14 and .cmd[0] < 0.16) and (.cmd[1] > 0.04 and .cmd[1] < 0.06) and (.cmd[2] > -0.06 and .cmd[2] < -0.04) and .adapter_backend == "mujoco-sim" and .adapter_command_published == true' "${status_body}" >/dev/null; then
+       jq -e '.mode == "LOCO" and .target_mode == "Position" and .paused == false and (.cmd[0] > 0.14 and .cmd[0] < 0.16) and (.cmd[1] > 0.04 and .cmd[1] < 0.06) and (.cmd[2] > -0.06 and .cmd[2] < -0.04) and .adapter_backend == "mujoco-sim" and .adapter_command_published == true' "${status_body}" >/dev/null; then
         loco_ready=1
         break
     fi
@@ -330,7 +330,7 @@ post_ok "${reset_url}" "reset after loco"
 reset_endpoint_ready=0
 for _ in $(seq 1 40); do
     if curl -sf "${status_url}" -o "${status_body}" &&
-       jq -e '.mode == "LOCO" and .paused == false and (.cmd[0] > 0.14 and .cmd[0] < 0.16) and (.cmd[1] > 0.04 and .cmd[1] < 0.06) and (.cmd[2] > -0.06 and .cmd[2] < -0.04) and .http_reset_requests >= 2 and .adapter_backend == "mujoco-sim" and .adapter_command_published == true' "${status_body}" >/dev/null; then
+       jq -e '.mode == "LOCO" and .target_mode == "Position" and .paused == false and (.cmd[0] > 0.14 and .cmd[0] < 0.16) and (.cmd[1] > 0.04 and .cmd[1] < 0.06) and (.cmd[2] > -0.06 and .cmd[2] < -0.04) and .http_reset_requests >= 2 and .adapter_backend == "mujoco-sim" and .adapter_command_published == true' "${status_body}" >/dev/null; then
         reset_endpoint_ready=1
         break
     fi
@@ -351,7 +351,7 @@ post_ok "${control_url}?mode=final_damping" "final_damping"
 status_ready=0
 for _ in $(seq 1 40); do
     if curl -sf "${status_url}" -o "${status_body}" &&
-       jq -e '.mode == "DAMPING" and .paused == false and .adapter_backend == "mujoco-sim" and .adapter_command_published == true and .http_control_commands >= 10 and .sim_steps > 0 and (.cmd | length) == 3' "${status_body}" >/dev/null; then
+       jq -e '.mode == "DAMPING" and .target_mode == "Damping" and .paused == false and .adapter_backend == "mujoco-sim" and .adapter_command_published == true and .http_control_commands >= 10 and .sim_steps > 0 and (.cmd | length) == 3' "${status_body}" >/dev/null; then
         status_ready=1
         break
     fi
@@ -385,6 +385,7 @@ if [[ ! -s "${summary_json}" ]]; then
 fi
 
 mode="$(jq -r '.mode' "${summary_json}")"
+target_mode="$(jq -r '.target_mode' "${summary_json}")"
 http_control_commands="$(jq -r '.http_control_commands' "${summary_json}")"
 http_reset_requests="$(jq -r '.http_reset_requests' "${summary_json}")"
 sim_steps="$(jq -r '.sim_steps' "${summary_json}")"
@@ -393,6 +394,11 @@ adapter_command_published="$(jq -r '.adapter_command_published' "${summary_json}
 
 if [[ "${mode}" != "DAMPING" ]]; then
     echo "[Smoke][ERROR] expected final mode DAMPING, got ${mode}" >&2
+    cat "${summary_json}" >&2
+    exit 1
+fi
+if [[ "${target_mode}" != "Damping" ]]; then
+    echo "[Smoke][ERROR] expected final target_mode Damping, got ${target_mode}" >&2
     cat "${summary_json}" >&2
     exit 1
 fi
@@ -439,4 +445,4 @@ fi
 
 echo "[Smoke] PASSED viewer HTTP control API"
 echo "[Smoke] summary=${summary_json}"
-jq '{mode, paused, adapter_backend, adapter_command_published, sim_steps, http_reset_requests, http_control_commands}' "${summary_json}"
+jq '{mode, target_mode, paused, adapter_backend, adapter_command_published, sim_steps, http_reset_requests, http_control_commands}' "${summary_json}"

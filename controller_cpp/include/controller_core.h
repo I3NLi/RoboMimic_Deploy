@@ -30,6 +30,19 @@ enum class JointTargetMode {
     Damping,
 };
 
+inline const char* joint_target_mode_name(JointTargetMode mode)
+{
+    switch (mode) {
+    case JointTargetMode::Position:
+        return "Position";
+    case JointTargetMode::ZeroTorque:
+        return "ZeroTorque";
+    case JointTargetMode::Damping:
+        return "Damping";
+    }
+    return "Unknown";
+}
+
 struct JointTarget {
     JointArray q{};
     JointGains gains{};
