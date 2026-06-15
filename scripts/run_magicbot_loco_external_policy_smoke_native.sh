@@ -65,7 +65,7 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-for tool in python3 ss rg; do
+for tool in python3 ss grep; do
     if ! command -v "${tool}" >/dev/null 2>&1; then
         echo "[Smoke][ERROR] required tool not found: ${tool}" >&2
         exit 1
@@ -207,7 +207,7 @@ wait_for_udp_ready() {
     local label="$3"
     local ready=0
     for _ in $(seq 1 100); do
-        if ss -lun | rg -q ":${port}\\b"; then
+        if ss -lun | grep -Eq ":${port}([[:space:]]|$)"; then
             ready=1
             break
         fi
@@ -237,7 +237,7 @@ for expected in \
     '[DryRun] BeyondMimic loaded' \
     '[DryRun] BeyondMimic trajectory/TrackMimic key loaded' \
     '[DryRun] BeyondMimic trajectory key ClipA loaded'; do
-    if ! rg -F -q "${expected}" "${dry_log}"; then
+    if ! grep -Fq "${expected}" "${dry_log}"; then
         echo "[Smoke][ERROR] dry-run output missing: ${expected}" >&2
         sed -n '1,220p' "${dry_log}" >&2
         exit 1
@@ -285,14 +285,14 @@ fi
 runner_pid=""
 
 for expected in 'DANCE ignored; add --allow-dance' 'SKILL ignored; add --allow-skill'; do
-    if ! rg -q "${expected}" "${blocked_log}"; then
+    if ! grep -Fq "${expected}" "${blocked_log}"; then
         echo "[Smoke][ERROR] missing expected blocked external-policy output: ${expected}" >&2
         sed -n '1,260p' "${blocked_log}" >&2
         exit 1
     fi
 done
 for forbidden in 'mode=DANCE' 'mode=SKILL'; do
-    if rg -q "${forbidden}" "${blocked_log}"; then
+    if grep -Fq "${forbidden}" "${blocked_log}"; then
         echo "[Smoke][ERROR] external policy entered without allow gate: ${forbidden}" >&2
         sed -n '1,260p' "${blocked_log}" >&2
         exit 1
@@ -343,7 +343,7 @@ fi
 runner_pid=""
 
 for expected in 'mode=DANCE' 'mode=SKILL' 'external=ClipA' 'mode=DAMPING'; do
-    if ! rg -q "${expected}" "${input_log}"; then
+    if ! grep -Fq "${expected}" "${input_log}"; then
         echo "[Smoke][ERROR] missing expected input-check output: ${expected}" >&2
         sed -n '1,260p' "${input_log}" >&2
         exit 1
@@ -351,7 +351,7 @@ for expected in 'mode=DANCE' 'mode=SKILL' 'external=ClipA' 'mode=DAMPING'; do
 done
 
 for blocked in 'DANCE ignored' 'SKILL ignored'; do
-    if rg -q "${blocked}" "${input_log}"; then
+    if grep -Fq "${blocked}" "${input_log}"; then
         echo "[Smoke][ERROR] external request was unexpectedly blocked: ${blocked}" >&2
         sed -n '1,260p' "${input_log}" >&2
         exit 1
@@ -364,4 +364,4 @@ if [[ "${keep_log}" -eq 1 ]]; then
     echo "[Smoke] blocked_log=${blocked_log}"
     echo "[Smoke] input_log=${input_log}"
 fi
-rg 'DryRun|DANCE ignored|SKILL ignored|mode=(DANCE|SKILL|DAMPING)' "${dry_log}" "${blocked_log}" "${input_log}"
+grep -EH 'DryRun|DANCE ignored|SKILL ignored|mode=(DANCE|SKILL|DAMPING)' "${dry_log}" "${blocked_log}" "${input_log}"

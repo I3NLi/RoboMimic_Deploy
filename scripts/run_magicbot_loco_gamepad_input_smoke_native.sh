@@ -52,7 +52,7 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-for tool in python3 rg mkfifo; do
+for tool in python3 grep mkfifo; do
     if ! command -v "${tool}" >/dev/null 2>&1; then
         echo "[Smoke][ERROR] required tool not found: ${tool}" >&2
         exit 1
@@ -138,7 +138,7 @@ runner_pid=$!
 
 ready=0
 for _ in $(seq 1 360); do
-    if rg -q '\[Input\] Gamepad control enabled|\[InputCheck\] No robot connection' "${log_path}"; then
+    if grep -Eq '\[Input\] Gamepad control enabled|\[InputCheck\] No robot connection' "${log_path}"; then
         ready=1
         break
     fi
@@ -203,7 +203,7 @@ send_gamepad_events "axis_only"
 
 stand_zero_ready=0
 for _ in $(seq 1 80); do
-    if rg -q 'gamepad mode=STAND cmd=\[-?0 -?0 -?0\]$' "${log_path}"; then
+    if grep -Eq 'gamepad mode=STAND cmd=\[-?0 -?0 -?0\]$' "${log_path}"; then
         stand_zero_ready=1
         break
     fi
@@ -225,7 +225,7 @@ send_gamepad_events "loco_axis"
 
 loco_ready=0
 for _ in $(seq 1 80); do
-    if rg -q 'gamepad mode=LOCO cmd=\[0\.5 -?0 -?0\]' "${log_path}"; then
+    if grep -Eq 'gamepad mode=LOCO cmd=\[0\.5 -?0 -?0\]' "${log_path}"; then
         loco_ready=1
         break
     fi
@@ -247,7 +247,7 @@ send_gamepad_events "pause"
 
 pause_ready=0
 for _ in $(seq 1 80); do
-    if rg -q 'gamepad paused mode=LOCO cmd=\[-?0 -?0 -?0\].*pause-zero' "${log_path}"; then
+    if grep -Eq 'gamepad paused mode=LOCO cmd=\[-?0 -?0 -?0\].*pause-zero' "${log_path}"; then
         pause_ready=1
         break
     fi
@@ -276,4 +276,4 @@ echo "[Smoke] PASSED real-runner gamepad input-check"
 if [[ "${keep_log}" -eq 1 ]]; then
     echo "[Smoke] log=${log_path}"
 fi
-rg 'gamepad.*mode=(STAND|LOCO)|pause-zero' "${log_path}"
+grep -E 'gamepad.*mode=(STAND|LOCO)|pause-zero' "${log_path}"
