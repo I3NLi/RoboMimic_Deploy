@@ -235,7 +235,8 @@ force/impulse smoke. `--viewer-only` checks native viewer HTTP/UDP/gamepad,
 video stream, DANCE/SKILL, safety wall, and perturb APIs. `--python-only` runs
 the same viewer smokes through the Python-facing launcher. `--real-only` does
 not connect to the robot; it checks MagicBot real-adapter target-mode
-translation plus dry/input/safety/allow-gate behavior.
+translation, the real operator loop's `ControllerRuntime.tick` boundary, plus
+dry/input/safety/allow-gate behavior.
 
 Manual build:
 

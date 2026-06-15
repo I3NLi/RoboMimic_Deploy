@@ -270,6 +270,45 @@ for forbidden in (
         )
         sys.exit(1)
 
+operator_marker = "OperatorInput operator_input(args, raw_cmd);"
+operator_start = source.find(operator_marker)
+operator_end = source.find("if (args.final_stand_time", operator_start)
+if operator_start < 0 or operator_end < 0:
+    print("[Smoke][ERROR] could not locate real operator loop", file=sys.stderr)
+    sys.exit(1)
+operator_body = source[operator_start:operator_end]
+required_operator_flow = [
+    "ml::MagicbotRealAdapter real_adapter(robot, state);",
+    "ml::ControllerRuntime runtime(core, real_adapter);",
+    "tick_input.command.velocity = raw_cmd;",
+    "tick_input.mode_request = pending_mode_request;",
+    "const ml::RuntimeTickOutput tick = runtime.tick(tick_input);",
+    "pending_mode_request = ml::ModeRequest::none();",
+    "command_target = tick.core.target.q;",
+    "tick.core.telemetry.safety_enabled",
+]
+missing_operator_flow = [item for item in required_operator_flow if item not in operator_body]
+if missing_operator_flow:
+    print(
+        "[Smoke][ERROR] real operator loop must publish through ControllerRuntime.tick; missing: "
+        + ", ".join(missing_operator_flow),
+        file=sys.stderr,
+    )
+    sys.exit(1)
+for forbidden in (
+    "core.step(",
+    "real_adapter.write_target",
+    "torque_limited_target",
+    "clamp_and_rate_limit",
+):
+    if forbidden in operator_body:
+        print(
+            "[Smoke][ERROR] real operator loop must not duplicate ControllerCore/runtime logic: "
+            + forbidden,
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
 for direct_pattern in (
     r"torque_limited_target",
     r"clamp_and_rate_limit",
