@@ -20,9 +20,9 @@ Usage: $0 [options] [-- extra run_mujoco_loco_viewer_native args]
 Smoke-test the --control-station preset. The script starts the native viewer
 through the control-station wrapper, provides a smoke TrackMimic trajectory
 YAML, then verifies UDP control can enter LOCO and HTTP control can enter the
-base modes, reset back to STAND, and enter DANCE/BeyondMimic plus
-SKILL/TrackMimic trajectory. It also verifies runtime safety-wall control via
-HTTP `/control`.
+base modes, `/reset` preserves the current mode/command while resetting sim
+position, and DANCE/BeyondMimic plus SKILL/TrackMimic trajectory are available.
+It also verifies runtime safety-wall control via HTTP `/control`.
 
 Options:
   --duration S       Viewer wall-clock duration, default ${duration}
