@@ -202,6 +202,13 @@ if ! jq -e '
     and .push_impulse_norm == 1
     and .push_force_steps > 0
     and .push_impulse_applied == true
+    and .last_viewer_event_type == "move"
+    and .last_viewer_event_button == 0
+    and .last_viewer_drag_dx == 80
+    and .last_viewer_drag_dy == 0
+    and .last_viewer_drag_norm_dx > 0.16
+    and .last_viewer_drag_norm_dx < 0.17
+    and .last_viewer_drag_norm_dy == 0
 ' "${status_body}" >/dev/null; then
     echo "[Smoke][ERROR] live /status did not report scheduled push telemetry" >&2
     cat "${status_body}" >&2
@@ -277,12 +284,19 @@ if ! jq -e '
     and .push_start_s == 0.25
     and .push_duration_s == 0.12
     and .push_impulse_time_s == 0.55
+    and .last_viewer_event_type == "up"
+    and .last_viewer_event_button == 0
+    and .last_viewer_drag_dx == 80
+    and .last_viewer_drag_dy == 0
+    and .last_viewer_drag_norm_dx > 0.16
+    and .last_viewer_drag_norm_dx < 0.17
+    and .last_viewer_drag_norm_dy == 0
 ' "${summary_json}" >/dev/null; then
-    echo "[Smoke][ERROR] expected scheduled push vectors/timing in summary" >&2
+    echo "[Smoke][ERROR] expected scheduled push vectors/timing and drag direction in summary" >&2
     cat "${summary_json}" >&2
     exit 1
 fi
 
 echo "[Smoke] PASSED viewer HTTP perturb API"
 echo "[Smoke] summary=${summary_json}"
-jq '{sim_steps, http_viewer_events, mouse_perturb_steps, last_perturb_body, last_perturb_body_name, push_body_resolved, push_force, push_impulse, push_start_s, push_duration_s, push_impulse_time_s, push_force_steps, push_impulse_applied, push_force_norm, push_impulse_norm}' "${summary_json}"
+jq '{sim_steps, http_viewer_events, mouse_perturb_steps, last_perturb_body, last_perturb_body_name, last_viewer_event_type, last_viewer_event_button, last_viewer_drag_dx, last_viewer_drag_dy, last_viewer_drag_norm_dx, last_viewer_drag_norm_dy, push_body_resolved, push_force, push_impulse, push_start_s, push_duration_s, push_impulse_time_s, push_force_steps, push_impulse_applied, push_force_norm, push_impulse_norm}' "${summary_json}"
