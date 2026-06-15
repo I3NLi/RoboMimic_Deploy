@@ -108,6 +108,9 @@ scripts/run_mujoco_loco_viewer_native.sh --camera-stream --camera-port 18080
 /viewer-event   POST: 遥控器拖拽扰动/相机事件
 ```
 
+`scripts/run_viewer_stream_smoke_native.sh` 会验证 `/frame.jpg` 和虚拟遥控器使用的
+multipart MJPEG `/stream.mjpg` 端点。
+
 ROS2 图像发布：
 
 ```bash
