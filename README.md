@@ -354,6 +354,47 @@ scripts/run_magicbot_loco_native.sh \
 
 Default Xbox-style gamepad map: left stick Y is `vx`, left stick X is `vy`, right stick X is `wz`. Button 0/A enters `LOCO`, button 1/B enters zero-torque `PASSIVE`, button 2/X pause-zeros, button 3/Y enters `STAND`, button 4/LB requests BeyondMimic, button 5/RB requests TrackMimic, button 6/Back resets the current policy/target without changing mode, button 7/Start toggles pause-zero, button 8/L3 exits the run loop, and button 9/R3 toggles the runtime motion-safety wall. Deadman is disabled by default; set `--gamepad-deadman-button N` if you want one. Axis and button indices are CLI-configurable.
 
+Virtual remote over shared UDP input:
+
+`/home/hiyio/MaigcLab/magicbot-virtual-remote` can run on another host and drive
+the shared `magicbot_z1_loco_onnx` runner through text UDP. For a no-robot
+check on the robot/sim host:
+
+```bash
+scripts/run_magicbot_loco_native.sh \
+  --input-check \
+  --udp-control \
+  --udp-bind 0.0.0.0 \
+  --udp-port 15000 \
+  --duration 10
+```
+
+For real-robot operation, use the same UDP input only after the safety ladder
+and explicit high-risk gates:
+
+```bash
+scripts/run_magicbot_loco_native.sh \
+  --run \
+  --allow-loco \
+  --udp-control \
+  --udp-bind 0.0.0.0 \
+  --udp-port 15000 \
+  --duration 5 \
+  --local-ip 192.168.54.119
+```
+
+In the remote UI set `Remote Host` to the controller host IP and `Loco UDP` to
+`15000`; the shared runner consumes `loco/passive/stand/final_damping`,
+`vx/vy/wz`, `reset`, `pause/resume`, `beyond/track_mimic`, and
+`safety=on|off|toggle`. The `FSM UDP` `15001` field is only needed for the
+legacy FSM / `wireless_remote` path:
+
+```bash
+scripts/run_robot_controller_virtual_remote_native.sh \
+  --net lo \
+  --virtual-remote-port 15001
+```
+
 ## Runtime Notes
 
 - `--allow-loco` is required for ONNX loco mode.

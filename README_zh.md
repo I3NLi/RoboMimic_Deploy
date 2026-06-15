@@ -343,17 +343,44 @@ scripts/run_magicbot_loco_native.sh \
 
 默认 Xbox 风格手柄映射：左摇杆 Y 为 `vx`，左摇杆 X 为 `vy`，右摇杆 X 为 `wz`；button 0/A 进 `LOCO`，button 1/B 进零力矩 `PASSIVE`，button 2/X 暂停清零，button 3/Y 进 `STAND`，button 4/LB 请求 BeyondMimic，button 5/RB 请求 TrackMimic，button 6/Back 只重置当前 policy/target 且不切换模式，button 7/Start 切换暂停清零，button 8/L3 退出 run loop，button 9/R3 切换运行时 safety wall。默认不需要 deadman；如果需要可设置 `--gamepad-deadman-button N`。轴和按键编号都可以用命令行参数改。
 
-完整 FSM 虚拟遥控器：
+共享 UDP 虚拟遥控器：
 
-`/home/hiyio/MaigcLab/magicbot-virtual-remote` 提供 Xbox 风格 Electron 遥控器。对 `robot_controller_onnx` 主线，建议走 `wireless_remote` 兼容 UDP 帧，而不是 Linux `/dev/input/js*`：
+`/home/hiyio/MaigcLab/magicbot-virtual-remote` 可以部署在另一台主机上，通过
+text UDP 直接驱动共享 `magicbot_z1_loco_onnx` runner。机器人/仿真主机上
+先做无机器人输入检查：
+
+```bash
+scripts/run_magicbot_loco_native.sh \
+  --input-check \
+  --udp-control \
+  --udp-bind 0.0.0.0 \
+  --udp-port 15000 \
+  --duration 10
+```
+
+真机运行必须先走完安全阶梯，并显式打开高风险 gate：
+
+```bash
+scripts/run_magicbot_loco_native.sh \
+  --run \
+  --allow-loco \
+  --udp-control \
+  --udp-bind 0.0.0.0 \
+  --udp-port 15000 \
+  --duration 5 \
+  --local-ip 192.168.54.119
+```
+
+遥控器页面里把 `Remote Host` 填成控制器主机 IP，`Loco UDP` 填 `15000`；
+共享 runner 接收 `loco/passive/stand/final_damping`、`vx/vy/wz`、`reset`、
+`pause/resume`、`beyond/track_mimic` 和 `safety=on|off|toggle`。`FSM UDP`
+的 `15001` 只给旧 FSM / `wireless_remote` 链路使用：
 
 ```bash
 scripts/run_robot_controller_virtual_remote_native.sh \
   --net lo \
   --virtual-remote-port 15001
 ```
-
-遥控器可以在另一台主机上运行，把页面里的 `Remote Host` 填成控制器主机 IP，`FSM UDP` 填 `15001`。按键语义对齐 C++ FSM：`START=POS_RESET`，`R1+A=LOCO`，`R1+X/Y/B=SKILL_1/2/3`，`L1+Y/B/X/A=SKILL_4/5/6/7`，`F1=PASSIVE`，`F2/R3=safety=toggle`，`UP release=PAUSE`，`SELECT=退出`。控制器侧 UDP 超时会自动归零遥控器状态。
 
 ## 运行说明
 

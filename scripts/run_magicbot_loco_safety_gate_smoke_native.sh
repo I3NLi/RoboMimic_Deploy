@@ -106,6 +106,52 @@ for path, start_marker, end_marker, label in sections:
     if "--allow-loco" in section[: section.find("scripts/run_dual_push_smoke_native.sh")]:
         print(f"[Smoke][ERROR] {label} safety ladder must not allow LOCO before sim closed-loop smoke", file=sys.stderr)
         sys.exit(1)
+
+remote_requirements = [
+    (
+        Path(sys.argv[1]),
+        "README",
+        [
+            "Virtual remote over shared UDP input",
+            "magicbot_z1_loco_onnx",
+            "scripts/run_magicbot_loco_native.sh",
+            "--input-check",
+            "--udp-control",
+            "--udp-port 15000",
+            "Loco UDP",
+            "safety=on|off|toggle",
+            "legacy FSM / `wireless_remote`",
+            "scripts/run_robot_controller_virtual_remote_native.sh",
+        ],
+    ),
+    (
+        Path(sys.argv[2]),
+        "README_zh",
+        [
+            "共享 UDP 虚拟遥控器",
+            "magicbot_z1_loco_onnx",
+            "scripts/run_magicbot_loco_native.sh",
+            "--input-check",
+            "--udp-control",
+            "--udp-port 15000",
+            "Loco UDP",
+            "safety=on|off|toggle",
+            "旧 FSM / `wireless_remote`",
+            "scripts/run_robot_controller_virtual_remote_native.sh",
+        ],
+    ),
+]
+
+for path, label, required_items in remote_requirements:
+    readme = path.read_text(encoding="utf-8")
+    missing = [item for item in required_items if item not in readme]
+    if missing:
+        print(
+            f"[Smoke][ERROR] {label} virtual-remote UDP docs missing: "
+            + ", ".join(missing),
+            file=sys.stderr,
+        )
+        sys.exit(1)
 PY
 
 echo "[Smoke] Checking real runner wrapper rebuilds on shared headers"
