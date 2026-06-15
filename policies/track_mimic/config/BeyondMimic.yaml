@@ -1,4 +1,4 @@
-onnx_path: "/home/hiyio/MaigcLab/RoboMimic_Deploy_magicbot/policies/beyond_mimic/model/policy.onnx"
+onnx_path: "policy.onnx"
 
 motion_length: 0
 motion_start_step: 2000
