@@ -216,7 +216,6 @@ def event(value: int, kind: int, number: int) -> bytes:
 packets = []
 if sequence == "loco_axis":
     packets = [
-        event(1, JS_EVENT_BUTTON, 4),       # deadman held
         event(1, JS_EVENT_BUTTON, 0),       # LOCO button
         event(-16384, JS_EVENT_AXIS, 1),    # default vx axis with sign -1 -> +0.5
         event(0, JS_EVENT_AXIS, 0),

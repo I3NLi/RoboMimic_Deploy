@@ -272,7 +272,7 @@ post_control_query "mode=loco&vx=0.12&vy=0.03&wz=-0.04" "mode=loco velocity"
 wait_status '.mode == "LOCO" and .adapter_backend == "mujoco-sim" and .adapter_command_published == true and .paused == false and (.cmd[0] > 0.11 and .cmd[0] < 0.13) and (.cmd[1] > 0.02 and .cmd[1] < 0.04) and (.cmd[2] > -0.05 and .cmd[2] < -0.03) and .sim_steps > 0' "control-station LOCO velocity"
 
 post_reset
-wait_status '.mode == "STAND" and .adapter_backend == "mujoco-sim" and .adapter_command_published == true and .paused == false and .cmd[0] == 0 and .cmd[1] == 0 and .cmd[2] == 0 and .http_reset_requests >= 1 and .sim_steps > 0' "control-station /reset STAND"
+wait_status '.mode == "LOCO" and .adapter_backend == "mujoco-sim" and .adapter_command_published == true and .paused == false and (.cmd[0] > 0.11 and .cmd[0] < 0.13) and (.cmd[1] > 0.02 and .cmd[1] < 0.04) and (.cmd[2] > -0.05 and .cmd[2] < -0.03) and .http_reset_requests >= 1 and .sim_steps > 0' "control-station /reset preserves LOCO"
 
 post_control "final_damping"
 wait_status '.mode == "FINAL_DAMPING" and .adapter_backend == "mujoco-sim" and .adapter_command_published == true and .paused == false and .cmd[0] == 0 and .cmd[1] == 0 and .cmd[2] == 0 and .sim_steps > 0' "control-station FINAL_DAMPING"

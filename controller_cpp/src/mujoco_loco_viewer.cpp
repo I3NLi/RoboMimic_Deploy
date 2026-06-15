@@ -116,7 +116,7 @@ struct Args {
     float gamepad_axis_vx_sign = -1.0f;
     float gamepad_axis_vy_sign = -1.0f;
     float gamepad_axis_wz_sign = -1.0f;
-    int gamepad_deadman_button = 4;
+    int gamepad_deadman_button = -1;
     int gamepad_stop_button = -1;
     int gamepad_loco_button = 0;
     int gamepad_stand_button = 3;
@@ -124,8 +124,8 @@ struct Args {
     int gamepad_pause_button = 7;
     int gamepad_reset_button = 6;
     int gamepad_passive_button = 1;
-    int gamepad_dance_button = -1;
-    int gamepad_skill_button = -1;
+    int gamepad_dance_button = 4;
+    int gamepad_skill_button = 5;
     bool ground_correction = false;
     std::string ground_floor_geom = "floor";
     std::vector<std::string> ground_body_keywords;
@@ -1602,6 +1602,10 @@ void apply_viewer_text_action(
     bool allow_implicit_reset = true)
 {
     const bool old_reset_requested = reset_requested;
+    if (action == magicbot_loco::TextControlAction::ResetStand) {
+        reset_requested = true;
+        return;
+    }
     const magicbot_loco::TextControlActionEffect effect =
         magicbot_loco::text_control_action_effect(action, std::move(external_policy_key));
     if (effect.mode_requested && effect.mode == magicbot_loco::ControlMode::Skill &&

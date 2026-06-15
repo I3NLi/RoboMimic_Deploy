@@ -124,7 +124,7 @@ if not http_reset_match:
     sys.exit(1)
 http_reset_block = http_reset_match.group(1)
 if "TextControlAction::ResetStand" not in http_reset_block:
-    print("[Smoke][ERROR] viewer HTTP /reset must route through TextControlAction::ResetStand", file=sys.stderr)
+    print("[Smoke][ERROR] viewer HTTP /reset must route through the shared reset action", file=sys.stderr)
     sys.exit(1)
 if re.search(r"(desired_mode\s*=(?!=)|reset_requested\s*=(?!=)|desired_external_policy_key\.clear\(\))", http_reset_block):
     print("[Smoke][ERROR] viewer HTTP /reset must not set reset/mode fields directly", file=sys.stderr)
@@ -330,7 +330,7 @@ post_ok "${reset_url}" "reset after loco"
 reset_endpoint_ready=0
 for _ in $(seq 1 40); do
     if curl -sf "${status_url}" -o "${status_body}" &&
-       jq -e '.mode == "STAND" and .paused == false and .cmd[0] == 0 and .cmd[1] == 0 and .cmd[2] == 0 and .http_reset_requests >= 2 and .adapter_backend == "mujoco-sim" and .adapter_command_published == true' "${status_body}" >/dev/null; then
+       jq -e '.mode == "LOCO" and .paused == false and (.cmd[0] > 0.14 and .cmd[0] < 0.16) and (.cmd[1] > 0.04 and .cmd[1] < 0.06) and (.cmd[2] > -0.06 and .cmd[2] < -0.04) and .http_reset_requests >= 2 and .adapter_backend == "mujoco-sim" and .adapter_command_published == true' "${status_body}" >/dev/null; then
         reset_endpoint_ready=1
         break
     fi
@@ -338,7 +338,7 @@ for _ in $(seq 1 40); do
 done
 
 if [[ "${reset_endpoint_ready}" -ne 1 ]]; then
-    echo "[Smoke][ERROR] viewer /reset endpoint did not return LOCO to STAND with zero command" >&2
+    echo "[Smoke][ERROR] viewer /reset endpoint changed mode/command instead of only resetting position" >&2
     cat "${status_body}" >&2 || true
     exit 1
 fi
