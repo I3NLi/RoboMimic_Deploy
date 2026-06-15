@@ -607,11 +607,13 @@ scripts/run_viewer_gamepad_control_smoke_native.sh --duration 1.5 --keep-summary
 
 The script starts the viewer with `--gamepad-control` pointed at a FIFO-backed
 fake Linux joystick device, writes `js_event` packets for deadman, LOCO, axis,
-and pause buttons, then checks live `/status` and the summary for LOCO,
-published adapter commands, nonzero policy/sim steps, the expected axis-derived
-command vector, and pause-zero behavior. It also statically guards that the
-viewer gamepad code routes buttons through shared `TextControlAction` handling
-and does not own mode/runtime logic.
+pause, and safety buttons, then checks live `/status` and the summary for LOCO,
+published adapter commands, nonzero policy/sim steps, `safety_enabled == true`,
+the expected axis-derived command vector, and pause-zero behavior. It also
+statically guards that the viewer gamepad code routes mode buttons through
+shared `TextControlAction` handling, emits the shared
+`TextControlSafetyCommand::Toggle` for safety, and does not own mode/runtime
+logic.
 
 Python viewer gamepad control smoke:
 

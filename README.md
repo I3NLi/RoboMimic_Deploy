@@ -99,6 +99,9 @@ architecture:
 scripts/run_mujoco_loco_viewer_native.sh --control-station
 ```
 
+With viewer `--gamepad-control`, button 9/R3 toggles the runtime motion-safety
+wall; override it with `--gamepad-safety-button N`.
+
 Python-facing entrypoint for the same shared-runtime viewer:
 
 ```bash

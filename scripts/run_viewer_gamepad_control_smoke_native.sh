@@ -115,6 +115,7 @@ required = [
     "TextControlAction::ResetStand",
     "TextControlAction::Dance",
     "TextControlAction::Skill",
+    "TextControlSafetyCommand::Toggle",
 ]
 missing = [item for item in required if item not in body]
 if missing:
@@ -239,6 +240,8 @@ elif sequence == "pause":
     packets = [event(1, JS_EVENT_BUTTON, 7)]
 elif sequence == "passive":
     packets = [event(1, JS_EVENT_BUTTON, 1)]
+elif sequence == "safety":
+    packets = [event(1, JS_EVENT_BUTTON, 9)]
 else:
     raise SystemExit(f"unknown sequence: {sequence}")
 
@@ -325,6 +328,25 @@ if [[ "${pause_ready}" -ne 1 ]]; then
     exit 1
 fi
 
+send_gamepad_events "safety"
+
+safety_ready=0
+for _ in $(seq 1 80); do
+    if curl -sf "${status_url}" -o "${status_body}" &&
+       jq -e '.mode == "LOCO" and .paused == true and .safety_enabled == true and .adapter_backend == "mujoco-sim" and .adapter_command_published == true' "${status_body}" >/dev/null; then
+        safety_ready=1
+        break
+    fi
+    sleep 0.1
+done
+
+if [[ "${safety_ready}" -ne 1 ]]; then
+    echo "[Smoke][ERROR] viewer /status did not report fake gamepad safety toggle" >&2
+    cat "${status_body}" >&2 || true
+    sed -n '1,280p' "${viewer_log}" >&2
+    exit 1
+fi
+
 if ! wait "${viewer_pid}"; then
     echo "[Smoke][ERROR] viewer exited with failure" >&2
     sed -n '1,260p' "${viewer_log}" >&2
@@ -338,7 +360,7 @@ if [[ ! -s "${summary_json}" ]]; then
     exit 1
 fi
 
-if ! jq -e '.mode == "LOCO" and .paused == true and .adapter_backend == "mujoco-sim" and .adapter_command_published == true and .sim_steps > 0 and .policy_steps > 0' "${summary_json}" >/dev/null; then
+if ! jq -e '.mode == "LOCO" and .paused == true and .safety_enabled == true and .adapter_backend == "mujoco-sim" and .adapter_command_published == true and .sim_steps > 0 and .policy_steps > 0' "${summary_json}" >/dev/null; then
     echo "[Smoke][ERROR] summary did not report final fake gamepad LOCO pause state" >&2
     cat "${summary_json}" >&2
     exit 1
@@ -346,4 +368,4 @@ fi
 
 echo "[Smoke] PASSED viewer gamepad control path"
 echo "[Smoke] summary=${summary_json}"
-jq '{mode, paused, adapter_backend, adapter_command_published, sim_steps, policy_steps}' "${summary_json}"
+jq '{mode, paused, safety_enabled, adapter_backend, adapter_command_published, sim_steps, policy_steps}' "${summary_json}"

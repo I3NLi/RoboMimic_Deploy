@@ -95,6 +95,9 @@ scripts/run_mujoco_loco_viewer_native.sh --duration 5 --unpaused --loco
 scripts/run_mujoco_loco_viewer_native.sh --camera-stream --camera-port 18080
 ```
 
+viewer 开启 `--gamepad-control` 时，button 9/R3 会切换运行时 safety wall；
+可用 `--gamepad-safety-button N` 覆盖。
+
 端点：
 
 ```text

@@ -126,6 +126,7 @@ struct Args {
     int gamepad_passive_button = 1;
     int gamepad_dance_button = 4;
     int gamepad_skill_button = 5;
+    int gamepad_safety_button = 9;
     bool ground_correction = false;
     std::string ground_floor_geom = "floor";
     std::vector<std::string> ground_body_keywords;
@@ -916,6 +917,7 @@ void usage(const char* argv0)
         "          [--gamepad-zero-button N] [--gamepad-passive-button N]\n"
         "          [--gamepad-pause-button N] [--gamepad-reset-button N]\n"
         "          [--gamepad-stop-button N] [--gamepad-dance-button N] [--gamepad-skill-button N]\n"
+        "          [--gamepad-safety-button N]\n"
         "          [--push-body NAME] [--push-force X,Y,Z] [--push-start SEC] [--push-duration SEC]\n"
         "          [--push-impulse X,Y,Z] [--push-impulse-time SEC]\n"
         "          [--camera-stream] [--camera-port N] [--camera-name NAME]\n"
@@ -1071,6 +1073,8 @@ Args parse_args(int argc, char** argv)
             args.gamepad_dance_button = std::atoi(need_value(i, argc, argv).c_str());
         } else if (arg == "--gamepad-skill-button") {
             args.gamepad_skill_button = std::atoi(need_value(i, argc, argv).c_str());
+        } else if (arg == "--gamepad-safety-button") {
+            args.gamepad_safety_button = std::atoi(need_value(i, argc, argv).c_str());
         } else if (arg == "--push-body") {
             args.push_body = need_value(i, argc, argv);
         } else if (arg == "--push-force") {
@@ -1701,7 +1705,8 @@ public:
         const std::vector<std::string>& skill_policy_keys,
         bool& paused,
         bool& running,
-        bool& reset_requested)
+        bool& reset_requested,
+        magicbot_loco::TextControlSafetyCommand& safety_request)
     {
         bool changed = false;
         js_event event{};
@@ -1717,7 +1722,8 @@ public:
                               skill_policy_keys,
                               paused,
                               running,
-                              reset_requested) ||
+                              reset_requested,
+                              safety_request) ||
                           changed;
                 continue;
             }
@@ -1752,7 +1758,8 @@ private:
         const std::vector<std::string>& skill_policy_keys,
         bool& paused,
         bool& running,
-        bool& reset_requested)
+        bool& reset_requested,
+        magicbot_loco::TextControlSafetyCommand& safety_request)
     {
         const uint8_t type = event.type & static_cast<uint8_t>(~JS_EVENT_INIT);
         if (type == JS_EVENT_AXIS) {
@@ -1862,6 +1869,8 @@ private:
                 paused,
                 running,
                 reset_requested);
+        } else if (args_.gamepad_safety_button >= 0 && event.number == args_.gamepad_safety_button) {
+            safety_request = magicbot_loco::TextControlSafetyCommand::Toggle;
         }
         return true;
     }
@@ -2851,7 +2860,7 @@ int main(int argc, char** argv)
         if (gamepad_input) {
             std::printf(
                 "Gamepad: device=%s axes(vx,vy,wz)=[%d %d %d] deadman_button=%d "
-                "loco=%d stand=%d zero=%d passive=%d pause=%d reset=%d stop=%d dance=%d skill=%d\n",
+                "loco=%d stand=%d zero=%d passive=%d pause=%d reset=%d stop=%d dance=%d skill=%d safety=%d\n",
                 args.gamepad_device.c_str(),
                 args.gamepad_axis_vx,
                 args.gamepad_axis_vy,
@@ -2865,7 +2874,8 @@ int main(int argc, char** argv)
                 args.gamepad_reset_button,
                 args.gamepad_stop_button,
                 args.gamepad_dance_button,
-                args.gamepad_skill_button);
+                args.gamepad_skill_button,
+                args.gamepad_safety_button);
         }
         if (has_vec3(args.push_force) || has_vec3(args.push_impulse)) {
             std::printf(
@@ -2964,15 +2974,22 @@ int main(int argc, char** argv)
                 print_cmd(cmd, desired_mode, paused);
             }
             if (gamepad_input &&
-                gamepad_input->poll(
-                    cmd,
-                    desired_mode,
-                    desired_external_policy_key,
-                    dance_enabled,
-                    skill_policy_keys,
-                    paused,
-                    running,
-                    reset_requested)) {
+                [&]() {
+                    magicbot_loco::TextControlSafetyCommand safety_request =
+                        magicbot_loco::TextControlSafetyCommand::None;
+                    const bool input_changed = gamepad_input->poll(
+                        cmd,
+                        desired_mode,
+                        desired_external_policy_key,
+                        dance_enabled,
+                        skill_policy_keys,
+                        paused,
+                        running,
+                        reset_requested,
+                        safety_request);
+                    const bool safety_changed = apply_core_safety_request(core, safety_request);
+                    return input_changed || safety_changed;
+                }()) {
                 print_cmd(cmd, desired_mode, paused);
             }
             cmd = magicbot_loco::command_for_control_mode(cmd, desired_mode);
