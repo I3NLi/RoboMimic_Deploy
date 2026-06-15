@@ -161,7 +161,7 @@ void print_usage(const char* argv0)
         << "\n"
         << "Operator input:\n"
         << "  --keyboard-control               Live terminal keyboard input in run loop\n"
-        << "                                   L stand/loco, R re-stand, W/S vx, Q/E vy, A/D wz,\n"
+        << "                                   L stand/loco, R reset, W/S vx, Q/E vy, A/D wz,\n"
         << "                                   B beyond/dance, T track/skill, X zero, Space/P pause-zero, Esc stop\n"
         << "  --gamepad-control                Live Linux joystick input in run loop\n"
         << "  --gamepad-device PATH            Joystick device, default /dev/input/js0\n"
@@ -959,7 +959,7 @@ public:
         if (args.keyboard_control) {
             keyboard_ = std::make_unique<TerminalKeyboardInput>(initial_command, args.input_step);
             std::cout << "[Input] Keyboard control enabled: L stand/loco, M passive, F final damping, B dance, T skill, "
-                         "R re-stand, W/S vx, Q/E vy, A/D wz, X zero, Space/P pause-zero, Esc stop"
+                         "R reset, W/S vx, Q/E vy, A/D wz, X zero, Space/P pause-zero, Esc stop"
                       << std::endl;
         }
         if (args.gamepad_control) {
@@ -1269,7 +1269,7 @@ int input_check_only(const Args& args)
             if (!external_policy_key.empty()) std::cout << " external=" << external_policy_key;
             if (state.zeroed_by_deadman) std::cout << " deadman=open";
             if (state.pause_zero) std::cout << " pause-zero";
-            if (state.reset_stand_requested) std::cout << " reset-stand";
+            if (state.reset_stand_requested) std::cout << " reset";
             if (live_input_requested_mode(state, ml::ControlMode::Passive)) std::cout << " passive";
             if (live_input_requested_mode(state, ml::ControlMode::Dance)) std::cout << " dance";
             if (live_input_requested_mode(state, ml::ControlMode::Skill)) {

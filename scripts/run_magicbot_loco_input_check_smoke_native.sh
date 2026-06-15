@@ -133,8 +133,8 @@ if "mode_request_for_loco_toggle" not in source:
 if re.search(r"ControlMode::Loco\s*\?\s*ml::ControlMode::Stand", source):
     print("[Smoke][ERROR] real runner must not duplicate LOCO toggle mode mapping", file=sys.stderr)
     sys.exit(1)
-if "reset-stand input missing shared mode request" not in source:
-    print("[Smoke][ERROR] real runner must require reset-stand shared mode request", file=sys.stderr)
+if "Reset is intentionally local to policy/target state" not in source:
+    print("[Smoke][ERROR] real runner reset must stay local and preserve the selected mode", file=sys.stderr)
     sys.exit(1)
 
 reset_branch_start = source.find("if (input.reset_stand_requested)")
@@ -143,8 +143,14 @@ if reset_branch_start < 0 or reset_branch_end < 0:
     print("[Smoke][ERROR] could not locate real runner reset branch", file=sys.stderr)
     sys.exit(1)
 reset_branch = source[reset_branch_start:reset_branch_end]
-if "reset_mode_request = input.mode_request" not in reset_branch:
-    print("[Smoke][ERROR] real runner reset branch must reuse the shared input mode request", file=sys.stderr)
+if "state.snapshot().q" not in reset_branch:
+    print("[Smoke][ERROR] real runner reset branch must seed from the current robot position", file=sys.stderr)
+    sys.exit(1)
+if "core.reset_policy()" not in reset_branch:
+    print("[Smoke][ERROR] real runner reset branch must reset policy history", file=sys.stderr)
+    sys.exit(1)
+if re.search(r"run_mode\\s*=", reset_branch) or "input.mode_request" in reset_branch:
+    print("[Smoke][ERROR] real runner reset branch must not change mode from input.mode_request", file=sys.stderr)
     sys.exit(1)
 if "mode_request_for_control_mode(ml::ControlMode::Stand" in reset_branch:
     print("[Smoke][ERROR] real runner reset branch must not rebuild stand requests locally", file=sys.stderr)
@@ -250,7 +256,7 @@ if ! wait "${runner_pid}"; then
 fi
 runner_pid=""
 
-for expected in 'mode=LOCO' 'cmd=\[0.25 0 0\]' 'cmd=\[0.65 0 0\]' 'pause-zero' 'mode=PASSIVE' 'reset-stand' 'mode=FINAL_DAMPING'; do
+for expected in 'mode=LOCO' 'cmd=\[0.25 0 0\]' 'cmd=\[0.65 0 0\]' 'pause-zero' 'mode=PASSIVE' ' reset' 'mode=FINAL_DAMPING'; do
     if ! rg -q "${expected}" "${log_path}"; then
         echo "[Smoke][ERROR] missing expected input-check output: ${expected}" >&2
         sed -n '1,220p' "${log_path}" >&2
@@ -259,7 +265,7 @@ for expected in 'mode=LOCO' 'cmd=\[0.25 0 0\]' 'cmd=\[0.65 0 0\]' 'pause-zero' '
 done
 
 if ! rg -q 'mode=STAND cmd=\[0 0 0\]$' "${log_path}"; then
-    echo "[Smoke][ERROR] missing expected plain STAND output before reset-stand" >&2
+    echo "[Smoke][ERROR] missing expected plain STAND output before reset" >&2
     sed -n '1,240p' "${log_path}" >&2
     exit 1
 fi
@@ -289,4 +295,4 @@ echo "[Smoke] PASSED real-runner UDP input-check"
 if [[ "${keep_log}" -eq 1 ]]; then
     echo "[Smoke] log=${log_path}"
 fi
-rg 'mode=(LOCO|PASSIVE|STAND|FINAL_DAMPING)|pause-zero|reset-stand|DANCE ignored|SKILL ignored' "${log_path}"
+rg 'mode=(LOCO|PASSIVE|STAND|FINAL_DAMPING)|pause-zero| reset|DANCE ignored|SKILL ignored' "${log_path}"
