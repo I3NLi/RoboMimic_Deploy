@@ -59,7 +59,7 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-for tool in python3 ss rg; do
+for tool in python3 ss grep; do
     if ! command -v "${tool}" >/dev/null 2>&1; then
         echo "[Smoke][ERROR] required tool not found: ${tool}" >&2
         exit 1
@@ -67,7 +67,7 @@ for tool in python3 ss rg; do
 done
 
 echo "[Smoke] Checking real input mode requests use shared text actions"
-if rg -n 'set_live_input_mode_request\(out, ml::mode_request_for_control_mode' "${RUNNER_SOURCE}"; then
+if grep -E -n 'set_live_input_mode_request\(out, ml::mode_request_for_control_mode' "${RUNNER_SOURCE}"; then
     echo "[Smoke][ERROR] real input mode requests must go through text_control_action_effect helpers" >&2
     exit 1
 fi
@@ -206,7 +206,7 @@ runner_pid=$!
 
 ready=0
 for _ in $(seq 1 100); do
-    if ss -lun | rg -q ":${udp_port}\\b"; then
+    if ss -lun | grep -E -q ":${udp_port}([[:space:]]|$)"; then
         ready=1
         break
     fi
@@ -257,35 +257,35 @@ fi
 runner_pid=""
 
 for expected in 'mode=LOCO' 'cmd=\[0.25 0 0\]' 'cmd=\[0.65 0 0\]' 'pause-zero' 'mode=PASSIVE' ' reset' 'mode=FINAL_DAMPING'; do
-    if ! rg -q "${expected}" "${log_path}"; then
+    if ! grep -E -q "${expected}" "${log_path}"; then
         echo "[Smoke][ERROR] missing expected input-check output: ${expected}" >&2
         sed -n '1,220p' "${log_path}" >&2
         exit 1
     fi
 done
 
-if ! rg -q 'mode=STAND cmd=\[0 0 0\]$' "${log_path}"; then
+if ! grep -E -q 'mode=STAND cmd=\[0 0 0\]$' "${log_path}"; then
     echo "[Smoke][ERROR] missing expected plain STAND output before reset" >&2
     sed -n '1,240p' "${log_path}" >&2
     exit 1
 fi
 
-if ! rg -q 'DANCE ignored; add --allow-dance' "${log_path}"; then
+if ! grep -E -q 'DANCE ignored; add --allow-dance' "${log_path}"; then
     echo "[Smoke][ERROR] expected DANCE request to be blocked without --allow-dance" >&2
     sed -n '1,220p' "${log_path}" >&2
     exit 1
 fi
-if ! rg -q 'SKILL ignored; add --allow-skill' "${log_path}"; then
+if ! grep -E -q 'SKILL ignored; add --allow-skill' "${log_path}"; then
     echo "[Smoke][ERROR] expected SKILL request to be blocked without --allow-skill" >&2
     sed -n '1,220p' "${log_path}" >&2
     exit 1
 fi
-if rg -q 'mode=DANCE' "${log_path}"; then
+if grep -E -q 'mode=DANCE' "${log_path}"; then
     echo "[Smoke][ERROR] DANCE mode was entered without --allow-dance" >&2
     sed -n '1,220p' "${log_path}" >&2
     exit 1
 fi
-if rg -q 'mode=SKILL' "${log_path}"; then
+if grep -E -q 'mode=SKILL' "${log_path}"; then
     echo "[Smoke][ERROR] SKILL mode was entered without --allow-skill" >&2
     sed -n '1,220p' "${log_path}" >&2
     exit 1
@@ -295,4 +295,4 @@ echo "[Smoke] PASSED real-runner UDP input-check"
 if [[ "${keep_log}" -eq 1 ]]; then
     echo "[Smoke] log=${log_path}"
 fi
-rg 'mode=(LOCO|PASSIVE|STAND|FINAL_DAMPING)|pause-zero| reset|DANCE ignored|SKILL ignored' "${log_path}"
+grep -E 'mode=(LOCO|PASSIVE|STAND|FINAL_DAMPING)|pause-zero| reset|DANCE ignored|SKILL ignored' "${log_path}"
