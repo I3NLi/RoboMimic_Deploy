@@ -66,6 +66,11 @@ struct Args {
     std::string config = "policies/loco_mode/config/LocoMode_lowKp.yaml";
     std::string beyond_yaml;
     std::string track_mimic_yaml;
+    struct SkillTrajectoryYaml {
+        std::string key;
+        std::string yaml;
+    };
+    std::vector<SkillTrajectoryYaml> skill_trajectory_yamls;
     std::string mujoco_yaml = "configs/simulation/mujoco.yaml";
     std::string xml;
     std::string initial_pose_yaml;
@@ -197,6 +202,7 @@ struct ViewerHttpEvent {
 struct ViewerControlCommand {
     bool has_mode{false};
     magicbot_loco::TextControlAction action{magicbot_loco::TextControlAction::Zero};
+    std::string external_policy_key;
     bool has_vx{false};
     bool has_vy{false};
     bool has_wz{false};
@@ -536,6 +542,15 @@ private:
             }
             command.has_mode = true;
             command.action = action;
+            if (action == magicbot_loco::TextControlAction::Skill) {
+                command.external_policy_key = query_value(query, "policy");
+                if (command.external_policy_key.empty()) {
+                    command.external_policy_key = query_value(query, "policy_key");
+                }
+                if (command.external_policy_key.empty()) {
+                    command.external_policy_key = query_value(query, "external_policy");
+                }
+            }
             any = true;
         }
         if (query_float_optional(query, "vx", command.velocity[0])) {
@@ -859,7 +874,8 @@ private:
 void usage(const char* argv0)
 {
     std::printf(
-        "Usage: %s [--config PATH] [--beyond-yaml PATH] [--mujoco-yaml PATH] [--xml PATH]\n"
+        "Usage: %s [--config PATH] [--beyond-yaml PATH] [--track-mimic-yaml PATH]\n"
+        "          [--beyond-trajectory-yaml KEY=PATH] [--mujoco-yaml PATH] [--xml PATH]\n"
         "          [--initial-pose-yaml PATH] [--loco] [--paused|--unpaused]\n"
         "          [--duration SEC] [--width N] [--height N]\n"
         "          [--summary-json PATH]\n"
@@ -883,6 +899,24 @@ std::string need_value(int& i, int argc, char** argv)
         std::exit(2);
     }
     return argv[++i];
+}
+
+Args::SkillTrajectoryYaml parse_skill_trajectory_yaml_arg(const std::string& value)
+{
+    const size_t sep = value.find('=');
+    if (sep == std::string::npos) {
+        throw std::runtime_error("--beyond-trajectory-yaml expects KEY=PATH");
+    }
+    Args::SkillTrajectoryYaml out;
+    out.key = value.substr(0, sep);
+    out.yaml = value.substr(sep + 1);
+    if (out.key.empty()) {
+        throw std::runtime_error("--beyond-trajectory-yaml key must not be empty");
+    }
+    if (out.yaml.empty()) {
+        throw std::runtime_error("--beyond-trajectory-yaml path must not be empty");
+    }
+    return out;
 }
 
 std::array<double, 3> parse_vec3(std::string value)
@@ -923,6 +957,9 @@ Args parse_args(int argc, char** argv)
             args.beyond_yaml = need_value(i, argc, argv);
         } else if (arg == "--track-mimic-yaml") {
             args.track_mimic_yaml = need_value(i, argc, argv);
+        } else if (arg == "--beyond-trajectory-yaml") {
+            args.skill_trajectory_yamls.push_back(
+                parse_skill_trajectory_yaml_arg(need_value(i, argc, argv)));
         } else if (arg == "--mujoco-yaml") {
             args.mujoco_yaml = need_value(i, argc, argv);
         } else if (arg == "--xml") {
@@ -1529,17 +1566,35 @@ float apply_axis_deadzone(float value, double deadzone)
     return std::copysign((av - dz) / std::max(1e-6f, 1.0f - dz), value);
 }
 
+bool skill_policy_key_registered(const std::vector<std::string>& skill_policy_keys, const std::string& policy_key)
+{
+    const std::string key = policy_key.empty() ? magicbot_loco::kTrackMimicPolicyKey : policy_key;
+    return std::find(skill_policy_keys.begin(), skill_policy_keys.end(), key) != skill_policy_keys.end();
+}
+
 void apply_viewer_text_action(
     magicbot_loco::TextControlAction action,
     std::array<float, 3>& cmd,
     magicbot_loco::ControlMode& desired_mode,
     std::string& desired_external_policy_key,
     bool dance_enabled,
-    bool skill_enabled,
+    const std::vector<std::string>& skill_policy_keys,
     bool& paused,
     bool& running,
-    bool& reset_requested)
+    bool& reset_requested,
+    std::string external_policy_key = {})
 {
+    const magicbot_loco::TextControlActionEffect effect =
+        magicbot_loco::text_control_action_effect(action, std::move(external_policy_key));
+    if (effect.mode_requested && effect.mode == magicbot_loco::ControlMode::Skill &&
+        !skill_policy_key_registered(skill_policy_keys, effect.external_policy_key)) {
+        std::fprintf(
+            stderr,
+            "[Viewer] SKILL ignored; no BeyondMimic trajectory YAML configured for key %s\n",
+            effect.external_policy_key.c_str());
+        return;
+    }
+
     magicbot_loco::TextControlIntentState intent;
     intent.command = cmd;
     intent.desired_mode = desired_mode;
@@ -1548,16 +1603,19 @@ void apply_viewer_text_action(
     intent.running = running;
     intent.reset_requested = reset_requested;
 
-    const auto result = magicbot_loco::apply_text_control_action_to_intent(
+    const auto result = magicbot_loco::apply_text_control_effect_to_intent(
         intent,
-        action,
-        magicbot_loco::TextControlIntentOptions{dance_enabled, skill_enabled});
+        effect,
+        magicbot_loco::TextControlIntentOptions{dance_enabled, !skill_policy_keys.empty()});
     if (result.reject_reason == magicbot_loco::TextControlIntentRejectReason::DanceDisabled) {
         std::fprintf(stderr, "[Viewer] DANCE ignored; start with --beyond-yaml PATH to enable BeyondMimic\n");
         return;
     }
     if (result.reject_reason == magicbot_loco::TextControlIntentRejectReason::SkillDisabled) {
-        std::fprintf(stderr, "[Viewer] SKILL ignored; start with --track-mimic-yaml PATH to enable SKILL/TrackMimic trajectory\n");
+        std::fprintf(
+            stderr,
+            "[Viewer] SKILL ignored; start with --track-mimic-yaml PATH or "
+            "--beyond-trajectory-yaml KEY=PATH to enable SKILL/BeyondMimic trajectory\n");
         return;
     }
 
@@ -1591,7 +1649,7 @@ public:
         magicbot_loco::ControlMode& desired_mode,
         std::string& desired_external_policy_key,
         bool dance_enabled,
-        bool skill_enabled,
+        const std::vector<std::string>& skill_policy_keys,
         bool& paused,
         bool& running,
         bool& reset_requested)
@@ -1607,7 +1665,7 @@ public:
                               desired_mode,
                               desired_external_policy_key,
                               dance_enabled,
-                              skill_enabled,
+                              skill_policy_keys,
                               paused,
                               running,
                               reset_requested) ||
@@ -1642,7 +1700,7 @@ private:
         magicbot_loco::ControlMode& desired_mode,
         std::string& desired_external_policy_key,
         bool dance_enabled,
-        bool skill_enabled,
+        const std::vector<std::string>& skill_policy_keys,
         bool& paused,
         bool& running,
         bool& reset_requested)
@@ -1674,7 +1732,7 @@ private:
                 desired_mode,
                 desired_external_policy_key,
                 dance_enabled,
-                skill_enabled,
+                skill_policy_keys,
                 paused,
                 running,
                 reset_requested);
@@ -1685,7 +1743,7 @@ private:
                 desired_mode,
                 desired_external_policy_key,
                 dance_enabled,
-                skill_enabled,
+                skill_policy_keys,
                 paused,
                 running,
                 reset_requested);
@@ -1696,7 +1754,7 @@ private:
                 desired_mode,
                 desired_external_policy_key,
                 dance_enabled,
-                skill_enabled,
+                skill_policy_keys,
                 paused,
                 running,
                 reset_requested);
@@ -1707,7 +1765,7 @@ private:
                 desired_mode,
                 desired_external_policy_key,
                 dance_enabled,
-                skill_enabled,
+                skill_policy_keys,
                 paused,
                 running,
                 reset_requested);
@@ -1718,7 +1776,7 @@ private:
                 desired_mode,
                 desired_external_policy_key,
                 dance_enabled,
-                skill_enabled,
+                skill_policy_keys,
                 paused,
                 running,
                 reset_requested);
@@ -1729,7 +1787,7 @@ private:
                 desired_mode,
                 desired_external_policy_key,
                 dance_enabled,
-                skill_enabled,
+                skill_policy_keys,
                 paused,
                 running,
                 reset_requested);
@@ -1740,7 +1798,7 @@ private:
                 desired_mode,
                 desired_external_policy_key,
                 dance_enabled,
-                skill_enabled,
+                skill_policy_keys,
                 paused,
                 running,
                 reset_requested);
@@ -1754,7 +1812,7 @@ private:
         magicbot_loco::ControlMode& desired_mode,
         std::string& desired_external_policy_key,
         bool dance_enabled,
-        bool skill_enabled,
+        const std::vector<std::string>& skill_policy_keys,
         bool& paused,
         bool& running,
         bool& reset_requested)
@@ -1765,7 +1823,7 @@ private:
             desired_mode,
             desired_external_policy_key,
             dance_enabled,
-            skill_enabled,
+            skill_policy_keys,
             paused,
             running,
             reset_requested);
@@ -1796,10 +1854,13 @@ private:
 
 class ViewerUdpCommandInput {
 public:
-    explicit ViewerUdpCommandInput(const Args& args, bool dance_enabled, bool skill_enabled)
+    explicit ViewerUdpCommandInput(
+        const Args& args,
+        bool dance_enabled,
+        std::vector<std::string> skill_policy_keys)
         : args_(args),
           dance_enabled_(dance_enabled),
-          skill_enabled_(skill_enabled)
+          skill_policy_keys_(std::move(skill_policy_keys))
     {
         fd_ = socket(AF_INET, SOCK_DGRAM, 0);
         if (fd_ < 0) throw std::runtime_error(std::string("viewer udp socket failed: ") + std::strerror(errno));
@@ -1909,17 +1970,18 @@ private:
                     desired_mode,
                     desired_external_policy_key,
                     dance_enabled_,
-                    skill_enabled_,
+                    skill_policy_keys_,
                     paused,
                     running,
-                    reset_requested);
+                    reset_requested,
+                    op.external_policy_key);
             }
         }
     }
 
     const Args& args_;
     bool dance_enabled_{false};
-    bool skill_enabled_{false};
+    std::vector<std::string> skill_policy_keys_;
     int fd_{-1};
     bool have_packet_{false};
     Clock::time_point last_packet_t_{};
@@ -1945,7 +2007,7 @@ void apply_viewer_control_command(
     magicbot_loco::ControlMode& desired_mode,
     std::string& desired_external_policy_key,
     bool dance_enabled,
-    bool skill_enabled,
+    const std::vector<std::string>& skill_policy_keys,
     bool& paused,
     bool& running,
     bool& reset_requested)
@@ -1962,10 +2024,11 @@ void apply_viewer_control_command(
         desired_mode,
         desired_external_policy_key,
         dance_enabled,
-        skill_enabled,
+        skill_policy_keys,
         paused,
         running,
-        reset_requested);
+        reset_requested,
+        control.external_policy_key);
 }
 
 void apply_viewer_keyboard_text_action(
@@ -1974,7 +2037,7 @@ void apply_viewer_keyboard_text_action(
     magicbot_loco::ControlMode& desired_mode,
     std::string& desired_external_policy_key,
     bool dance_enabled,
-    bool skill_enabled,
+    const std::vector<std::string>& skill_policy_keys,
     bool& paused,
     bool& running,
     bool& reset_requested)
@@ -1989,7 +2052,7 @@ void apply_viewer_keyboard_text_action(
             desired_mode,
             desired_external_policy_key,
             dance_enabled,
-            skill_enabled,
+            skill_policy_keys,
             paused,
             running,
             reset_requested);
@@ -2002,7 +2065,7 @@ void apply_viewer_keyboard_text_action(
         desired_mode,
         desired_external_policy_key,
         dance_enabled,
-        skill_enabled,
+        skill_policy_keys,
         paused,
         running,
         reset_requested);
@@ -2014,7 +2077,7 @@ void handle_key(
     magicbot_loco::ControlMode& desired_mode,
     std::string& desired_external_policy_key,
     bool dance_enabled,
-    bool skill_enabled,
+    const std::vector<std::string>& skill_policy_keys,
     bool& paused,
     bool& follow,
     bool& reset_requested,
@@ -2036,7 +2099,7 @@ void handle_key(
             desired_mode,
             desired_external_policy_key,
             dance_enabled,
-            skill_enabled,
+            skill_policy_keys,
             paused,
             running,
             reset_requested);
@@ -2049,7 +2112,7 @@ void handle_key(
             desired_mode,
             desired_external_policy_key,
             dance_enabled,
-            skill_enabled,
+            skill_policy_keys,
             paused,
             running,
             reset_requested);
@@ -2062,7 +2125,7 @@ void handle_key(
             desired_mode,
             desired_external_policy_key,
             dance_enabled,
-            skill_enabled,
+            skill_policy_keys,
             paused,
             running,
             reset_requested);
@@ -2075,7 +2138,7 @@ void handle_key(
             desired_mode,
             desired_external_policy_key,
             dance_enabled,
-            skill_enabled,
+            skill_policy_keys,
             paused,
             running,
             reset_requested);
@@ -2088,7 +2151,7 @@ void handle_key(
             desired_mode,
             desired_external_policy_key,
             dance_enabled,
-            skill_enabled,
+            skill_policy_keys,
             paused,
             running,
             reset_requested);
@@ -2101,7 +2164,7 @@ void handle_key(
             desired_mode,
             desired_external_policy_key,
             dance_enabled,
-            skill_enabled,
+            skill_policy_keys,
             paused,
             running,
             reset_requested);
@@ -2162,7 +2225,7 @@ void process_events(
     magicbot_loco::ControlMode& desired_mode,
     std::string& desired_external_policy_key,
     bool dance_enabled,
-    bool skill_enabled,
+    const std::vector<std::string>& skill_policy_keys,
     bool& paused,
     bool& follow,
     bool& reset_requested,
@@ -2187,7 +2250,7 @@ void process_events(
                 desired_mode,
                 desired_external_policy_key,
                 dance_enabled,
-                skill_enabled,
+                skill_policy_keys,
                 paused,
                 follow,
                 reset_requested,
@@ -2475,7 +2538,7 @@ int main(int argc, char** argv)
         magicbot_loco::NativeBeyondMimicExternalPolicyRegistry external_policies(
             static_cast<float>(loco_cfg.policy_dt));
         bool dance_enabled = false;
-        bool skill_enabled = false;
+        std::vector<std::string> skill_policy_keys;
         if (!args.beyond_yaml.empty()) {
             const fs::path beyond_yaml_path = resolve_path(root, args.beyond_yaml);
             if (!fs::exists(beyond_yaml_path)) {
@@ -2492,7 +2555,21 @@ int main(int argc, char** argv)
                     track_yaml_path.string());
             }
             external_policies.register_track_mimic(core, track_yaml_path.string());
-            skill_enabled = true;
+            skill_policy_keys.push_back(magicbot_loco::kTrackMimicPolicyKey);
+        }
+        for (const Args::SkillTrajectoryYaml& trajectory : args.skill_trajectory_yamls) {
+            const fs::path trajectory_yaml_path = resolve_path(root, trajectory.yaml);
+            if (!fs::exists(trajectory_yaml_path)) {
+                throw std::runtime_error(
+                    "BeyondMimic trajectory config not found for key " +
+                    trajectory.key + ": " + trajectory_yaml_path.string());
+            }
+            external_policies.register_trajectory_variant(
+                core,
+                trajectory.key,
+                trajectory_yaml_path.string(),
+                trajectory.key);
+            skill_policy_keys.push_back(trajectory.key);
         }
 
         char error[1024] = {0};
@@ -2622,7 +2699,7 @@ int main(int argc, char** argv)
         std::array<float, 3> cmd{0.0f, 0.0f, 0.0f};
         std::unique_ptr<ViewerUdpCommandInput> udp_input;
         if (args.udp_control) {
-            udp_input = std::make_unique<ViewerUdpCommandInput>(args, dance_enabled, skill_enabled);
+            udp_input = std::make_unique<ViewerUdpCommandInput>(args, dance_enabled, skill_policy_keys);
         }
         std::unique_ptr<ViewerGamepadInput> gamepad_input;
         if (args.gamepad_control) {
@@ -2651,10 +2728,16 @@ int main(int argc, char** argv)
         if (dance_enabled) {
             std::printf("Beyond : %s\n", resolve_path(root, args.beyond_yaml).string().c_str());
         }
-        if (skill_enabled) {
+        if (!skill_policy_keys.empty() && !args.track_mimic_yaml.empty()) {
             std::printf(
                 "Track  : %s (SKILL/TrackMimic key, BeyondMimic trajectory config)\n",
                 resolve_path(root, args.track_mimic_yaml).string().c_str());
+        }
+        for (const Args::SkillTrajectoryYaml& trajectory : args.skill_trajectory_yamls) {
+            std::printf(
+                "Skill  : %s -> %s (BeyondMimic trajectory config)\n",
+                trajectory.key.c_str(),
+                resolve_path(root, trajectory.yaml).string().c_str());
         }
         std::printf(
             "Keys   : L loco, M passive, N final damping, B beyond/dance, T track/skill, Space pause, R reset, "
@@ -2715,7 +2798,7 @@ int main(int argc, char** argv)
                 desired_mode,
                 desired_external_policy_key,
                 dance_enabled,
-                skill_enabled,
+                skill_policy_keys,
                 paused,
                 follow,
                 reset_requested,
@@ -2729,7 +2812,7 @@ int main(int argc, char** argv)
                         desired_mode,
                         desired_external_policy_key,
                         dance_enabled,
-                        skill_enabled,
+                        skill_policy_keys,
                         paused,
                         running,
                         reset_requested);
@@ -2760,7 +2843,7 @@ int main(int argc, char** argv)
                             desired_mode,
                             desired_external_policy_key,
                             dance_enabled,
-                            skill_enabled,
+                            skill_policy_keys,
                             paused,
                             running,
                             reset_requested);
@@ -2784,7 +2867,7 @@ int main(int argc, char** argv)
                     desired_mode,
                     desired_external_policy_key,
                     dance_enabled,
-                    skill_enabled,
+                    skill_policy_keys,
                     paused,
                     running,
                     reset_requested)) {

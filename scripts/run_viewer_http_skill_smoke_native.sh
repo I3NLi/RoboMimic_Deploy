@@ -18,8 +18,9 @@ Usage: $0 [options] [-- extra mujoco_loco_viewer args]
 
 Smoke-test the viewer HTTP control path for SKILL/TrackMimic trajectory. The script starts
 the native viewer with the BeyondMimic trajectory variant registered as a shared
-ControllerCore external policy, posts mode=track_mimic to /control, then
-validates live /status and the summary JSON.
+ControllerCore external policy, posts mode=track_mimic and then a keyed
+mode=skill&policy=ClipA variant to /control, then validates live /status and
+the summary JSON.
 
 Options:
   --duration S            Viewer wall-clock duration, default ${duration}
@@ -109,11 +110,16 @@ viewer_log="$(mktemp /tmp/magicbot_viewer_http_skill_XXXXXX.log)"
 status_body="$(mktemp /tmp/magicbot_viewer_http_skill_status_XXXXXX.json)"
 track_tmp_dir="$(mktemp -d /tmp/magicbot_track_mimic_XXXXXX)"
 track_mimic_runtime_yaml="${track_tmp_dir}/BeyondMimic.yaml"
+variant_runtime_yaml="${track_tmp_dir}/ClipA.yaml"
 viewer_pid=""
 
 python3 "${SCRIPT_DIR}/make_track_mimic_motion_yaml.py" \
     --base-yaml "$(resolve_repo_path "${track_mimic_yaml}")" \
     --output-yaml "${track_mimic_runtime_yaml}" \
+    >/dev/null
+python3 "${SCRIPT_DIR}/make_track_mimic_motion_yaml.py" \
+    --base-yaml "$(resolve_repo_path "${track_mimic_yaml}")" \
+    --output-yaml "${variant_runtime_yaml}" \
     >/dev/null
 
 cleanup() {
@@ -140,6 +146,7 @@ echo "[Smoke] Starting viewer HTTP SKILL smoke via ${RUNNER} on 127.0.0.1:${came
     --camera-host 127.0.0.1 \
     --camera-port "${camera_port}" \
     --track-mimic-yaml "${track_mimic_runtime_yaml}" \
+    --beyond-trajectory-yaml "ClipA=${variant_runtime_yaml}" \
     --summary-json "${summary_json}" \
     "${extra_args[@]}" \
     >"${viewer_log}" 2>&1 &
@@ -193,6 +200,30 @@ if [[ "${status_ready}" -ne 1 ]]; then
     exit 1
 fi
 
+status="$(curl -sS -o "${status_body}" -w '%{http_code}' -X POST "${control_url}?mode=skill&policy=ClipA")"
+if [[ "${status}" != "200" ]]; then
+    echo "[Smoke][ERROR] skill ClipA control returned HTTP ${status}" >&2
+    cat "${status_body}" >&2 || true
+    exit 1
+fi
+
+variant_ready=0
+for _ in $(seq 1 80); do
+    if curl -sf "${status_url}" -o "${status_body}" &&
+       jq -e '.mode == "SKILL" and .external_policy == "ClipA" and .adapter_backend == "mujoco-sim" and .adapter_command_published == true and .paused == false and .http_control_commands >= 2 and .policy_steps > 0 and .sim_steps > 0' "${status_body}" >/dev/null; then
+        variant_ready=1
+        break
+    fi
+    sleep 0.1
+done
+
+if [[ "${variant_ready}" -ne 1 ]]; then
+    echo "[Smoke][ERROR] viewer /status did not report active ClipA SKILL variant" >&2
+    cat "${status_body}" >&2 || true
+    sed -n '1,220p' "${viewer_log}" >&2
+    exit 1
+fi
+
 if ! wait "${viewer_pid}"; then
     echo "[Smoke][ERROR] viewer exited with failure" >&2
     sed -n '1,220p' "${viewer_log}" >&2
@@ -206,12 +237,12 @@ if [[ ! -s "${summary_json}" ]]; then
     exit 1
 fi
 
-if ! jq -e '.mode == "SKILL" and .external_policy == "TrackMimic" and .adapter_backend == "mujoco-sim" and .adapter_command_published == true and .paused == false and .policy_steps > 0 and .sim_steps > 0 and .http_control_commands >= 1' "${summary_json}" >/dev/null; then
+if ! jq -e '.mode == "SKILL" and .external_policy == "ClipA" and .adapter_backend == "mujoco-sim" and .adapter_command_published == true and .paused == false and .policy_steps > 0 and .sim_steps > 0 and .http_control_commands >= 2' "${summary_json}" >/dev/null; then
     echo "[Smoke][ERROR] summary did not report active SKILL" >&2
     cat "${summary_json}" >&2
     exit 1
 fi
 
-echo "[Smoke] PASSED viewer HTTP SKILL/TrackMimic trajectory control"
+echo "[Smoke] PASSED viewer HTTP SKILL/TrackMimic and keyed trajectory control"
 echo "[Smoke] summary=${summary_json}"
 jq '{mode, external_policy, adapter_backend, adapter_command_published, paused, sim_steps, policy_steps, http_control_commands}' "${summary_json}"

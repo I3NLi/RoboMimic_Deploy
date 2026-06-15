@@ -6,6 +6,7 @@
 #include "beyond_mimic_policy.h"
 
 #include <memory>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -54,6 +55,9 @@ public:
     {
         if (policy_key.empty()) {
             throw std::invalid_argument("BeyondMimic trajectory policy key must not be empty");
+        }
+        if (!trajectory_keys_.insert(policy_key).second) {
+            throw std::invalid_argument("duplicate BeyondMimic trajectory policy key: " + policy_key);
         }
         if (state_label.empty()) {
             state_label = policy_key;
@@ -105,6 +109,7 @@ private:
     ::PolicyOutput dance_output_;
     std::unique_ptr<::BeyondMimicPolicy> dance_policy_;
     std::unique_ptr<BeyondAdapter> dance_adapter_;
+    std::set<std::string> trajectory_keys_;
     std::vector<std::unique_ptr<TrajectoryVariant>> trajectory_variants_;
 };
 

@@ -131,7 +131,12 @@ button. When `--track-mimic-yaml PATH` is supplied, the runner registers the
 BeyondMimic trajectory variant as the keyed shared `SKILL` external policy. That
 YAML must include `motion_file`; `mode=skill` / `mode=track_mimic`, `T` from
 keyboard input, or an explicitly configured gamepad skill button still require
-the separate `--allow-skill` gate on real hardware.
+the separate `--allow-skill` gate on real hardware. Additional trajectory
+variants can be registered with repeated `--beyond-trajectory-yaml KEY=PATH`
+arguments; each key is backed by the same `BeyondMimicPolicy` implementation,
+requires its own `motion_file` YAML, and can be requested from UDP text as
+`mode=skill:KEY`. The real-runner input gate checks that the requested SKILL key
+was configured before it forwards the request to `ControllerCore`.
 The same UDP input now accepts `mode=passive` / `mode=damping` for shared
 `PASSIVE` and `mode=final`, `mode=finaldamping`, or `mode=final_damping` for
 shared `FINAL_DAMPING`; both clear velocity commands and route through
@@ -160,7 +165,11 @@ same keyed shared `DANCE` external policy used by the real runner; `B` and UDP
 When `--track-mimic-yaml PATH` is supplied, the viewer registers the BeyondMimic
 trajectory variant as the keyed shared `SKILL` external policy. That YAML must
 include `motion_file`; `T`, UDP text, or HTTP `mode=skill` / `mode=track_mimic`
-enter it.
+enter it. The viewer also accepts repeated `--beyond-trajectory-yaml KEY=PATH`
+arguments for additional BeyondMimic trajectory SKILL keys. HTTP control can
+select them with `/control?mode=skill&policy=KEY`, and UDP text can select them
+with `mode=skill:KEY`; unregistered SKILL keys are rejected in the viewer input
+layer before a core mode request is sent.
 The `scripts/run_mujoco_loco_viewer_native.sh --control-station` preset now
 auto-registers the default BeyondMimic YAML when it is present, and only
 auto-registers the default TrackMimic YAML when it already includes
@@ -412,12 +421,13 @@ shared external-policy registry, then runs `--input-check` with explicit
 registration path, that the variant path still creates `BeyondMimicPolicy`
 adapters for `SKILL` keys, and that trajectory variants require `motion_file`.
 The smoke helper generates a temporary minimal trajectory YAML for this test. It
-first sends `mode=beyond` and `mode=track_mimic` with both YAML paths present
-but without `--allow-dance` / `--allow-skill`, verifying that YAML presence does
-not bypass the explicit gates. The allowed UDP portion then sends `mode=beyond`,
-`mode=track_mimic`, and `mode=final_damping`, verifying that the real-runner
-input path accepts DANCE/SKILL only when the matching gates and YAML paths are
-present, without connecting to the robot.
+first sends `mode=beyond`, `mode=track_mimic`, and `mode=skill:ClipA` with YAML
+paths present but without `--allow-dance` / `--allow-skill`, verifying that YAML
+presence does not bypass the explicit gates. The allowed UDP portion then sends
+`mode=beyond`, `mode=track_mimic`, `mode=skill:ClipA`, and
+`mode=final_damping`, verifying that the real-runner input path accepts
+DANCE/SKILL only when the matching gates and requested SKILL keys are present,
+without connecting to the robot.
 
 Baseline closed-loop smoke:
 
@@ -520,14 +530,14 @@ Viewer HTTP SKILL / TrackMimic smoke:
 scripts/run_viewer_http_skill_smoke_native.sh --duration 0.8 --keep-summary
 ```
 
-The script generates a temporary `motion_file` trajectory YAML, registers the
-BeyondMimic trajectory variant as the shared `SKILL` external policy in the
-viewer, posts `mode=track_mimic` through `/control`, then checks live `/status`
-and the summary for `mode == SKILL`, advancing `sim_steps` and `policy_steps`,
-active `external_policy == TrackMimic`,
-`adapter_backend == mujoco-sim`, `adapter_command_published == true`, and at
-least one HTTP control command. This is an entry-path smoke, not a stability
-acceptance test.
+The script generates temporary `motion_file` trajectory YAMLs, registers
+TrackMimic plus a keyed `ClipA` BeyondMimic trajectory variant as shared
+`SKILL` external policies in the viewer, posts `mode=track_mimic` and then
+`mode=skill&policy=ClipA` through `/control`, then checks live `/status` and the
+summary for `mode == SKILL`, advancing `sim_steps` and `policy_steps`, active
+`external_policy == ClipA`, `adapter_backend == mujoco-sim`,
+`adapter_command_published == true`, and at least two HTTP control commands.
+This is an entry-path smoke, not a stability acceptance test.
 
 Python viewer HTTP external-policy smokes:
 
@@ -664,8 +674,8 @@ entrypoint, keeping the Python command aligned with the native shared runtime.
 
 ## Next cuts
 
-1. Expose additional BeyondMimic trajectory variants through CLI/control-station
-   selection as distinct SKILL keys with their own `motion_file` YAMLs, using
-   `NativeBeyondMimicExternalPolicyRegistry::register_trajectory_variant()`.
+1. Surface registered BeyondMimic trajectory SKILL keys in the web/control
+   station UI so operators can choose available variants without typing raw
+   `policy=KEY` values.
 2. Move viewer mode/control API code to send requests only; it must not duplicate
    core policy or safety logic.

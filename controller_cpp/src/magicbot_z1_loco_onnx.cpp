@@ -28,6 +28,7 @@
 #include <thread>
 #include <termios.h>
 #include <unistd.h>
+#include <utility>
 #include <vector>
 
 #include <arpa/inet.h>
@@ -44,10 +45,16 @@ void signal_handler(int signum)
     g_running.store(false);
 }
 
+struct SkillTrajectoryYaml {
+    std::string key;
+    std::filesystem::path yaml;
+};
+
 struct Args {
     std::filesystem::path config{"policies/loco_mode/config/LocoMode_lowKp.yaml"};
     std::filesystem::path beyond_yaml{};
     std::filesystem::path track_mimic_yaml{};
+    std::vector<SkillTrajectoryYaml> skill_trajectory_yamls;
     bool dry_run{false};
     bool connect_check{false};
     bool read_state{false};
@@ -128,6 +135,8 @@ void print_usage(const char* argv0)
         << "  --config PATH                    Loco YAML config\n"
         << "  --beyond-yaml PATH               Enable BeyondMimic as DANCE external policy\n"
         << "  --track-mimic-yaml PATH          Enable SKILL/TrackMimic as a BeyondMimic trajectory config\n"
+        << "  --beyond-trajectory-yaml KEY=PATH\n"
+        << "                                   Register extra SKILL key backed by a BeyondMimic trajectory YAML\n"
         << "  --local-ip IP                    SDK local IP, default MAGICBOT_LOCAL_IP or 192.168.54.119\n"
         << "  --skip-network-check             Do not verify local-ip exists on this host\n"
         << "  --dry-run                        Load YAML/ONNX and run one inference\n"
@@ -138,7 +147,7 @@ void print_usage(const char* argv0)
         << "  --pd-stand-only                  With --run, hold default PD stand and never run ONNX\n"
         << "  --allow-loco                     Required before ONNX loco is allowed\n"
         << "  --allow-dance                    Required before DANCE/BeyondMimic is allowed on real robot\n"
-        << "  --allow-skill                    Required before SKILL/TrackMimic trajectory is allowed on real robot\n"
+        << "  --allow-skill                    Required before SKILL/BeyondMimic trajectory is allowed on real robot\n"
         << "\n"
         << "Motion:\n"
         << "  --vx V --vy V --wz V             Normalized command inputs; YAML cmd_range maps physical speed\n"
@@ -192,6 +201,24 @@ std::string take_value(int& i, int argc, char** argv)
     return argv[++i];
 }
 
+SkillTrajectoryYaml parse_skill_trajectory_yaml_arg(const std::string& value)
+{
+    const size_t sep = value.find('=');
+    if (sep == std::string::npos) {
+        throw std::runtime_error("--beyond-trajectory-yaml expects KEY=PATH");
+    }
+    SkillTrajectoryYaml out;
+    out.key = value.substr(0, sep);
+    out.yaml = value.substr(sep + 1);
+    if (out.key.empty()) {
+        throw std::runtime_error("--beyond-trajectory-yaml key must not be empty");
+    }
+    if (out.yaml.empty()) {
+        throw std::runtime_error("--beyond-trajectory-yaml path must not be empty");
+    }
+    return out;
+}
+
 Args parse_args(int argc, char** argv)
 {
     Args args;
@@ -209,6 +236,9 @@ Args parse_args(int argc, char** argv)
             args.beyond_yaml = take_value(i, argc, argv);
         } else if (a == "--track-mimic-yaml") {
             args.track_mimic_yaml = take_value(i, argc, argv);
+        } else if (a == "--beyond-trajectory-yaml") {
+            args.skill_trajectory_yamls.push_back(
+                parse_skill_trajectory_yaml_arg(take_value(i, argc, argv)));
         } else if (a == "--dry-run") {
             args.dry_run = true;
         } else if (a == "--connect-check") {
@@ -480,9 +510,14 @@ void set_live_input_action_request(
     LiveInputState& out,
     ml::TextControlAction action,
     std::array<float, 3>* command = nullptr,
-    bool* paused = nullptr)
+    bool* paused = nullptr,
+    std::string external_policy_key = {})
 {
-    apply_live_input_action_effect(out, ml::text_control_action_effect(action), command, paused);
+    apply_live_input_action_effect(
+        out,
+        ml::text_control_action_effect(action, std::move(external_policy_key)),
+        command,
+        paused);
 }
 
 bool live_input_requested_mode(const LiveInputState& input, ml::ControlMode mode)
@@ -506,17 +541,43 @@ bool dance_request_allowed(const Args& args, const char* prefix)
     return true;
 }
 
-bool skill_request_allowed(const Args& args, const char* prefix)
+bool skill_key_configured(const Args& args, const std::string& policy_key)
+{
+    const std::string key = policy_key.empty() ? ml::kTrackMimicPolicyKey : policy_key;
+    if (key == ml::kTrackMimicPolicyKey) {
+        return !args.track_mimic_yaml.empty();
+    }
+    for (const SkillTrajectoryYaml& trajectory : args.skill_trajectory_yamls) {
+        if (trajectory.key == key) return true;
+    }
+    return false;
+}
+
+bool has_any_skill_trajectory(const Args& args)
+{
+    return !args.track_mimic_yaml.empty() || !args.skill_trajectory_yamls.empty();
+}
+
+bool skill_request_allowed(const Args& args, const char* prefix, const std::string& policy_key)
 {
     if (!args.allow_skill) {
         std::cout << prefix
-                  << " SKILL ignored; add --allow-skill together with --track-mimic-yaml PATH to enable SKILL/TrackMimic trajectory"
+                  << " SKILL ignored; add --allow-skill together with --track-mimic-yaml PATH or "
+                     "--beyond-trajectory-yaml KEY=PATH to enable SKILL/BeyondMimic trajectory"
                   << std::endl;
         return false;
     }
-    if (args.track_mimic_yaml.empty()) {
-        std::cout << prefix << " SKILL ignored; start with --track-mimic-yaml PATH to enable SKILL/TrackMimic trajectory"
+    if (!has_any_skill_trajectory(args)) {
+        std::cout << prefix
+                  << " SKILL ignored; start with --track-mimic-yaml PATH or "
+                     "--beyond-trajectory-yaml KEY=PATH to enable SKILL/BeyondMimic trajectory"
                   << std::endl;
+        return false;
+    }
+    if (!skill_key_configured(args, policy_key)) {
+        const std::string key = policy_key.empty() ? ml::kTrackMimicPolicyKey : policy_key;
+        std::cout << prefix << " SKILL ignored; no BeyondMimic trajectory YAML configured for key "
+                  << key << std::endl;
         return false;
     }
     return true;
@@ -861,7 +922,7 @@ private:
                     cmd[static_cast<size_t>(op.axis)] = op.value;
                 }
             } else {
-                handle_action(op.action, out, cmd);
+                handle_action(op.action, op.external_policy_key, out, cmd);
             }
         }
 
@@ -872,9 +933,14 @@ private:
         out.status = "udp packet";
     }
 
-    void handle_action(ml::TextControlAction action, LiveInputState& out, std::array<float, 3>& cmd)
+    void handle_action(
+        ml::TextControlAction action,
+        const std::string& external_policy_key,
+        LiveInputState& out,
+        std::array<float, 3>& cmd)
     {
-        const ml::TextControlActionEffect effect = ml::text_control_action_effect(action);
+        const ml::TextControlActionEffect effect =
+            ml::text_control_action_effect(action, external_policy_key);
         apply_live_input_action_effect(out, effect, &cmd, &paused_);
     }
 
@@ -1165,6 +1231,7 @@ int input_check_only(const Args& args)
     std::cout << "[InputCheck] No robot connection. Press Esc/stop button or wait for duration." << std::endl;
 
     ml::ControlMode mode = ml::ControlMode::Stand;
+    std::string external_policy_key;
     const auto start = std::chrono::steady_clock::now();
     auto last_log = start - std::chrono::seconds(60);
     while (g_running.load()) {
@@ -1189,22 +1256,27 @@ int input_check_only(const Args& args)
             if (state.mode_request.mode == ml::ControlMode::Dance) {
                 allowed = dance_request_allowed(args, "[InputCheck]");
             } else if (state.mode_request.mode == ml::ControlMode::Skill) {
-                allowed = skill_request_allowed(args, "[InputCheck]");
+                allowed = skill_request_allowed(args, "[InputCheck]", state.mode_request.external_policy_key);
             }
             if (allowed) {
                 mode = state.mode_request.mode;
+                external_policy_key = state.mode_request.external_policy_key;
+                if (!ml::is_external_policy_mode(mode)) external_policy_key.clear();
             }
         }
         if (state.changed || std::chrono::duration<double>(now - last_log).count() >= args.log_interval) {
             const std::array<float, 3> display_cmd = ml::command_for_control_mode(state.command, mode);
             std::cout << "[InputCheck] " << state.status << " mode=" << ml::control_mode_name(mode)
                       << " cmd=[" << display_cmd[0] << " " << display_cmd[1] << " " << display_cmd[2] << "]";
+            if (!external_policy_key.empty()) std::cout << " external=" << external_policy_key;
             if (state.zeroed_by_deadman) std::cout << " deadman=open";
             if (state.pause_zero) std::cout << " pause-zero";
             if (state.reset_stand_requested) std::cout << " reset-stand";
             if (live_input_requested_mode(state, ml::ControlMode::Passive)) std::cout << " passive";
             if (live_input_requested_mode(state, ml::ControlMode::Dance)) std::cout << " dance";
-            if (live_input_requested_mode(state, ml::ControlMode::Skill)) std::cout << " skill";
+            if (live_input_requested_mode(state, ml::ControlMode::Skill)) {
+                std::cout << " skill=" << state.mode_request.external_policy_key;
+            }
             if (live_input_requested_mode(state, ml::ControlMode::FinalDamping)) std::cout << " final-damping";
             std::cout << std::endl;
             last_log = now;
@@ -1366,7 +1438,7 @@ int run_robot_with_finally(const Args& args, const ml::LocoConfig& cfg, ml::Cont
                         if (input.mode_request.mode == ml::ControlMode::Dance) {
                             allowed = dance_request_allowed(args, "[Input]");
                         } else if (input.mode_request.mode == ml::ControlMode::Skill) {
-                            allowed = skill_request_allowed(args, "[Input]");
+                            allowed = skill_request_allowed(args, "[Input]", input.mode_request.external_policy_key);
                         }
                         if (allowed) {
                             requested_mode = input.mode_request.mode;
@@ -1413,7 +1485,9 @@ int run_robot_with_finally(const Args& args, const ml::LocoConfig& cfg, ml::Cont
                         if (input.pause_zero) std::cout << " pause-zero";
                         if (live_input_requested_mode(input, ml::ControlMode::Passive)) std::cout << " passive";
                         if (live_input_requested_mode(input, ml::ControlMode::Dance)) std::cout << " dance";
-                        if (live_input_requested_mode(input, ml::ControlMode::Skill)) std::cout << " skill";
+                        if (live_input_requested_mode(input, ml::ControlMode::Skill)) {
+                            std::cout << " skill=" << input.mode_request.external_policy_key;
+                        }
                         if (live_input_requested_mode(input, ml::ControlMode::FinalDamping)) {
                             std::cout << " final-damping";
                         }
@@ -1521,6 +1595,25 @@ int main(int argc, char** argv)
                     args.track_mimic_yaml,
                     "BeyondMimic trajectory/TrackMimic key");
             }
+            for (const SkillTrajectoryYaml& trajectory : args.skill_trajectory_yamls) {
+                if (!std::filesystem::exists(trajectory.yaml)) {
+                    throw std::runtime_error(
+                        "BeyondMimic trajectory config not found for key " +
+                        trajectory.key + ": " + trajectory.yaml.string());
+                }
+                external_policies.register_trajectory_variant(
+                    dry_core,
+                    trajectory.key,
+                    trajectory.yaml.string(),
+                    trajectory.key);
+                dry_run_external_policy(
+                    dry_core,
+                    cfg,
+                    ml::ControlMode::Skill,
+                    trajectory.key,
+                    trajectory.yaml,
+                    "BeyondMimic trajectory key " + trajectory.key);
+            }
             return 0;
         }
         if (args.connect_check) return connect_check(args);
@@ -1551,6 +1644,20 @@ int main(int argc, char** argv)
             external_policies.register_track_mimic(core, args.track_mimic_yaml.string());
             std::cout << "[ExternalPolicy] SKILL/TrackMimic -> BeyondMimic trajectory: "
                       << args.track_mimic_yaml << std::endl;
+        }
+        for (const SkillTrajectoryYaml& trajectory : args.skill_trajectory_yamls) {
+            if (!std::filesystem::exists(trajectory.yaml)) {
+                throw std::runtime_error(
+                    "BeyondMimic trajectory config not found for key " +
+                    trajectory.key + ": " + trajectory.yaml.string());
+            }
+            external_policies.register_trajectory_variant(
+                core,
+                trajectory.key,
+                trajectory.yaml.string(),
+                trajectory.key);
+            std::cout << "[ExternalPolicy] SKILL/" << trajectory.key
+                      << " -> BeyondMimic trajectory: " << trajectory.yaml << std::endl;
         }
         return run_robot_with_finally(args, cfg, core);
     } catch (const std::exception& exc) {

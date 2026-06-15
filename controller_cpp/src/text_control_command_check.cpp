@@ -33,16 +33,29 @@ void expect_action(const ml::TextControlOperation& op, ml::TextControlAction act
 {
     require(op.type == ml::TextControlOperation::Type::Action, "expected action op");
     require(op.action == action, "unexpected action");
+    require(op.external_policy_key.empty(), "unexpected external policy key");
+}
+
+void expect_action(
+    const ml::TextControlOperation& op,
+    ml::TextControlAction action,
+    const std::string& external_policy_key)
+{
+    require(op.type == ml::TextControlOperation::Type::Action, "expected action op");
+    require(op.action == action, "unexpected action");
+    require(op.external_policy_key == external_policy_key, "unexpected external policy key");
 }
 
 void check_named_velocity_and_mode()
 {
-    const auto ops = ml::parse_text_control_operations("VX=2.0 vy=-2.0 wz=0.125 mode=LoCo");
-    require(ops.size() == 4, "named velocity and mode op count");
+    const auto ops =
+        ml::parse_text_control_operations("VX=2.0 vy=-2.0 wz=0.125 mode=LoCo mode=skill:TrackVariant");
+    require(ops.size() == 5, "named velocity and mode op count");
     expect_velocity(ops[0], 0, 1.0f);
     expect_velocity(ops[1], 1, -1.0f);
     expect_velocity(ops[2], 2, 0.125f);
     expect_action(ops[3], ml::TextControlAction::Loco);
+    expect_action(ops[4], ml::TextControlAction::Skill, "TrackVariant");
 }
 
 void check_numeric_tokens_and_clear_modes()
@@ -82,15 +95,17 @@ void check_aliases()
 
 void check_order_preserved()
 {
-    const auto ops = ml::parse_text_control_operations("zero walk vx=0.4 run_forward pause resume stop");
-    require(ops.size() == 7, "order preserved op count");
+    const auto ops =
+        ml::parse_text_control_operations("zero walk vx=0.4 run_forward skill:ClipA pause resume stop");
+    require(ops.size() == 8, "order preserved op count");
     expect_action(ops[0], ml::TextControlAction::Zero);
     expect_action(ops[1], ml::TextControlAction::WalkForward);
     expect_velocity(ops[2], 0, 0.4f);
     expect_action(ops[3], ml::TextControlAction::RunForward);
-    expect_action(ops[4], ml::TextControlAction::Pause);
-    expect_action(ops[5], ml::TextControlAction::Resume);
-    expect_action(ops[6], ml::TextControlAction::Stop);
+    expect_action(ops[4], ml::TextControlAction::Skill, "ClipA");
+    expect_action(ops[5], ml::TextControlAction::Pause);
+    expect_action(ops[6], ml::TextControlAction::Resume);
+    expect_action(ops[7], ml::TextControlAction::Stop);
 }
 
 void check_invalid_tokens_are_ignored()
@@ -166,6 +181,12 @@ void check_action_effects()
     require(skill.zero_command, "skill effect should zero command");
     require(skill.external_policy_key == ml::kTrackMimicPolicyKey, "skill effect external key");
     require_request(skill, ml::ControlMode::Skill, ml::kTrackMimicPolicyKey, "skill effect");
+
+    const auto skill_variant = ml::text_control_action_effect(ml::TextControlAction::Skill, "ClipA");
+    require(skill_variant.mode_requested, "skill variant effect should request a mode");
+    require(skill_variant.mode == ml::ControlMode::Skill, "skill variant effect mode");
+    require(skill_variant.external_policy_key == "ClipA", "skill variant effect external key");
+    require_request(skill_variant, ml::ControlMode::Skill, "ClipA", "skill variant effect");
 
     const auto final_damping = ml::text_control_action_effect(ml::TextControlAction::FinalDamping);
     require(final_damping.mode_requested, "final damping effect should request a mode");
@@ -292,6 +313,15 @@ void check_intent_application()
     require(intent.desired_mode == ml::ControlMode::Skill, "skill intent mode");
     require(intent.desired_external_policy_key == ml::kTrackMimicPolicyKey, "skill intent external key");
     require(intent.command == std::array<float, 3>{0.0f, 0.0f, 0.0f}, "skill intent should zero command");
+
+    result = ml::apply_text_control_action_to_intent(
+        intent,
+        ml::TextControlAction::Skill,
+        ml::TextControlIntentOptions{},
+        "ClipA");
+    require(result.applied, "skill variant intent should apply");
+    require(intent.desired_mode == ml::ControlMode::Skill, "skill variant intent mode");
+    require(intent.desired_external_policy_key == "ClipA", "skill variant intent external key");
 
     result = ml::apply_text_control_action_to_intent(intent, ml::TextControlAction::Stop);
     require(result.applied, "stop intent should apply");

@@ -10,6 +10,7 @@
 #include <cstdlib>
 #include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace magicbot_loco {
@@ -91,6 +92,7 @@ struct TextControlOperation {
     int axis{-1};
     float value{0.0f};
     TextControlAction action{TextControlAction::Zero};
+    std::string external_policy_key;
 
     static TextControlOperation velocity(int axis_index, float axis_value)
     {
@@ -101,11 +103,12 @@ struct TextControlOperation {
         return op;
     }
 
-    static TextControlOperation action_op(TextControlAction next_action)
+    static TextControlOperation action_op(TextControlAction next_action, std::string policy_key = {})
     {
         TextControlOperation op;
         op.type = Type::Action;
         op.action = next_action;
+        op.external_policy_key = std::move(policy_key);
         return op;
     }
 };
@@ -197,7 +200,9 @@ inline bool text_control_action_from_word(const std::string& word, TextControlAc
     return false;
 }
 
-inline TextControlActionEffect text_control_action_effect(TextControlAction action)
+inline TextControlActionEffect text_control_action_effect(
+    TextControlAction action,
+    std::string external_policy_key = {})
 {
     TextControlActionEffect effect;
     switch (action) {
@@ -249,7 +254,8 @@ inline TextControlActionEffect text_control_action_effect(TextControlAction acti
     case TextControlAction::Skill:
         effect.mode_requested = true;
         effect.mode = ControlMode::Skill;
-        effect.external_policy_key = kTrackMimicPolicyKey;
+        effect.external_policy_key =
+            external_policy_key.empty() ? kTrackMimicPolicyKey : std::move(external_policy_key);
         effect.zero_command = true;
         effect.unpause = true;
         break;
@@ -352,9 +358,30 @@ inline TextControlIntentApplyResult apply_text_control_effect_to_intent(
 inline TextControlIntentApplyResult apply_text_control_action_to_intent(
     TextControlIntentState& intent,
     TextControlAction action,
-    const TextControlIntentOptions& options = TextControlIntentOptions{})
+    const TextControlIntentOptions& options = TextControlIntentOptions{},
+    std::string external_policy_key = {})
 {
-    return apply_text_control_effect_to_intent(intent, text_control_action_effect(action), options);
+    return apply_text_control_effect_to_intent(
+        intent,
+        text_control_action_effect(action, std::move(external_policy_key)),
+        options);
+}
+
+inline bool parse_text_control_action_token(
+    const std::string& raw_token,
+    TextControlAction& action,
+    std::string& external_policy_key)
+{
+    const size_t sep = raw_token.find(':');
+    const std::string action_word = sep == std::string::npos ? raw_token : raw_token.substr(0, sep);
+    if (!text_control_action_from_word(lower_ascii_copy(action_word), action)) {
+        return false;
+    }
+    external_policy_key = sep == std::string::npos ? std::string() : raw_token.substr(sep + 1);
+    if (action != TextControlAction::Skill) {
+        external_policy_key.clear();
+    }
+    return true;
 }
 
 inline std::vector<TextControlOperation> parse_text_control_operations(std::string message)
@@ -371,7 +398,8 @@ inline std::vector<TextControlOperation> parse_text_control_operations(std::stri
         const auto eq = token.find('=');
         if (eq != std::string::npos) {
             const std::string key = lower_ascii_copy(token.substr(0, eq));
-            const std::string value = lower_ascii_copy(token.substr(eq + 1));
+            const std::string raw_value = token.substr(eq + 1);
+            const std::string value = lower_ascii_copy(raw_value);
             float parsed = 0.0f;
             if ((key == "vx" || key == "x") && parse_text_control_float(value, parsed)) {
                 operations.push_back(TextControlOperation::velocity(0, parsed));
@@ -381,8 +409,10 @@ inline std::vector<TextControlOperation> parse_text_control_operations(std::stri
                 operations.push_back(TextControlOperation::velocity(2, parsed));
             } else if (key == "mode") {
                 TextControlAction action{};
-                if (text_control_action_from_word(value, action)) {
-                    operations.push_back(TextControlOperation::action_op(action));
+                std::string external_policy_key;
+                if (parse_text_control_action_token(raw_value, action, external_policy_key)) {
+                    operations.push_back(
+                        TextControlOperation::action_op(action, std::move(external_policy_key)));
                 }
             }
             continue;
@@ -396,8 +426,9 @@ inline std::vector<TextControlOperation> parse_text_control_operations(std::stri
         }
 
         TextControlAction action{};
-        if (text_control_action_from_word(lower_ascii_copy(token), action)) {
-            operations.push_back(TextControlOperation::action_op(action));
+        std::string external_policy_key;
+        if (parse_text_control_action_token(token, action, external_policy_key)) {
+            operations.push_back(TextControlOperation::action_op(action, std::move(external_policy_key)));
         }
     }
 

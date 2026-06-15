@@ -136,6 +136,7 @@ required = [
     "policy_key",
     "/*require_motion_file=*/true",
     "core.register_external_policy(policy_key",
+    "trajectory_keys_.insert",
     "trajectory_variants_.push_back",
 ]
 missing = [item for item in required if item not in variant_body]
@@ -162,9 +163,14 @@ fi
 
 track_tmp_dir="$(mktemp -d /tmp/magicbot_track_mimic_XXXXXX)"
 track_mimic_runtime_yaml="${track_tmp_dir}/BeyondMimic.yaml"
+variant_runtime_yaml="${track_tmp_dir}/ClipA.yaml"
 python3 "${SCRIPT_DIR}/make_track_mimic_motion_yaml.py" \
     --base-yaml "${track_mimic_yaml}" \
     --output-yaml "${track_mimic_runtime_yaml}" \
+    >/dev/null
+python3 "${SCRIPT_DIR}/make_track_mimic_motion_yaml.py" \
+    --base-yaml "${track_mimic_yaml}" \
+    --output-yaml "${variant_runtime_yaml}" \
     >/dev/null
 
 if [[ -z "${udp_port}" ]]; then
@@ -224,9 +230,13 @@ echo "[Smoke] Checking dry-run external policy YAML loading"
     --dry-run \
     --beyond-yaml "${beyond_yaml}" \
     --track-mimic-yaml "${track_mimic_runtime_yaml}" \
+    --beyond-trajectory-yaml "ClipA=${variant_runtime_yaml}" \
     >"${dry_log}" 2>&1
 
-for expected in '[DryRun] BeyondMimic loaded' '[DryRun] BeyondMimic trajectory/TrackMimic key loaded'; do
+for expected in \
+    '[DryRun] BeyondMimic loaded' \
+    '[DryRun] BeyondMimic trajectory/TrackMimic key loaded' \
+    '[DryRun] BeyondMimic trajectory key ClipA loaded'; do
     if ! rg -F -q "${expected}" "${dry_log}"; then
         echo "[Smoke][ERROR] dry-run output missing: ${expected}" >&2
         sed -n '1,220p' "${dry_log}" >&2
@@ -244,6 +254,7 @@ echo "[Smoke] Checking external-policy YAML does not bypass allow gates"
     --log-interval 0.3 \
     --beyond-yaml "${beyond_yaml}" \
     --track-mimic-yaml "${track_mimic_runtime_yaml}" \
+    --beyond-trajectory-yaml "ClipA=${variant_runtime_yaml}" \
     >"${blocked_log}" 2>&1 &
 runner_pid=$!
 
@@ -257,6 +268,7 @@ port = int("${udp_port}")
 packets = [
     b"mode=beyond",
     b"mode=track_mimic",
+    b"mode=skill:ClipA",
 ]
 
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -299,6 +311,7 @@ echo "[Smoke] Starting allowed external-policy input-check on UDP 127.0.0.1:${ud
     --allow-skill \
     --beyond-yaml "${beyond_yaml}" \
     --track-mimic-yaml "${track_mimic_runtime_yaml}" \
+    --beyond-trajectory-yaml "ClipA=${variant_runtime_yaml}" \
     >"${input_log}" 2>&1 &
 runner_pid=$!
 
@@ -312,6 +325,7 @@ port = int("${udp_port}")
 packets = [
     b"mode=beyond",
     b"mode=track_mimic",
+    b"mode=skill:ClipA",
     b"mode=final_damping",
 ]
 
@@ -328,7 +342,7 @@ if ! wait "${runner_pid}"; then
 fi
 runner_pid=""
 
-for expected in 'mode=DANCE' 'mode=SKILL' 'mode=FINAL_DAMPING'; do
+for expected in 'mode=DANCE' 'mode=SKILL' 'external=ClipA' 'mode=FINAL_DAMPING'; do
     if ! rg -q "${expected}" "${input_log}"; then
         echo "[Smoke][ERROR] missing expected input-check output: ${expected}" >&2
         sed -n '1,260p' "${input_log}" >&2
