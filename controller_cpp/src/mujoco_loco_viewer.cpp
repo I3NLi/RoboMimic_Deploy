@@ -183,6 +183,9 @@ struct ViewerStats {
     int http_reset_requests{0};
     int http_viewer_events{0};
     int http_control_commands{0};
+    int camera_frames{0};
+    int last_camera_jpg_bytes{0};
+    int last_camera_png_bytes{0};
     int last_perturb_body{0};
     std::string last_perturb_body_name;
     double min_base_height{std::numeric_limits<double>::infinity()};
@@ -221,6 +224,14 @@ struct CameraStreamState {
     std::vector<unsigned char> latest_png;
     std::vector<ViewerHttpEvent> viewer_events;
     std::vector<ViewerControlCommand> control_commands;
+    bool camera_stream_enabled{false};
+    std::string camera_name;
+    int camera_width{0};
+    int camera_height{0};
+    int camera_fps{0};
+    int camera_frames{0};
+    int latest_jpg_bytes{0};
+    int latest_png_bytes{0};
     std::string mode{"STAND"};
     std::string target_mode{"Position"};
     std::string external_policy;
@@ -281,6 +292,11 @@ public:
         auto vec3_norm = [](const std::array<double, 3>& value) {
             return std::sqrt(value[0] * value[0] + value[1] * value[1] + value[2] * value[2]);
         };
+        state_->camera_stream_enabled = args.camera_stream;
+        state_->camera_name = args.camera_name;
+        state_->camera_width = args.camera_width;
+        state_->camera_height = args.camera_height;
+        state_->camera_fps = args.camera_fps;
         state_->push_enabled = has_nonzero_vec3(args.push_force) || has_nonzero_vec3(args.push_impulse);
         state_->push_body = args.push_body;
         state_->push_body_id = push_body_id;
@@ -321,7 +337,10 @@ public:
         std::lock_guard<std::mutex> lock(state_->mutex);
         state_->latest_jpg = std::move(jpg);
         state_->latest_png = std::move(png);
+        state_->latest_jpg_bytes = static_cast<int>(state_->latest_jpg.size());
+        state_->latest_png_bytes = static_cast<int>(state_->latest_png.size());
         state_->timestamp = timestamp;
+        state_->camera_frames++;
         state_->seq++;
     }
 
@@ -624,6 +643,10 @@ private:
             std::lock_guard<std::mutex> lock(state->mutex);
             std::string body = "{\"ok\":true,\"seq\":" + std::to_string(state->seq) +
                                ",\"timestamp\":" + std::to_string(state->timestamp) +
+                               ",\"camera_stream_enabled\":" +
+                               (state->camera_stream_enabled ? "true" : "false") +
+                               ",\"camera_frames\":" + std::to_string(state->camera_frames) +
+                               ",\"latest_jpg_bytes\":" + std::to_string(state->latest_jpg_bytes) +
                                ",\"reset_pending\":" + (state->reset_requested ? "true" : "false") +
                                ",\"control_queue\":" + std::to_string(state->control_commands.size()) +
                                ",\"viewer_event_queue\":" + std::to_string(state->viewer_events.size()) + "}\n";
@@ -636,6 +659,14 @@ private:
                  << "\"ok\":true,"
                  << "\"seq\":" << state->seq << ","
                  << "\"timestamp\":" << state->timestamp << ","
+                 << "\"camera_stream_enabled\":" << (state->camera_stream_enabled ? "true" : "false") << ","
+                 << "\"camera_name\":\"" << json_escape(state->camera_name) << "\","
+                 << "\"camera_width\":" << state->camera_width << ","
+                 << "\"camera_height\":" << state->camera_height << ","
+                 << "\"camera_fps\":" << state->camera_fps << ","
+                 << "\"camera_frames\":" << state->camera_frames << ","
+                 << "\"latest_jpg_bytes\":" << state->latest_jpg_bytes << ","
+                 << "\"latest_png_bytes\":" << state->latest_png_bytes << ","
                  << "\"mode\":\"" << state->mode << "\","
                  << "\"target_mode\":\"" << json_escape(state->target_mode) << "\","
                  << "\"external_policy\":\"" << json_escape(state->external_policy) << "\","
@@ -1501,6 +1532,14 @@ std::string viewer_summary_json(
         << "\"adapter_command_published\":" << (adapter.command_published ? "true" : "false") << ","
         << "\"safety_enabled\":" << (safety_enabled ? "true" : "false") << ","
         << "\"paused\":" << (paused ? "true" : "false") << ","
+        << "\"camera_stream_enabled\":" << (args.camera_stream ? "true" : "false") << ","
+        << "\"camera_name\":\"" << json_escape(args.camera_name) << "\","
+        << "\"camera_width\":" << args.camera_width << ","
+        << "\"camera_height\":" << args.camera_height << ","
+        << "\"camera_fps\":" << args.camera_fps << ","
+        << "\"camera_frames\":" << stats.camera_frames << ","
+        << "\"last_camera_jpg_bytes\":" << stats.last_camera_jpg_bytes << ","
+        << "\"last_camera_png_bytes\":" << stats.last_camera_png_bytes << ","
         << "\"wall_s\":" << wall_s << ","
         << "\"sim_time_s\":" << data->time << ","
         << "\"sim_steps\":" << sim_step << ","
@@ -3128,6 +3167,9 @@ int main(int argc, char** argv)
                         args.camera_ros2 ? &rgb : nullptr,
                         args.camera_ros2 ? &rgba : nullptr)) {
                     const double ts = std::chrono::duration<double>(now_before_render.time_since_epoch()).count();
+                    ++stats.camera_frames;
+                    stats.last_camera_jpg_bytes = static_cast<int>(jpg.size());
+                    stats.last_camera_png_bytes = static_cast<int>(png.size());
                     if (camera_server) camera_server->update(std::move(jpg), std::move(png), ts);
 #ifdef ENABLE_ROS2_CAMERA
                     if (ros2_camera) {

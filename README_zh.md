@@ -131,7 +131,7 @@ viewer 开启 `--gamepad-control` 时，button 9/R3 会切换运行时 safety wa
 
 ```text
 /health
-/status         JSON: viewer、adapter、command、mode、target_mode 和 safety telemetry
+/status         JSON: viewer、adapter、command、mode、target_mode、safety 和 camera telemetry
 /frame.jpg
 /frame.png
 /stream.mjpg

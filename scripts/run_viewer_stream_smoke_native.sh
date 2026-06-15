@@ -95,6 +95,7 @@ frame_path="$(mktemp /tmp/magicbot_viewer_frame_XXXXXX.jpg)"
 stream_headers="$(mktemp /tmp/magicbot_viewer_stream_headers_XXXXXX.txt)"
 stream_body="$(mktemp /tmp/magicbot_viewer_stream_body_XXXXXX.bin)"
 stream_error="$(mktemp /tmp/magicbot_viewer_stream_error_XXXXXX.txt)"
+status_body="$(mktemp /tmp/magicbot_viewer_stream_status_XXXXXX.json)"
 viewer_pid=""
 
 cleanup() {
@@ -102,7 +103,7 @@ cleanup() {
         kill "${viewer_pid}" >/dev/null 2>&1 || true
         wait "${viewer_pid}" >/dev/null 2>&1 || true
     fi
-    rm -f "${viewer_log}" "${frame_path}" "${stream_headers}" "${stream_body}" "${stream_error}"
+    rm -f "${viewer_log}" "${frame_path}" "${stream_headers}" "${stream_body}" "${stream_error}" "${status_body}"
     if [[ "${keep_summary}" -eq 0 ]]; then
         rm -f "${summary_json}"
     fi
@@ -119,12 +120,16 @@ echo "[Smoke] Starting viewer stream smoke via ${RUNNER} on 127.0.0.1:${camera_p
     --camera-stream \
     --camera-host 127.0.0.1 \
     --camera-port "${camera_port}" \
+    --camera-width 320 \
+    --camera-height 240 \
+    --camera-fps 8 \
     --summary-json "${summary_json}" \
     "${extra_args[@]}" \
     >"${viewer_log}" 2>&1 &
 viewer_pid=$!
 
 health_url="http://127.0.0.1:${camera_port}/health"
+status_url="http://127.0.0.1:${camera_port}/status"
 frame_url="http://127.0.0.1:${camera_port}/frame.jpg"
 stream_url="http://127.0.0.1:${camera_port}/stream.mjpg"
 
@@ -180,6 +185,27 @@ then
     exit 1
 fi
 
+if ! curl -fsS --max-time 1 "${status_url}" -o "${status_body}"; then
+    echo "[Smoke][ERROR] could not fetch viewer /status telemetry" >&2
+    sed -n '1,180p' "${viewer_log}" >&2
+    exit 1
+fi
+
+if ! jq -e '
+    .camera_stream_enabled == true
+    and .camera_name == "head_rgba_camera"
+    and .camera_width == 320
+    and .camera_height == 240
+    and .camera_fps == 8
+    and .camera_frames > 0
+    and .latest_jpg_bytes > 0
+    and .latest_png_bytes > 0
+' "${status_body}" >/dev/null; then
+    echo "[Smoke][ERROR] /status did not report active camera stream telemetry" >&2
+    cat "${status_body}" >&2
+    exit 1
+fi
+
 set +e
 curl -fsS --max-time 2 -D "${stream_headers}" "${stream_url}" -o "${stream_body}" 2>"${stream_error}"
 stream_status=$?
@@ -218,6 +244,21 @@ fi
 
 if ! jq -e '.sim_steps > 0' "${summary_json}" >/dev/null; then
     echo "[Smoke][ERROR] summary did not report sim progress" >&2
+    cat "${summary_json}" >&2
+    exit 1
+fi
+
+if ! jq -e '
+    .camera_stream_enabled == true
+    and .camera_name == "head_rgba_camera"
+    and .camera_width == 320
+    and .camera_height == 240
+    and .camera_fps == 8
+    and .camera_frames > 0
+    and .last_camera_jpg_bytes > 0
+    and .last_camera_png_bytes > 0
+' "${summary_json}" >/dev/null; then
+    echo "[Smoke][ERROR] summary did not report active camera stream telemetry" >&2
     cat "${summary_json}" >&2
     exit 1
 fi

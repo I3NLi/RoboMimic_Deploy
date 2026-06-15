@@ -141,7 +141,7 @@ Endpoints:
 
 ```text
 /health
-/status         JSON: viewer, adapter, command, mode, target_mode, and safety telemetry
+/status         JSON: viewer, adapter, command, mode, target_mode, safety, and camera telemetry
 /frame.jpg
 /frame.png
 /stream.mjpg
