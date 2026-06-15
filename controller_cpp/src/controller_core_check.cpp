@@ -217,6 +217,46 @@ void check_stand_passive_final_modes(const std::filesystem::path& config_path)
     require_joint_array_near(final_damping.target.q, final_q, "final damping target should seed from state");
 }
 
+void check_loco_policy_mode(const std::filesystem::path& config_path)
+{
+    ml::LocoConfig cfg = ml::load_loco_config(config_path);
+    ml::ControllerCoreOptions options;
+    options.safety.enabled = false;
+    ml::ControllerCore core(cfg, options);
+
+    const ml::JointArray q = cfg.default_motor();
+    const ml::RobotSnapshot snapshot = make_snapshot(q);
+    const ml::Command command{{0.25f, -0.1f, 0.2f}};
+
+    const auto entered = core.step(
+        snapshot,
+        command,
+        ml::mode_request_for_control_mode(ml::ControlMode::Loco),
+        cfg.policy_dt);
+    require(entered.telemetry.mode == ml::ControlMode::Loco, "loco mode telemetry");
+    require_target_mode(entered.target, ml::JointTargetMode::Position, "loco should publish position target");
+    require(entered.telemetry.policy_evaluated, "loco should evaluate ONNX policy on entry");
+    require(entered.telemetry.policy_steps == 1, "loco policy step count after entry");
+    require_joint_array_near(
+        entered.target.q,
+        entered.telemetry.command_target,
+        "loco target should match telemetry command target");
+
+    const auto held = core.step(
+        snapshot,
+        command,
+        ml::ModeRequest::none(),
+        cfg.policy_dt * 0.25f);
+    require(held.telemetry.mode == ml::ControlMode::Loco, "held loco mode telemetry");
+    require_target_mode(held.target, ml::JointTargetMode::Position, "held loco should keep position target");
+    require(!held.telemetry.policy_evaluated, "held loco tick below policy dt should not evaluate policy");
+    require(held.telemetry.policy_steps == 1, "held loco policy step count");
+    require_joint_array_near(
+        held.target.q,
+        entered.target.q,
+        "held loco target should hold last command target between policy ticks");
+}
+
 void check_runtime_adapter_flow(const std::filesystem::path& config_path)
 {
     ml::LocoConfig cfg = ml::load_loco_config(config_path);
@@ -376,6 +416,7 @@ void check_external_policy_flow(const std::filesystem::path& config_path)
             cfg.policy_dt);
         require(entered.telemetry.mode == ml::ControlMode::Dance, "dance mode telemetry");
         require(entered.telemetry.external_policy == "FakeDance", "dance external policy telemetry");
+        require_target_mode(entered.target, ml::JointTargetMode::Position, "dance should publish position target");
         require(entered.telemetry.policy_evaluated, "dance should evaluate external policy");
         require(dance.resets == 1, "dance policy should reset on entry");
         require(dance.steps == 1, "dance policy should step on entry");
@@ -388,6 +429,7 @@ void check_external_policy_flow(const std::filesystem::path& config_path)
             ml::ModeRequest::none(),
             cfg.policy_dt);
         require(continued.telemetry.mode == ml::ControlMode::Dance, "continued dance mode telemetry");
+        require_target_mode(continued.target, ml::JointTargetMode::Position, "continued dance position target");
         require(dance.steps == 2, "dance policy should step again after policy dt");
         require_vec3_near(dance.last_velocity, command.velocity, "continued dance should preserve command");
 
@@ -443,6 +485,7 @@ void check_external_policy_flow(const std::filesystem::path& config_path)
             cfg.policy_dt);
         require(out.telemetry.mode == ml::ControlMode::Skill, "skill mode telemetry");
         require(out.telemetry.external_policy == "FakeSkill", "skill external policy telemetry");
+        require_target_mode(out.target, ml::JointTargetMode::Position, "skill should publish position target");
         require(out.telemetry.policy_evaluated, "skill should evaluate external policy");
         require(skill.resets == 1, "skill policy should reset on entry");
         require(skill.steps == 1, "skill policy should step on entry");
@@ -468,6 +511,7 @@ void check_external_policy_flow(const std::filesystem::path& config_path)
             ml::mode_request_for_control_mode(ml::ControlMode::Skill, "GainsSkill"),
             cfg.policy_dt);
         require(entered.telemetry.policy_evaluated, "gains skill should evaluate on entry");
+        require_target_mode(entered.target, ml::JointTargetMode::Position, "gains skill position target");
         require(skill.steps == 1, "gains skill should step once on entry");
         for (int i = 0; i < ml::kNumJoints; ++i) {
             const size_t index = static_cast<size_t>(i);
@@ -488,6 +532,7 @@ void check_external_policy_flow(const std::filesystem::path& config_path)
             ml::ModeRequest::none(),
             cfg.policy_dt * 0.25f);
         require(!held.telemetry.policy_evaluated, "external gains hold tick should not evaluate policy");
+        require_target_mode(held.target, ml::JointTargetMode::Position, "held gains skill position target");
         require(skill.steps == 1, "external gains hold tick should not step policy");
         for (int i = 0; i < ml::kNumJoints; ++i) {
             const size_t index = static_cast<size_t>(i);
@@ -518,6 +563,7 @@ void check_external_policy_flow(const std::filesystem::path& config_path)
             ml::mode_request_for_control_mode(ml::ControlMode::Skill, "SkillA"),
             cfg.policy_dt);
         require(first_out.telemetry.external_policy == "SkillA", "first skill key telemetry");
+        require_target_mode(first_out.target, ml::JointTargetMode::Position, "first skill key position target");
         require(first.resets == 1, "first skill policy should reset on entry");
         require(first.steps == 1, "first skill policy should step on entry");
 
@@ -528,6 +574,7 @@ void check_external_policy_flow(const std::filesystem::path& config_path)
             cfg.policy_dt);
         require(second_out.telemetry.mode == ml::ControlMode::Skill, "same-mode skill switch mode");
         require(second_out.telemetry.external_policy == "SkillB", "same-mode skill switch telemetry");
+        require_target_mode(second_out.target, ml::JointTargetMode::Position, "same-mode skill switch target");
         require(first.steps == 1, "first skill policy should stop stepping after switch");
         require(second.resets == 1, "second skill policy should reset on same-mode key switch");
         require(second.steps == 1, "second skill policy should step after same-mode key switch");
@@ -552,6 +599,7 @@ void check_external_policy_flow(const std::filesystem::path& config_path)
             ml::mode_request_for_control_mode(ml::ControlMode::Dance, "LimitedDance"),
             cfg.policy_dt);
         require(out.telemetry.mode == ml::ControlMode::Dance, "limited dance mode telemetry");
+        require_target_mode(out.target, ml::JointTargetMode::Position, "limited dance position target");
         require(out.telemetry.policy_evaluated, "limited dance should evaluate policy");
 
         const ml::JointArray raw_target = offset_target(start_q, 0.08f);
@@ -626,6 +674,7 @@ int main(int argc, char** argv)
 
     try {
         check_stand_passive_final_modes(argv[1]);
+        check_loco_policy_mode(argv[1]);
         check_runtime_adapter_flow(argv[1]);
         check_shared_target_rate_limit(argv[1]);
         check_shared_motion_safety(argv[1]);

@@ -14,8 +14,8 @@ usage() {
 Usage: $0 [--config PATH]
 
 Build and run the shared ControllerCore check. The check loads the loco config
-and policy, then verifies STAND, PASSIVE, and FINAL_DAMPING mode outputs without
-connecting to MuJoCo or the real robot.
+and policy, then verifies PASSIVE, STAND, LOCO, DANCE, SKILL, and FINAL_DAMPING
+mode outputs without connecting to MuJoCo or the real robot.
 EOF
 }
 
