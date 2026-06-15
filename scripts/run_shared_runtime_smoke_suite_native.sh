@@ -20,7 +20,7 @@ logic itself.
 
 Default groups:
   core            text parser, mode manager, ControllerCore/ControllerRuntime
-  sim             pure-sim closed-loop scheduled force + impulse
+  sim             sim-adapter target modes plus pure-sim closed-loop scheduled force + impulse
   viewer          native viewer HTTP/UDP/mode/external-policy/perturb controls
   python          Python-facing viewer launcher over the same native runtime
   real-no-robot   real-adapter target modes plus real-runner dry/input/safety gates without connecting robot
@@ -181,6 +181,7 @@ if [[ "${RUN_CORE}" -eq 1 ]]; then
 fi
 
 if [[ "${RUN_SIM}" -eq 1 ]]; then
+    run_step "${SCRIPT_DIR}/run_sim_adapter_target_mode_check_native.sh"
     run_step "${SCRIPT_DIR}/run_dual_push_smoke_native.sh" --duration 1.0
 fi
 
