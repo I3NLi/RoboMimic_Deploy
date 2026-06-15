@@ -238,7 +238,7 @@ APIs. `--python-only` runs the same viewer smokes through the Python-facing
 launcher. `--real-only` does
 not connect to the robot; it checks MagicBot real-adapter target-mode
 translation, the real operator loop's `ControllerRuntime.tick` boundary, plus
-dry/input/gamepad-safety/allow-gate behavior.
+dry/input/gamepad LOCO/PASSIVE/STAND/safety and allow-gate behavior.
 
 Manual build:
 

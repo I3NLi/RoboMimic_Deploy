@@ -6,7 +6,7 @@ PROJECT_ROOT="$( cd "${SCRIPT_DIR}/.." &> /dev/null && pwd )"
 RUNNER="${SCRIPT_DIR}/run_magicbot_loco_native.sh"
 RUNNER_SOURCE="${PROJECT_ROOT}/controller_cpp/src/magicbot_z1_loco_onnx.cpp"
 
-duration="2.2"
+duration="3.0"
 keep_log=0
 extra_args=()
 
@@ -16,8 +16,8 @@ Usage: $0 [options] [-- extra magicbot_z1_loco_onnx args]
 
 Smoke-test the real runner Linux joystick input path without connecting to a
 robot. The script starts magicbot_z1_loco_onnx in --input-check mode with a
-FIFO-backed fake joystick, writes js_event packets, then validates logged mode
-and command/safety changes.
+FIFO-backed fake joystick, writes js_event packets, then validates logged
+LOCO, PASSIVE, STAND, pause, command, and safety changes.
 
 Options:
   --duration S    Input-check duration, default ${duration}
@@ -175,14 +175,12 @@ def event(value: int, kind: int, number: int) -> bytes:
 
 if sequence == "axis_only":
     packets = [
-        event(1, JS_EVENT_BUTTON, 4),       # deadman held
         event(-16384, JS_EVENT_AXIS, 1),    # default vx axis with sign -1 -> +0.5
         event(0, JS_EVENT_AXIS, 0),
         event(0, JS_EVENT_AXIS, 3),
     ]
 elif sequence == "loco_axis":
     packets = [
-        event(1, JS_EVENT_BUTTON, 4),       # deadman held
         event(1, JS_EVENT_BUTTON, 0),       # LOCO button
         event(-16384, JS_EVENT_AXIS, 1),    # default vx axis with sign -1 -> +0.5
         event(0, JS_EVENT_AXIS, 0),
@@ -190,6 +188,10 @@ elif sequence == "loco_axis":
     ]
 elif sequence == "pause":
     packets = [event(1, JS_EVENT_BUTTON, 7)]
+elif sequence == "passive":
+    packets = [event(1, JS_EVENT_BUTTON, 1)]
+elif sequence == "stand":
+    packets = [event(1, JS_EVENT_BUTTON, 3)]
 elif sequence == "safety":
     packets = [event(1, JS_EVENT_BUTTON, 9)]  # R3/F2 safety wall toggle
 else:
@@ -268,11 +270,61 @@ if [[ "${pause_ready}" -ne 1 ]]; then
     exit 1
 fi
 
+passive_search_start=$(( $(wc -l < "${log_path}") + 1 ))
+send_gamepad_events "passive"
+
+passive_ready=0
+for _ in $(seq 1 80); do
+    if tail -n +"${passive_search_start}" "${log_path}" |
+       grep -Eq 'gamepad mode=PASSIVE cmd=\[-?0 -?0 -?0\]'; then
+        passive_ready=1
+        break
+    fi
+    if ! kill -0 "${runner_pid}" >/dev/null 2>&1; then
+        echo "[Smoke][ERROR] input-check exited before gamepad PASSIVE was observed" >&2
+        sed -n '1,300p' "${log_path}" >&2
+        exit 1
+    fi
+    sleep 0.1
+done
+
+if [[ "${passive_ready}" -ne 1 ]]; then
+    echo "[Smoke][ERROR] missing fake gamepad B/PASSIVE output" >&2
+    sed -n '1,300p' "${log_path}" >&2
+    exit 1
+fi
+
+stand_search_start=$(( $(wc -l < "${log_path}") + 1 ))
+send_gamepad_events "stand"
+
+stand_ready=0
+for _ in $(seq 1 80); do
+    if tail -n +"${stand_search_start}" "${log_path}" |
+       grep -Eq 'gamepad mode=STAND cmd=\[-?0 -?0 -?0\]'; then
+        stand_ready=1
+        break
+    fi
+    if ! kill -0 "${runner_pid}" >/dev/null 2>&1; then
+        echo "[Smoke][ERROR] input-check exited before gamepad STAND was observed" >&2
+        sed -n '1,320p' "${log_path}" >&2
+        exit 1
+    fi
+    sleep 0.1
+done
+
+if [[ "${stand_ready}" -ne 1 ]]; then
+    echo "[Smoke][ERROR] missing fake gamepad Y/STAND output" >&2
+    sed -n '1,320p' "${log_path}" >&2
+    exit 1
+fi
+
+safety_search_start=$(( $(wc -l < "${log_path}") + 1 ))
 send_gamepad_events "safety"
 
 safety_ready=0
 for _ in $(seq 1 80); do
-    if grep -Eq 'gamepad paused mode=LOCO cmd=\[-?0 -?0 -?0\].*pause-zero.*safety=off' "${log_path}"; then
+    if tail -n +"${safety_search_start}" "${log_path}" |
+       grep -Eq 'gamepad mode=STAND cmd=\[-?0 -?0 -?0\].*safety=off'; then
         safety_ready=1
         break
     fi
@@ -301,4 +353,4 @@ echo "[Smoke] PASSED real-runner gamepad input-check"
 if [[ "${keep_log}" -eq 1 ]]; then
     echo "[Smoke] log=${log_path}"
 fi
-grep -E 'gamepad.*mode=(STAND|LOCO)|pause-zero|safety=off' "${log_path}"
+grep -E 'gamepad.*mode=(STAND|LOCO|PASSIVE)|pause-zero|safety=off' "${log_path}"
