@@ -2,11 +2,11 @@
  * onnx_skill_policies.h
  *
  * Extra C++ policy ports for robot_controller_onnx:
- *  - LocoMode (policies/loco_mode/LocoMode.py)
+ *  - LocoMode ONNX policy
  *  - Dance/KungFu/Kick/KungFu2 motion policies
  *  - SkillCooldown / SkillCast transition policies
  *
- * This header is intended to be included after python_reference/legacy_robot.cpp defines:
+ * This header is intended to be included after the native controller defines:
  *   - Z1_NUM_MOTOR
  *   - FSMState / FSMStateName / FSMCommand
  *   - StateAndCmd / PolicyOutput
@@ -133,6 +133,20 @@ protected:
         return out;
     }
 
+    void validate_single_io(int input_dim, int output_dim, const std::string& label)
+    {
+        const auto in_shape = session_->GetInputTypeInfo(0).GetTensorTypeAndShapeInfo().GetShape();
+        if (!in_shape.empty() && in_shape.back() > 0 && in_shape.back() != input_dim) {
+            throw std::runtime_error(
+                label + " ONNX input dim does not match config num_obs");
+        }
+        const auto out_shape = session_->GetOutputTypeInfo(0).GetTensorTypeAndShapeInfo().GetShape();
+        if (!out_shape.empty() && out_shape.back() > 0 && out_shape.back() != output_dim) {
+            throw std::runtime_error(
+                label + " ONNX output dim does not match config num_actions");
+        }
+    }
+
     std::vector<Ort::Value> run_two_inputs(
         std::vector<float>& obs_buf, int obs_dim, float step_val)
     {
@@ -186,6 +200,22 @@ public:
             throw std::runtime_error("LocoMode supports command_dim 3 or 4 only");
         }
         root_height_command_ = cfg["root_height_command"] ? cfg["root_height_command"].as<float>() : 0.0f;
+        obs_clip_ = cfg["obs_clip"] ? cfg["obs_clip"].as<float>() : 100.0f;
+        const int base_obs = 6 + command_dim_ + 3 * num_actions_;
+        gait_phase_dim_ = cfg["gait_phase_dim"] ? cfg["gait_phase_dim"].as<int>() : std::max(0, num_obs_ - base_obs);
+        if (gait_phase_dim_ != 0 && gait_phase_dim_ != 2) {
+            throw std::runtime_error("LocoMode gait_phase_dim must be 0 or 2");
+        }
+        gait_phase_period_ = cfg["gait_phase_period"] ? cfg["gait_phase_period"].as<float>() : 0.6f;
+        gait_phase_stand_threshold_ =
+            cfg["gait_phase_stand_threshold"] ? cfg["gait_phase_stand_threshold"].as<float>() : 0.02f;
+        policy_dt_ = cfg["policy_dt"] ? cfg["policy_dt"].as<float>() : 0.02f;
+        if (gait_phase_period_ <= 0.f) {
+            throw std::runtime_error("LocoMode gait_phase_period must be > 0");
+        }
+        if (policy_dt_ <= 0.f) {
+            throw std::runtime_error("LocoMode policy_dt must be > 0");
+        }
         ang_vel_scale_ = cfg["ang_vel_scale"].as<float>();
         dof_pos_scale_ = cfg["dof_pos_scale"].as<float>();
         dof_vel_scale_ = cfg["dof_vel_scale"].as<float>();
@@ -218,10 +248,11 @@ public:
         obs_.assign(num_obs_, 0.f);
         qj_obs_.assign(num_actions_, 0.f);
         dqj_obs_.assign(num_actions_, 0.f);
-        const int expected_obs = 6 + command_dim_ + 3 * num_actions_;
+        const int expected_obs = base_obs + gait_phase_dim_;
         if (num_obs_ != expected_obs) {
             throw std::runtime_error("LocoMode num_obs does not match command_dim/action layout");
         }
+        validate_single_io(num_obs_, num_actions_, "LocoMode");
 
         // warmup
         std::vector<float> warm(num_obs_, 0.f);
@@ -233,6 +264,7 @@ public:
 
     void enter() override
     {
+        gait_phase_time_ = 0.f;
         kps_mj_.assign(num_actions_, 0.f);
         kds_mj_.assign(num_actions_, 0.f);
         tau_limit_mj_.assign(num_actions_, 0.f);
@@ -281,6 +313,13 @@ public:
         for (int i = 0; i < num_actions_ && (off + i) < num_obs_; i++) obs_[off + i] = dqj_obs_[i];
         off += num_actions_;
         for (int i = 0; i < num_actions_ && (off + i) < num_obs_; i++) obs_[off + i] = action_[i];
+        off += num_actions_;
+        if (gait_phase_dim_ == 2 && (off + 1) < num_obs_) {
+            auto gait_phase = gait_phase_from_command(cmd);
+            obs_[off] = gait_phase[0];
+            obs_[off + 1] = gait_phase[1];
+        }
+        sanitize_obs(obs_);
 
         auto out = run_single_input(obs_, num_obs_);
         for (int i = 0; i < num_actions_ && i < (int)out.size(); i++) {
@@ -315,14 +354,17 @@ public:
 
     FSMStateName check_change() override
     {
-        if (sc_.skill_cmd == FSMCommand::SKILL_1) return FSMStateName::SKILL_DANCE;
-        if (sc_.skill_cmd == FSMCommand::SKILL_2) return FSMStateName::SKILL_KUNGFU;
-        if (sc_.skill_cmd == FSMCommand::SKILL_3) return FSMStateName::SKILL_KICK;
-        if (sc_.skill_cmd == FSMCommand::SKILL_4) return FSMStateName::SKILL_BEYOND_MIMIC;
-        if (sc_.skill_cmd == FSMCommand::SKILL_5) return FSMStateName::JOINT_ZERO_CHECK;
-        if (sc_.skill_cmd == FSMCommand::SKILL_6) return FSMStateName::IMU_CALIB;
-        if (sc_.skill_cmd == FSMCommand::SKILL_7) return FSMStateName::SKILL_TRACK_MIMIC;
-        if (sc_.skill_cmd == FSMCommand::PASSIVE) return FSMStateName::PASSIVE;
+        const FSMCommand cmd = sc_.skill_cmd;
+        sc_.skill_cmd = FSMCommand::INVALID;
+        if (cmd == FSMCommand::SKILL_1) return FSMStateName::SKILL_DANCE;
+        if (cmd == FSMCommand::SKILL_2) return FSMStateName::SKILL_KUNGFU;
+        if (cmd == FSMCommand::SKILL_3) return FSMStateName::SKILL_KICK;
+        if (cmd == FSMCommand::SKILL_4) return FSMStateName::SKILL_BEYOND_MIMIC;
+        if (cmd == FSMCommand::SKILL_5) return FSMStateName::JOINT_ZERO_CHECK;
+        if (cmd == FSMCommand::SKILL_6) return FSMStateName::IMU_CALIB;
+        if (cmd == FSMCommand::SKILL_7) return FSMStateName::SKILL_TRACK_MIMIC;
+        if (cmd == FSMCommand::PASSIVE) return FSMStateName::PASSIVE;
+        if (cmd == FSMCommand::POS_RESET) return FSMStateName::FIXEDPOSE;
         return FSMStateName::LOCOMODE;
     }
 
@@ -353,10 +395,44 @@ private:
         return out;
     }
 
+    std::array<float, 2> gait_phase_from_command(const std::vector<float>& cmd)
+    {
+        const float vx = cmd.size() > 0 ? cmd[0] : 0.f;
+        const float vy = cmd.size() > 1 ? cmd[1] : 0.f;
+        const float wz = cmd.size() > 2 ? cmd[2] : 0.f;
+        const float command_norm = std::sqrt(vx * vx + vy * vy + wz * wz);
+
+        std::array<float, 2> mask{1.f, 1.f};
+        if (command_norm >= gait_phase_stand_threshold_) {
+            constexpr float kTwoPi = 6.28318530718f;
+            const float phase = std::fmod(gait_phase_time_, gait_phase_period_) / gait_phase_period_;
+            const float sin_pos = std::sin(kTwoPi * phase);
+            mask[0] = sin_pos >= 0.f ? 1.f : 0.f;
+            mask[1] = sin_pos < 0.f ? 1.f : 0.f;
+        }
+
+        gait_phase_time_ = std::fmod(gait_phase_time_ + policy_dt_, gait_phase_period_);
+        return mask;
+    }
+
+    void sanitize_obs(std::vector<float>& obs) const
+    {
+        for (float& v : obs) {
+            if (!std::isfinite(v)) v = 0.0f;
+            if (obs_clip_ > 0.0f) v = std::clamp(v, -obs_clip_, obs_clip_);
+        }
+    }
+
     int num_actions_{24};
     int num_obs_{96};
     int command_dim_{3};
+    int gait_phase_dim_{0};
     float root_height_command_{0.f};
+    float gait_phase_period_{0.6f};
+    float gait_phase_stand_threshold_{0.02f};
+    float gait_phase_time_{0.f};
+    float policy_dt_{0.02f};
+    float obs_clip_{100.f};
     float ang_vel_scale_{1.f};
     float dof_pos_scale_{1.f};
     float dof_vel_scale_{1.f};

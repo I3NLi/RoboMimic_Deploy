@@ -232,10 +232,7 @@ inline TextControlActionEffect text_control_action_effect(
         effect.unpause = true;
         break;
     case TextControlAction::ResetStand:
-        effect.mode_requested = true;
-        effect.mode = ControlMode::Stand;
         effect.zero_command = true;
-        effect.unpause = true;
         effect.reset_stand = true;
         break;
     case TextControlAction::Passive:
@@ -321,11 +318,6 @@ inline TextControlIntentApplyResult apply_text_control_effect_to_intent(
         intent.running = false;
     }
     if (effect.reset_stand) {
-        const ModeRequest reset_request = mode_request_for_text_control_effect(effect);
-        if (reset_request.requested) {
-            intent.desired_mode = reset_request.mode;
-            intent.desired_external_policy_key = reset_request.external_policy_key;
-        }
         intent.reset_requested = true;
         return {};
     }

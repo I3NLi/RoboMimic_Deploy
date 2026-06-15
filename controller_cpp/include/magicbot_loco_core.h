@@ -55,6 +55,7 @@ struct LocoConfig {
     Vec default_lab;
     Vec cmd_scale;
     std::array<float, 3> cmd_deadzone{0.0f, 0.0f, 0.0f};
+    std::array<float, 3> cmd_slew_rate{0.0f, 0.0f, 0.0f};
     CommandRange cmd_range;
     float root_height_command{0.69f};
     float obs_clip{100.0f};
@@ -127,6 +128,7 @@ public:
     const Vec& last_action_lab() const { return last_action_lab_; }
 
 private:
+    Vec apply_command_slew(const Vec& target_cmd_unscaled);
     std::array<float, 2> gait_phase_from_command(const Vec& cmd_unscaled);
 
     const LocoConfig& cfg_;
@@ -138,6 +140,7 @@ private:
     std::vector<const char*> input_names_;
     std::vector<const char*> output_names_;
     Vec last_action_lab_;
+    Vec smoothed_cmd_unscaled_;
     float gait_phase_time_{0.0f};
 };
 

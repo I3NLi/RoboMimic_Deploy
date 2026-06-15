@@ -3,10 +3,11 @@ set -euo pipefail
 
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 PROJECT_ROOT="$( cd "${SCRIPT_DIR}/.." &> /dev/null && pwd )"
-DEFAULT_CONFIG="${PROJECT_ROOT}/policies/loco_mode/config/LocoMode_lowKp.yaml"
 CPP_DIR="${PROJECT_ROOT}/controller_cpp"
-BUILD_DIR="${CPP_DIR}/build_native"
-NATIVE_BIN="${BUILD_DIR}/magicbot_z1_loco_onnx"
+BUILD_DIR="${CPP_DIR}/build_virtual_remote"
+NATIVE_BIN="${BUILD_DIR}/robot_controller_onnx"
+DEFAULT_YAML="${PROJECT_ROOT}/policies/beyond_mimic/config/BeyondMimic.yaml"
+DEFAULT_TRACK_YAML="${PROJECT_ROOT}/policies/track_mimic/config/BeyondMimic.yaml"
 
 has_arg() {
     local needle="$1"
@@ -19,27 +20,28 @@ has_arg() {
 }
 
 args=("$@")
-if ! has_arg "--config" "${args[@]}"; then
-    args=(--config "${DEFAULT_CONFIG}" "${args[@]}")
+if ! has_arg "--yaml" "${args[@]}"; then
+    args=(--yaml "${DEFAULT_YAML}" "${args[@]}")
 fi
-
-MAGICBOT_Z1_SDK_ROOT="${MAGICBOT_Z1_SDK_ROOT:-${MAGICBOT_SDK_ROOT:-}}"
-if [[ -z "${MAGICBOT_Z1_SDK_ROOT}" ]]; then
-    for candidate in \
-        "${HOME}/magicbot-z1_sdk-main" \
-        "${HOME}/MaigcLab/magicbot-z1_sdk-main" \
-        "/home/eame/magicbot-z1_sdk-main" \
-        "/home/hiyio/MaigcLab/magicbot-z1_sdk-main"; do
-        if [[ -f "${candidate}/include/magic_robot.h" ]]; then
-            MAGICBOT_Z1_SDK_ROOT="${candidate}"
-            break
-        fi
-    done
+if ! has_arg "--track-yaml" "${args[@]}"; then
+    args=(--track-yaml "${DEFAULT_TRACK_YAML}" "${args[@]}")
 fi
-
-if [[ -z "${MAGICBOT_Z1_SDK_ROOT}" ]]; then
-    echo "[Error] Could not find magicbot-z1_sdk-main. Set MAGICBOT_Z1_SDK_ROOT." >&2
-    exit 1
+if ! has_arg "--virtual-remote" "${args[@]}"; then
+    args=(--virtual-remote "${args[@]}")
+fi
+if ! has_arg "--virtual-remote-bind" "${args[@]}"; then
+    args=(--virtual-remote-bind 0.0.0.0 "${args[@]}")
+fi
+if ! has_arg "--virtual-remote-port" "${args[@]}"; then
+    args=(--virtual-remote-port "${MAGICBOT_REMOTE_WIRELESS_PORT:-15001}" "${args[@]}")
+fi
+if [[ "${MAGICBOT_REAL_JOYSTICK:-0}" == "1" || -n "${MAGICBOT_JOYSTICK_DEV:-}" ]]; then
+    if ! has_arg "--joystick" "${args[@]}"; then
+        args=(--joystick "${args[@]}")
+    fi
+fi
+if has_arg "--joystick" "${args[@]}" && ! has_arg "--joystick-dev" "${args[@]}"; then
+    args=(--joystick-dev "${MAGICBOT_JOYSTICK_DEV:-/dev/input/js0}" "${args[@]}")
 fi
 
 ONNXRUNTIME_DIR="${ONNXRUNTIME_DIR:-/home/hiyio/unitree_rl_lab/deploy/thirdparty/onnxruntime-linux-x64-1.22.0}"
@@ -77,7 +79,6 @@ fi
 
 if [[ ! -f "${ONNXRUNTIME_INCLUDE_DIR}/onnxruntime_cxx_api.h" ]]; then
     echo "[Error] ONNXRuntime headers not found: ${ONNXRUNTIME_INCLUDE_DIR}" >&2
-    echo "        Set ONNXRUNTIME_INCLUDE_DIR to a directory containing onnxruntime_cxx_api.h." >&2
     exit 1
 fi
 
@@ -101,35 +102,19 @@ if [[ -z "${YAML_CPP_DIR}" ]]; then
     done
 fi
 
-needs_build() {
-    [[ ! -x "${NATIVE_BIN}" ]] && return 0
-
-    local dep
-    for dep in \
-        "${CPP_DIR}/CMakeLists.txt" \
-        "${CPP_DIR}/src/magicbot_z1_loco_onnx.cpp" \
-        "${CPP_DIR}/src/magicbot_loco_core.cpp" \
-        "${CPP_DIR}/src/magicbot_loco_sdk_adapter.cpp"; do
-        [[ "${dep}" -nt "${NATIVE_BIN}" ]] && return 0
-    done
-
-    while IFS= read -r dep; do
-        [[ "${dep}" -nt "${NATIVE_BIN}" ]] && return 0
-    done < <(find "${CPP_DIR}/include" -maxdepth 1 -type f \( -name '*.h' -o -name '*.hpp' \))
-
-    return 1
-}
-
 mkdir -p "${BUILD_DIR}/onnxruntime"
 ORT_LINK_LIB="${BUILD_DIR}/onnxruntime/libonnxruntime.so.1"
 ln -sf "${ONNXRUNTIME_LIB}" "${ORT_LINK_LIB}"
 ONNXRUNTIME_LIB="${ORT_LINK_LIB}"
 export LD_LIBRARY_PATH="${BUILD_DIR}/onnxruntime:${LD_LIBRARY_PATH:-}"
 
-if needs_build; then
+if [[ ! -x "${NATIVE_BIN}" \
+    || "${CPP_DIR}/CMakeLists.txt" -nt "${NATIVE_BIN}" \
+    || "${CPP_DIR}/src/robot_controller.cpp" -nt "${NATIVE_BIN}" \
+    || "${CPP_DIR}/include/beyond_mimic_policy.h" -nt "${NATIVE_BIN}" \
+    || "${CPP_DIR}/include/onnx_skill_policies.h" -nt "${NATIVE_BIN}" ]]; then
     cmake_args=(
         -DCMAKE_BUILD_TYPE=Release
-        -DMAGICBOT_Z1_SDK_ROOT="${MAGICBOT_Z1_SDK_ROOT}"
         -DONNXRUNTIME_DIR="${ONNXRUNTIME_DIR}"
         -DONNXRUNTIME_INCLUDE_DIR="${ONNXRUNTIME_INCLUDE_DIR}"
         -DONNXRUNTIME_LIB="${ONNXRUNTIME_LIB}"
@@ -140,7 +125,7 @@ if needs_build; then
     fi
     cmake -S "${CPP_DIR}" -B "${BUILD_DIR}" \
         "${cmake_args[@]}"
-    cmake --build "${BUILD_DIR}" --target magicbot_z1_loco_onnx -j"$(nproc)"
+    cmake --build "${BUILD_DIR}" --target robot_controller_onnx -j"$(nproc)"
 fi
 
 exec "${NATIVE_BIN}" "${args[@]}"

@@ -199,11 +199,10 @@ void check_action_effects()
     require(!zero_request.requested, "non-mode effect should not build a mode request");
 
     const auto reset = ml::text_control_action_effect(ml::TextControlAction::ResetStand);
-    require(reset.mode_requested, "reset effect should request stand mode");
-    require(reset.mode == ml::ControlMode::Stand, "reset effect mode");
+    require(!reset.mode_requested, "reset effect should not request a mode");
     require(reset.zero_command, "reset effect should zero command");
-    require(reset.reset_stand, "reset effect should request re-stand/reset");
-    require_request(reset, ml::ControlMode::Stand, {}, "reset effect");
+    require(reset.reset_stand, "reset effect should request local reset");
+    require(!ml::mode_request_for_text_control_effect(reset).requested, "reset effect should not build a mode request");
 
     const auto pause = ml::text_control_action_effect(ml::TextControlAction::Pause);
     require(pause.pause, "pause effect should pause");
@@ -283,9 +282,10 @@ void check_intent_application()
     require(intent.command == std::array<float, 3>{0.0f, 0.0f, 0.0f}, "toggle-to-stand should zero command");
 
     intent.command = {0.1f, 0.2f, 0.3f};
+    intent.desired_mode = ml::ControlMode::Loco;
     result = ml::apply_text_control_action_to_intent(intent, ml::TextControlAction::ResetStand);
     require(result.applied, "reset intent should apply");
-    require(intent.desired_mode == ml::ControlMode::Stand, "reset intent mode");
+    require(intent.desired_mode == ml::ControlMode::Loco, "reset intent should preserve mode");
     require(intent.reset_requested, "reset intent should set reset flag");
     require(intent.command == std::array<float, 3>{0.0f, 0.0f, 0.0f}, "reset intent should zero command");
 

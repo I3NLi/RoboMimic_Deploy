@@ -1246,10 +1246,8 @@ int input_check_only(const Args& args)
             mode = ml::mode_request_for_loco_toggle(mode).mode;
         }
         if (state.reset_stand_requested) {
-            if (!state.mode_request.requested) {
-                throw std::runtime_error("reset-stand input missing shared mode request");
-            }
-            mode = state.mode_request.mode;
+            // Reset is intentionally local to policy/target state. It must not
+            // change the selected mode; mode changes have their own buttons.
         }
         if (state.mode_request.requested) {
             bool allowed = true;
@@ -1446,18 +1444,11 @@ int run_robot_with_finally(const Args& args, const ml::LocoConfig& cfg, ml::Cont
                         }
                     }
                     if (input.reset_stand_requested) {
-                        std::cout << "[Input] Re-stand requested" << std::endl;
-                        if (!input.mode_request.requested) {
-                            throw std::runtime_error("reset-stand input missing shared mode request");
-                        }
-                        const ml::ModeRequest reset_mode_request = input.mode_request;
+                        std::cout << "[Input] Reset requested" << std::endl;
                         raw_cmd = {0.0f, 0.0f, 0.0f};
-                        run_mode = reset_mode_request.mode;
-                        run_external_policy_key = reset_mode_request.external_policy_key;
-                        command_target = stand_interpolation(robot, state, cfg, args, rate_watchdog);
+                        command_target = state.snapshot().q;
                         core.seed_target(command_target);
                         core.reset_policy();
-                        pending_mode_request = reset_mode_request;
                         next_control_t = std::chrono::steady_clock::now();
                         last_log = next_control_t - std::chrono::seconds(60);
                         continue;

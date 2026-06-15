@@ -230,6 +230,16 @@ LocoConfig load_loco_config(const std::filesystem::path& path)
             cfg.cmd_deadzone.fill(raw["cmd_deadzone"].as<float>());
         }
     }
+    if (raw["cmd_slew_rate"]) {
+        if (raw["cmd_slew_rate"].IsSequence()) {
+            Vec slew = read_fvec(raw, "cmd_slew_rate");
+            if (slew.size() == 1) slew.assign(3, slew[0]);
+            if (slew.size() != 3) throw std::runtime_error("cmd_slew_rate must be scalar or length 3");
+            for (int i = 0; i < 3; ++i) cfg.cmd_slew_rate[i] = std::max(0.0f, slew[static_cast<size_t>(i)]);
+        } else {
+            cfg.cmd_slew_rate.fill(std::max(0.0f, raw["cmd_slew_rate"].as<float>()));
+        }
+    }
 
     auto cmd_range = raw["cmd_range"];
     cfg.cmd_range.vx = {cmd_range["lin_vel_x"][0].as<float>(), cmd_range["lin_vel_x"][1].as<float>()};
@@ -439,11 +449,15 @@ OnnxLocoPolicy::OnnxLocoPolicy(const LocoConfig& cfg)
         }
     }
     last_action_lab_.assign(static_cast<size_t>(cfg_.num_actions), 0.0f);
+    smoothed_cmd_unscaled_.assign(static_cast<size_t>(cfg_.command_dim), 0.0f);
+    if (cfg_.command_dim >= 4) smoothed_cmd_unscaled_[3] = cfg_.root_height_command;
 }
 
 void OnnxLocoPolicy::reset()
 {
     std::fill(last_action_lab_.begin(), last_action_lab_.end(), 0.0f);
+    std::fill(smoothed_cmd_unscaled_.begin(), smoothed_cmd_unscaled_.end(), 0.0f);
+    if (cfg_.command_dim >= 4) smoothed_cmd_unscaled_[3] = cfg_.root_height_command;
     gait_phase_time_ = 0.0f;
 }
 
@@ -457,6 +471,30 @@ void OnnxLocoPolicy::warmup(int rounds)
         (void)infer(q, dq, zero3, gravity, zero3);
     }
     reset();
+}
+
+Vec OnnxLocoPolicy::apply_command_slew(const Vec& target_cmd_unscaled)
+{
+    if (smoothed_cmd_unscaled_.size() != target_cmd_unscaled.size()) {
+        smoothed_cmd_unscaled_.assign(target_cmd_unscaled.size(), 0.0f);
+    }
+    Vec out = target_cmd_unscaled;
+    for (int i = 0; i < 3 && i < static_cast<int>(target_cmd_unscaled.size()); ++i) {
+        const float rate = cfg_.cmd_slew_rate[static_cast<size_t>(i)];
+        if (rate <= 0.0f) {
+            smoothed_cmd_unscaled_[static_cast<size_t>(i)] = target_cmd_unscaled[static_cast<size_t>(i)];
+            continue;
+        }
+        const float max_delta = rate * cfg_.policy_dt;
+        const float delta = target_cmd_unscaled[static_cast<size_t>(i)] - smoothed_cmd_unscaled_[static_cast<size_t>(i)];
+        smoothed_cmd_unscaled_[static_cast<size_t>(i)] += std::clamp(delta, -max_delta, max_delta);
+        out[static_cast<size_t>(i)] = smoothed_cmd_unscaled_[static_cast<size_t>(i)];
+    }
+    for (int i = 3; i < static_cast<int>(target_cmd_unscaled.size()); ++i) {
+        smoothed_cmd_unscaled_[static_cast<size_t>(i)] = target_cmd_unscaled[static_cast<size_t>(i)];
+        out[static_cast<size_t>(i)] = target_cmd_unscaled[static_cast<size_t>(i)];
+    }
+    return out;
 }
 
 std::array<float, 2> OnnxLocoPolicy::gait_phase_from_command(const Vec& cmd_unscaled)
@@ -487,7 +525,8 @@ InferResult OnnxLocoPolicy::infer(
     const std::array<float, 3>& raw_cmd)
 {
     Vec deadzone_cmd = apply_deadzone(raw_cmd, cfg_.cmd_deadzone);
-    Vec cmd_unscaled = scale_command(deadzone_cmd, cfg_, false);
+    Vec target_cmd_unscaled = scale_command(deadzone_cmd, cfg_, false);
+    Vec cmd_unscaled = apply_command_slew(target_cmd_unscaled);
     Vec cmd = cmd_unscaled;
     for (int i = 0; i < cfg_.command_dim; ++i) cmd[i] *= cfg_.cmd_scale[i];
 

@@ -279,6 +279,18 @@ scripts/run_magicbot_loco_native.sh \
 
 默认手柄映射：左摇杆 Y 为 `vx`，左摇杆 X 为 `vy`，右摇杆 X 为 `wz`；button 0 进 `LOCO`，button 3 回 `STAND`，button 6 重新插值回站姿并 reset policy，button 2 暂停清零，button 7 切换暂停清零。默认必须按住 button 4 才会输出非零命令，button 1 退出 run loop。轴和按键编号都可以用命令行参数改。
 
+完整 FSM 虚拟遥控器：
+
+`/home/hiyio/MaigcLab/magicbot-virtual-remote` 提供 Xbox 风格 Electron 遥控器。对 `robot_controller_onnx` 主线，建议走 `wireless_remote` 兼容 UDP 帧，而不是 Linux `/dev/input/js*`：
+
+```bash
+scripts/run_robot_controller_virtual_remote_native.sh \
+  --net lo \
+  --virtual-remote-port 15001
+```
+
+遥控器可以在另一台主机上运行，把页面里的 `Remote Host` 填成控制器主机 IP，`FSM UDP` 填 `15001`。按键语义对齐 C++ FSM：`START=POS_RESET`，`R1+A=LOCO`，`R1+X/Y/B=SKILL_1/2/3`，`L1+Y/B/X/A=SKILL_4/5/6/7`，`F1=PASSIVE`，`UP release=PAUSE`，`SELECT=退出`。控制器侧 UDP 超时会自动归零遥控器状态。
+
 ## 运行说明
 
 - `--allow-loco` 是进入 ONNX loco 的显式开关。

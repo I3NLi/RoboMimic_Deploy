@@ -2,9 +2,9 @@
  * robot_controller.cpp
  * C++ controller runtime for the MagicBot Z1 robot.
  *
- * Mirrors the Python version faithfully:
+ * Native controller implementation:
  *  - DDS communication via unitree_sdk2 C++ API
- *  - RemoteController parsing (same byte layout as Python struct.unpack)
+ *  - RemoteController parsing (same controller byte layout)
  *  - Gravity orientation from IMU quaternion
  *  - SafetyFilter: action/gain clamping, fault handling
  *  - HoldToConfirm: N-frame button hold to confirm commands
@@ -13,6 +13,8 @@
  *
  * Usage:
  *   ./robot_controller_onnx [network_interface] [num_joints] [--yaml PATH] [--track-yaml PATH]
+ *                         [--virtual-remote --virtual-remote-port 15001]
+ *                         [--joystick --joystick-dev /dev/input/js0]
  *   e.g.  ./robot_controller_onnx enp4s0 24
  *
  * Build: see CMakeLists.txt
@@ -32,6 +34,7 @@
 #include <memory>
 #include <mutex>
 #include <shared_mutex>
+#include <stdexcept>
 #include <string>
 #include <vector>
 #include <time.h>
@@ -39,6 +42,61 @@
 #include <unistd.h>
 #include <signal.h>
 #include <filesystem>
+#include <fcntl.h>
+#include <linux/joystick.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <sys/ioctl.h>
+#include <arpa/inet.h>
+
+#ifdef KEY_R1
+#undef KEY_R1
+#endif
+#ifdef KEY_L1
+#undef KEY_L1
+#endif
+#ifdef KEY_START
+#undef KEY_START
+#endif
+#ifdef KEY_SELECT
+#undef KEY_SELECT
+#endif
+#ifdef KEY_R2
+#undef KEY_R2
+#endif
+#ifdef KEY_L2
+#undef KEY_L2
+#endif
+#ifdef KEY_F1
+#undef KEY_F1
+#endif
+#ifdef KEY_F2
+#undef KEY_F2
+#endif
+#ifdef KEY_A
+#undef KEY_A
+#endif
+#ifdef KEY_B
+#undef KEY_B
+#endif
+#ifdef KEY_X
+#undef KEY_X
+#endif
+#ifdef KEY_Y
+#undef KEY_Y
+#endif
+#ifdef KEY_UP
+#undef KEY_UP
+#endif
+#ifdef KEY_RIGHT
+#undef KEY_RIGHT
+#endif
+#ifdef KEY_DOWN
+#undef KEY_DOWN
+#endif
+#ifdef KEY_LEFT
+#undef KEY_LEFT
+#endif
 
 // unitree_sdk2 C++ headers
 #include <unitree/robot/channel/channel_factory.hpp>
@@ -80,10 +138,8 @@ static const std::array<float, Z1_NUM_MOTOR> JOINT_ZERO_KD = {
 static const std::array<float, Z1_NUM_MOTOR> JOINT_ZERO_DEFAULT = {
     0.f,0.f,0.f,0.35f,-0.18f,0.f,
     0.f,0.f,0.f,0.35f,-0.18f,0.f,
-    0.f,
-    0.15f,0.15f,0.f,0.5f,0.f,
-    0.15f,-0.15f,0.f,0.5f,0.f,
-    0.f
+    0.f,0.f,0.15f,0.15f,0.f,0.5f,
+    0.f,0.15f,-0.15f,0.f,0.5f,0.f
 };
 
 // SkillCooldown config mirror (policies/skill_cooldown/config/SkillCooldown.yaml)
@@ -106,10 +162,8 @@ static const std::array<float, Z1_NUM_MOTOR> SKILL_CD_KD = {
 static const std::array<float, Z1_NUM_MOTOR> SKILL_CD_DEFAULT = {
     0.f,0.f,0.f,0.35f,-0.18f,0.f,
     0.f,0.f,0.f,0.35f,-0.18f,0.f,
-    0.f,
-    0.15f,0.15f,0.f,0.5f,0.f,
-    0.15f,-0.15f,0.f,0.5f,0.f,
-    0.f
+    0.f,0.f,0.15f,0.15f,0.f,0.5f,
+    0.f,0.15f,-0.15f,0.f,0.5f,0.f
 };
 static const std::array<int, 0> SKILL_CD_LOWER_IDX = {};
 static const std::array<int, Z1_NUM_MOTOR> SKILL_CD_UPPER_IDX = {
@@ -188,10 +242,29 @@ struct Config {
     int   fault_hold_steps        = 25;
     float fault_latch_seconds     = 1.0f;
     int   max_faults_before_latch = 3;
+
+    // Optional virtual remote. It accepts the same 40-byte wireless_remote
+    // payload over UDP, allowing the UI to run on another host.
+    bool        virtual_remote_enable    = false;
+    std::string virtual_remote_bind      = "0.0.0.0";
+    int         virtual_remote_port      = 15001;
+    float       virtual_remote_timeout_s = 0.35f;
+
+    // Optional real Linux joystick/gamepad input. It is converted into the
+    // same wireless_remote layout, then consumed by the normal FSM mapping.
+    bool        joystick_enable      = false;
+    std::string joystick_dev         = "/dev/input/js0";
+    float       joystick_deadzone    = 0.07f;
+    int         joystick_axis_lx     = 0;
+    int         joystick_axis_ly     = 1;
+    int         joystick_axis_rx     = 3;
+    int         joystick_axis_ry     = 4;
+    int         joystick_axis_dpad_x = 6;
+    int         joystick_axis_dpad_y = 7;
 };
 
 // ============================================================
-// KeyMap — matches Python KeyMap
+// KeyMap — matches controller KeyMap
 // ============================================================
 
 enum KeyMap {
@@ -202,7 +275,7 @@ enum KeyMap {
 };
 
 // ============================================================
-// RemoteController — same byte parsing as Python struct.unpack
+// RemoteController — native byte parsing
 // ============================================================
 
 class RemoteController {
@@ -237,10 +310,351 @@ public:
 
     bool is_pressed (int id) const { return id >= 0 && id < 16 && button_states[id]; }
     bool is_released(int id) const { return id >= 0 && id < 16 && button_released[id]; }
+    bool consume_released(int id)
+    {
+        if (id < 0 || id >= 16) return false;
+        const bool released = button_released[id];
+        button_released[id] = false;
+        return released;
+    }
 };
 
 // ============================================================
-// FSMCommand — matches Python FSMCommand enum
+// VirtualRemoteUdp — optional remote wireless_remote receiver
+// ============================================================
+
+class VirtualRemoteUdp {
+public:
+    explicit VirtualRemoteUdp(const Config& cfg)
+        : enabled_(cfg.virtual_remote_enable),
+          bind_(cfg.virtual_remote_bind),
+          port_(cfg.virtual_remote_port),
+          timeout_s_(cfg.virtual_remote_timeout_s)
+    {
+        if (!enabled_) return;
+
+        fd_ = socket(AF_INET, SOCK_DGRAM, 0);
+        if (fd_ < 0) {
+            throw std::runtime_error(std::string("virtual remote socket failed: ") + std::strerror(errno));
+        }
+
+        const int flags = fcntl(fd_, F_GETFL, 0);
+        if (flags < 0 || fcntl(fd_, F_SETFL, flags | O_NONBLOCK) != 0) {
+            throw std::runtime_error(std::string("virtual remote fcntl failed: ") + std::strerror(errno));
+        }
+
+        sockaddr_in addr{};
+        addr.sin_family = AF_INET;
+        addr.sin_port = htons(static_cast<uint16_t>(port_));
+        if (bind_.empty() || bind_ == "0.0.0.0") {
+            addr.sin_addr.s_addr = htonl(INADDR_ANY);
+        } else if (inet_pton(AF_INET, bind_.c_str(), &addr.sin_addr) != 1) {
+            throw std::runtime_error("invalid --virtual-remote-bind address: " + bind_);
+        }
+
+        if (bind(fd_, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0) {
+            throw std::runtime_error(
+                "virtual remote bind " + bind_ + ":" + std::to_string(port_) +
+                " failed: " + std::strerror(errno));
+        }
+
+        printf("[VirtualRemote] UDP enabled: bind=%s port=%d timeout=%.2fs\n",
+               bind_.c_str(), port_, timeout_s_);
+    }
+
+    ~VirtualRemoteUdp()
+    {
+        if (fd_ >= 0) close(fd_);
+    }
+
+    bool enabled() const { return enabled_; }
+
+    bool poll(RemoteController& remote)
+    {
+        if (!enabled_ || fd_ < 0) return false;
+
+        bool received = false;
+        while (true) {
+            uint8_t buffer[512]{};
+            sockaddr_in src{};
+            socklen_t src_len = sizeof(src);
+            const ssize_t n = recvfrom(
+                fd_, buffer, sizeof(buffer), 0,
+                reinterpret_cast<sockaddr*>(&src), &src_len);
+            if (n > 0) {
+                std::array<uint8_t, 40> frame{};
+                if (decode_frame(buffer, n, frame)) {
+                    remote.set(frame);
+                    last_packet_t_ = now_sec();
+                    have_packet_ = true;
+                    timed_out_ = false;
+                    received = true;
+                }
+                continue;
+            }
+            if (n < 0 && errno != EAGAIN && errno != EWOULDBLOCK) {
+                printf("[VirtualRemote][WARN] recvfrom failed: %s\n", std::strerror(errno));
+            }
+            break;
+        }
+
+        if (received) return true;
+        if (!have_packet_) return false;
+        if (now_sec() - last_packet_t_ <= timeout_s_) return true;
+
+        if (!timed_out_) {
+            std::array<uint8_t, 40> neutral{};
+            remote.set(neutral);
+            timed_out_ = true;
+            printf("[VirtualRemote] timeout; neutral command applied\n");
+        }
+        return false;
+    }
+
+private:
+    static int hex_value(char ch)
+    {
+        if (ch >= '0' && ch <= '9') return ch - '0';
+        if (ch >= 'a' && ch <= 'f') return ch - 'a' + 10;
+        if (ch >= 'A' && ch <= 'F') return ch - 'A' + 10;
+        return -1;
+    }
+
+    static bool decode_hex(const std::string& hex, std::array<uint8_t, 40>& out)
+    {
+        if (hex.size() != 80) return false;
+        for (size_t i = 0; i < out.size(); ++i) {
+            const int hi = hex_value(hex[i * 2]);
+            const int lo = hex_value(hex[i * 2 + 1]);
+            if (hi < 0 || lo < 0) return false;
+            out[i] = static_cast<uint8_t>((hi << 4) | lo);
+        }
+        return true;
+    }
+
+    static bool decode_frame(const uint8_t* buffer, ssize_t n, std::array<uint8_t, 40>& out)
+    {
+        if (n == static_cast<ssize_t>(out.size())) {
+            std::memcpy(out.data(), buffer, out.size());
+            return true;
+        }
+
+        std::string text(reinterpret_cast<const char*>(buffer), static_cast<size_t>(n));
+        std::string hex;
+        const auto hex_key = text.find("\"hex\"");
+        if (hex_key != std::string::npos) {
+            const auto colon = text.find(':', hex_key);
+            const auto first_quote = text.find('"', colon == std::string::npos ? hex_key : colon);
+            const auto second_quote = first_quote == std::string::npos
+                ? std::string::npos
+                : text.find('"', first_quote + 1);
+            if (first_quote != std::string::npos && second_quote != std::string::npos) {
+                hex = text.substr(first_quote + 1, second_quote - first_quote - 1);
+            }
+        } else {
+            for (char ch : text) {
+                if (std::isxdigit(static_cast<unsigned char>(ch))) hex.push_back(ch);
+            }
+        }
+
+        return decode_hex(hex, out);
+    }
+
+    bool enabled_{false};
+    std::string bind_{"0.0.0.0"};
+    int port_{15001};
+    float timeout_s_{0.35f};
+    int fd_{-1};
+    bool have_packet_{false};
+    bool timed_out_{false};
+    double last_packet_t_{0.0};
+};
+
+// ============================================================
+// LinuxJoystickRemote — direct /dev/input/js* gamepad receiver
+// ============================================================
+
+class LinuxJoystickRemote {
+public:
+    explicit LinuxJoystickRemote(const Config& cfg)
+        : enabled_(cfg.joystick_enable),
+          dev_(cfg.joystick_dev),
+          deadzone_(cfg.joystick_deadzone),
+          axis_lx_(cfg.joystick_axis_lx),
+          axis_ly_(cfg.joystick_axis_ly),
+          axis_rx_(cfg.joystick_axis_rx),
+          axis_ry_(cfg.joystick_axis_ry),
+          axis_dpad_x_(cfg.joystick_axis_dpad_x),
+          axis_dpad_y_(cfg.joystick_axis_dpad_y)
+    {
+        if (!enabled_) return;
+
+        fd_ = open(dev_.c_str(), O_RDONLY | O_NONBLOCK);
+        if (fd_ < 0) {
+            throw std::runtime_error("joystick open " + dev_ + " failed: " + std::strerror(errno));
+        }
+
+        char name[128] = {0};
+        if (ioctl(fd_, JSIOCGNAME(sizeof(name)), name) < 0) {
+            std::snprintf(name, sizeof(name), "%s", dev_.c_str());
+        }
+        uint8_t axes = 0;
+        uint8_t buttons = 0;
+        ioctl(fd_, JSIOCGAXES, &axes);
+        ioctl(fd_, JSIOCGBUTTONS, &buttons);
+        axis_.assign(std::max<int>(axes, 16), 0.0f);
+        button_.assign(std::max<int>(buttons, 16), false);
+
+        printf("[Joystick] enabled: dev=%s name=\"%s\" axes=%u buttons=%u deadzone=%.2f\n",
+               dev_.c_str(), name, axes, buttons, deadzone_);
+        printf("[Joystick] mapping: axes lx=%d ly=%d rx=%d ry=%d dpad=(%d,%d); buttons A/B/X/Y=0..3 L1/R1=4/5 SELECT/START=6/7 L3/R3=8/9\n",
+               axis_lx_, axis_ly_, axis_rx_, axis_ry_, axis_dpad_x_, axis_dpad_y_);
+    }
+
+    ~LinuxJoystickRemote()
+    {
+        if (fd_ >= 0) close(fd_);
+    }
+
+    bool enabled() const { return enabled_; }
+
+    void poll(RemoteController& remote)
+    {
+        if (!enabled_ || fd_ < 0) return;
+
+        bool received = false;
+        while (true) {
+            js_event event{};
+            const ssize_t n = read(fd_, &event, sizeof(event));
+            if (n == static_cast<ssize_t>(sizeof(event))) {
+                handle_event(event);
+                received = true;
+                continue;
+            }
+            if (n < 0 && errno != EAGAIN && errno != EWOULDBLOCK) {
+                printf("[Joystick][WARN] read %s failed: %s\n", dev_.c_str(), std::strerror(errno));
+            }
+            break;
+        }
+
+        if (received) {
+            last_event_t_ = now_sec();
+            have_event_ = true;
+        }
+        if (has_active_input() || (have_event_ && now_sec() - last_event_t_ <= release_grace_s_)) {
+            remote.set(build_frame());
+        }
+    }
+
+private:
+    void handle_event(const js_event& raw)
+    {
+        const uint8_t type = raw.type & ~JS_EVENT_INIT;
+        if (type == JS_EVENT_AXIS) {
+            const size_t index = raw.number;
+            if (index >= axis_.size()) axis_.resize(index + 1, 0.0f);
+            axis_[index] = normalize_axis(raw.value);
+        } else if (type == JS_EVENT_BUTTON) {
+            const size_t index = raw.number;
+            if (index >= button_.size()) button_.resize(index + 1, false);
+            button_[index] = raw.value != 0;
+        }
+    }
+
+    std::array<uint8_t, 40> build_frame() const
+    {
+        std::array<uint8_t, 40> frame{};
+        uint16_t bits = 0;
+        auto set_bit = [&](int key, bool on) {
+            if (on && key >= 0 && key < 16) bits |= static_cast<uint16_t>(1u << key);
+        };
+
+        set_bit(KEY_A, button_down(0));
+        set_bit(KEY_B, button_down(1));
+        set_bit(KEY_X, button_down(2));
+        set_bit(KEY_Y, button_down(3));
+        set_bit(KEY_L1, button_down(4));
+        set_bit(KEY_R1, button_down(5));
+        set_bit(KEY_SELECT, button_down(6));
+        set_bit(KEY_START, button_down(7));
+        set_bit(KEY_F1, button_down(8));  // Python JoystickButton.L3; passive shortcut.
+        set_bit(KEY_F2, button_down(9));  // Python JoystickButton.R3.
+        set_bit(KEY_UP, button_down(11) || axis_value(axis_dpad_y_) < -0.5f);
+        set_bit(KEY_DOWN, button_down(12) || axis_value(axis_dpad_y_) > 0.5f);
+        set_bit(KEY_LEFT, button_down(13) || axis_value(axis_dpad_x_) < -0.5f);
+        set_bit(KEY_RIGHT, button_down(14) || axis_value(axis_dpad_x_) > 0.5f);
+
+        const float lx = shape_axis(axis_value(axis_lx_));
+        const float ly = shape_axis(-axis_value(axis_ly_));
+        const float rx = shape_axis(axis_value(axis_rx_));
+        const float ry = shape_axis(-axis_value(axis_ry_));
+
+        frame[2] = static_cast<uint8_t>(bits & 0xff);
+        frame[3] = static_cast<uint8_t>((bits >> 8) & 0xff);
+        std::memcpy(frame.data() + 4, &lx, sizeof(float));
+        std::memcpy(frame.data() + 8, &rx, sizeof(float));
+        std::memcpy(frame.data() + 12, &ry, sizeof(float));
+        std::memcpy(frame.data() + 20, &ly, sizeof(float));
+        return frame;
+    }
+
+    bool button_down(size_t index) const
+    {
+        return index < button_.size() && button_[index];
+    }
+
+    float axis_value(int index) const
+    {
+        if (index < 0 || static_cast<size_t>(index) >= axis_.size()) return 0.0f;
+        return axis_[static_cast<size_t>(index)];
+    }
+
+    float shape_axis(float value) const
+    {
+        value = std::clamp(value, -1.0f, 1.0f);
+        if (std::fabs(value) < deadzone_) return 0.0f;
+        return value;
+    }
+
+    bool has_active_input() const
+    {
+        for (bool down : button_) {
+            if (down) return true;
+        }
+        if (std::fabs(shape_axis(axis_value(axis_lx_))) > 0.0f) return true;
+        if (std::fabs(shape_axis(axis_value(axis_ly_))) > 0.0f) return true;
+        if (std::fabs(shape_axis(axis_value(axis_rx_))) > 0.0f) return true;
+        if (std::fabs(shape_axis(axis_value(axis_ry_))) > 0.0f) return true;
+        if (std::fabs(axis_value(axis_dpad_x_)) > 0.5f) return true;
+        if (std::fabs(axis_value(axis_dpad_y_)) > 0.5f) return true;
+        return false;
+    }
+
+    static float normalize_axis(int value)
+    {
+        const float denom = value < 0 ? 32768.0f : 32767.0f;
+        return std::clamp(static_cast<float>(value) / denom, -1.0f, 1.0f);
+    }
+
+    bool enabled_{false};
+    std::string dev_;
+    float deadzone_{0.07f};
+    int axis_lx_{0};
+    int axis_ly_{1};
+    int axis_rx_{3};
+    int axis_ry_{4};
+    int axis_dpad_x_{6};
+    int axis_dpad_y_{7};
+    int fd_{-1};
+    std::vector<float> axis_;
+    std::vector<bool> button_;
+    bool have_event_{false};
+    double last_event_t_{0.0};
+    double release_grace_s_{0.35};
+};
+
+// ============================================================
+// FSMCommand — matches FSMCommand enum
 // ============================================================
 
 enum class FSMCommand {
@@ -259,7 +673,7 @@ enum class FSMCommand {
 };
 
 // ============================================================
-// FSMStateName — matches Python FSMStateName enum
+// FSMStateName — matches FSMStateName enum
 // ============================================================
 
 enum class FSMStateName {
@@ -280,7 +694,7 @@ enum class FSMStateName {
 };
 
 // ============================================================
-// StateAndCmd — mirrors Python StateAndCmd
+// StateAndCmd — native StateAndCmd
 // ============================================================
 
 struct StateAndCmd {
@@ -304,7 +718,7 @@ struct StateAndCmd {
 };
 
 // ============================================================
-// PolicyOutput — mirrors Python PolicyOutput
+// PolicyOutput — native PolicyOutput
 // ============================================================
 
 struct PolicyOutput {
@@ -317,7 +731,7 @@ struct PolicyOutput {
 };
 
 // ============================================================
-// Rotation helpers — mirrors Python get_gravity_orientation_real
+// Rotation helpers — native projected-gravity helper
 // ============================================================
 
 static std::array<float, 3> get_gravity_orientation(const std::array<float, 4>& q)
@@ -331,7 +745,7 @@ static std::array<float, 3> get_gravity_orientation(const std::array<float, 4>& 
 }
 
 // ============================================================
-// HoldToConfirm — mirrors Python HoldToConfirm
+// HoldToConfirm — native HoldToConfirm
 // ============================================================
 
 class HoldToConfirm {
@@ -354,7 +768,7 @@ private:
 };
 
 // ============================================================
-// SafetyFilter — mirrors Python SafetyFilter
+// SafetyFilter — native SafetyFilter
 // ============================================================
 
 class SafetyFilter {
@@ -460,7 +874,7 @@ private:
 };
 
 // ============================================================
-// FSMState abstract base — mirrors Python FSMState
+// FSMState abstract base — native FSMState
 // ============================================================
 
 class FSMState {
@@ -506,6 +920,10 @@ public:
 
     FSMStateName check_change() override
     {
+        if (sc_.skill_cmd == FSMCommand::LOCO) {
+            sc_.skill_cmd = FSMCommand::INVALID;
+            return FSMStateName::LOCOMODE;
+        }
         if (sc_.skill_cmd == FSMCommand::POS_RESET) {
             sc_.skill_cmd = FSMCommand::INVALID;
             return FSMStateName::FIXEDPOSE;
@@ -581,18 +999,18 @@ private:
 };
 
 // ============================================================
-// LocoMode placeholder — add ONNX/libtorch policy here
+// LocoMode safe fallback used only when no ONNX policy was registered.
 // ============================================================
 
-class LocoModePlaceholder : public FSMState {
+class LocoModeFallback : public FSMState {
 public:
-    LocoModePlaceholder(StateAndCmd& sc, PolicyOutput& po, float kd = DAMPING_KD)
-        : FSMState(FSMStateName::LOCOMODE, "LocoMode(stub)", sc, po), kd_(kd) {}
+    LocoModeFallback(StateAndCmd& sc, PolicyOutput& po, float kd = DAMPING_KD)
+        : FSMState(FSMStateName::LOCOMODE, "LocoMode(safe-fallback)", sc, po), kd_(kd) {}
 
     void enter() override
     {
         printf("[LocoMode] WARNING: neural network not loaded — damping fallback active.\n");
-        printf("           To add a real policy, subclass FSMState and register it in FSM.\n");
+        printf("           Registering LocoMode(onnx) replaces this state.\n");
     }
 
     void run() override
@@ -606,15 +1024,18 @@ public:
 
     FSMStateName check_change() override
     {
-        // Match Python LocoMode.checkChange()
-        if (sc_.skill_cmd == FSMCommand::SKILL_1)   return FSMStateName::SKILL_DANCE;
-        if (sc_.skill_cmd == FSMCommand::SKILL_2)   return FSMStateName::SKILL_KUNGFU;
-        if (sc_.skill_cmd == FSMCommand::SKILL_3)   return FSMStateName::SKILL_KICK;
-        if (sc_.skill_cmd == FSMCommand::SKILL_4)   return FSMStateName::SKILL_BEYOND_MIMIC;
-        if (sc_.skill_cmd == FSMCommand::SKILL_5)   return FSMStateName::JOINT_ZERO_CHECK;
-        if (sc_.skill_cmd == FSMCommand::SKILL_6)   return FSMStateName::IMU_CALIB;
-        if (sc_.skill_cmd == FSMCommand::SKILL_7)   return FSMStateName::SKILL_TRACK_MIMIC;
-        if (sc_.skill_cmd == FSMCommand::PASSIVE)   return FSMStateName::PASSIVE;
+        // Match LocoMode state-change behavior
+        const FSMCommand cmd = sc_.skill_cmd;
+        sc_.skill_cmd = FSMCommand::INVALID;
+        if (cmd == FSMCommand::SKILL_1)   return FSMStateName::SKILL_DANCE;
+        if (cmd == FSMCommand::SKILL_2)   return FSMStateName::SKILL_KUNGFU;
+        if (cmd == FSMCommand::SKILL_3)   return FSMStateName::SKILL_KICK;
+        if (cmd == FSMCommand::SKILL_4)   return FSMStateName::SKILL_BEYOND_MIMIC;
+        if (cmd == FSMCommand::SKILL_5)   return FSMStateName::JOINT_ZERO_CHECK;
+        if (cmd == FSMCommand::SKILL_6)   return FSMStateName::IMU_CALIB;
+        if (cmd == FSMCommand::SKILL_7)   return FSMStateName::SKILL_TRACK_MIMIC;
+        if (cmd == FSMCommand::PASSIVE)   return FSMStateName::PASSIVE;
+        if (cmd == FSMCommand::POS_RESET) return FSMStateName::FIXEDPOSE;
         return FSMStateName::LOCOMODE;
     }
 
@@ -623,7 +1044,7 @@ private:
 };
 
 // ============================================================
-// Skill placeholders for parity states not fully ported yet
+// Safe fallback states used only when optional policy configs are absent.
 // ============================================================
 
 class HoldPositionSkill : public FSMState {
@@ -637,7 +1058,7 @@ public:
     void enter() override
     {
         hold_q_ = sc_.q;
-        printf("[%s] Entered (hold-position placeholder)\n", name_str.c_str());
+        printf("[%s] Entered (hold-position fallback)\n", name_str.c_str());
     }
 
     void run() override
@@ -731,7 +1152,7 @@ public:
 
     void run() override
     {
-        // Lower body: hold current position (C++ placeholder without cooldown NN).
+        // Lower body: hold current position when cooldown ONNX is absent.
         for (int i = 0; i < (int)SKILL_CD_LOWER_IDX.size(); i++) {
             const int m = SKILL_CD_LOWER_IDX[i];
             po_.actions[m] = sc_.q[m];
@@ -877,14 +1298,14 @@ public:
         if (loco_provider_) {
             FSMState* loco = loco_provider_();
             if (loco) {
-                // Python ImuCalib reuses LocoMode outputs for standing stabilization.
+                // ImuCalib reuses LocoMode outputs for standing stabilization.
                 loco->run();
                 used_loco_pose = true;
             }
         }
         if (!used_loco_pose) {
             if (!warned_no_loco_) {
-                printf("[ImuCalib][WARN] Loco provider missing, fallback to fixed stand pose.\n");
+                printf("[ImuCalib][WARN] Loco provider missing, using fixed stand pose.\n");
                 warned_no_loco_ = true;
             }
             for (int i = 0; i < sc_.num_joints; i++) {
@@ -994,13 +1415,13 @@ public:
           cooldown_(sc, po, ctrl_dt),
           joint_zero_(sc, po, ctrl_dt),
           imu_calib_(sc, po, ctrl_dt),
-          skill_cast_(FSMStateName::SKILL_CAST, "SkillCast(stub)", sc, po),
-          kungfu_(FSMStateName::SKILL_KUNGFU, "KungFu(stub)", sc, po),
-          dance_(FSMStateName::SKILL_DANCE, "Dance(stub)", sc, po),
-          kick_(FSMStateName::SKILL_KICK, "Kick(stub)", sc, po),
-          kungfu2_(FSMStateName::SKILL_KUNGFU2, "KungFu2(stub)", sc, po),
-          beyond_stub_(FSMStateName::SKILL_BEYOND_MIMIC, "BeyondMimic(stub)", sc, po),
-          track_stub_(FSMStateName::SKILL_TRACK_MIMIC, "TrackMimic(stub)", sc, po)
+          skill_cast_(FSMStateName::SKILL_CAST, "SkillCast(safe-fallback)", sc, po),
+          kungfu_(FSMStateName::SKILL_KUNGFU, "KungFu(safe-fallback)", sc, po),
+          dance_(FSMStateName::SKILL_DANCE, "Dance(safe-fallback)", sc, po),
+          kick_(FSMStateName::SKILL_KICK, "Kick(safe-fallback)", sc, po),
+          kungfu2_(FSMStateName::SKILL_KUNGFU2, "KungFu2(safe-fallback)", sc, po),
+          beyond_fallback_(FSMStateName::SKILL_BEYOND_MIMIC, "BeyondMimic(safe-fallback)", sc, po),
+          track_fallback_(FSMStateName::SKILL_TRACK_MIMIC, "TrackMimic(safe-fallback)", sc, po)
     {
         register_builtin_policies();
         imu_calib_.set_loco_provider([this]() -> FSMState* {
@@ -1049,14 +1470,12 @@ public:
     {
         handle_pause_command();
 
-        if (paused_ && !is_mimic_policy()) {
-            set_pause(false);
-        }
         if (paused_) {
             if (sc_.skill_cmd != FSMCommand::INVALID) {
                 set_pause(false);
             } else {
                 sc_.skill_cmd = FSMCommand::INVALID;
+                return;
             }
         }
 
@@ -1099,7 +1518,7 @@ private:
 
     PassiveMode         passive_;
     FixedPose           fixed_;
-    LocoModePlaceholder loco_;
+    LocoModeFallback    loco_;
     SkillCooldownPlaceholder cooldown_;
     JointZeroCheckMode      joint_zero_;
     ImuCalibMode            imu_calib_;
@@ -1108,8 +1527,8 @@ private:
     HoldPositionSkill       dance_;
     HoldPositionSkill       kick_;
     HoldPositionSkill       kungfu2_;
-    MimicFallbackMode       beyond_stub_;
-    MimicFallbackMode       track_stub_;
+    MimicFallbackMode       beyond_fallback_;
+    MimicFallbackMode       track_fallback_;
 
     std::map<FSMStateName, std::unique_ptr<FSMState>> extra_;
     std::map<FSMStateName, PolicyRecord> records_;
@@ -1145,17 +1564,17 @@ private:
             FSMStateName::FIXEDPOSE,
             &fixed_,
             false,
-            "[Hints] R1+A=LOCO, L3=PASSIVE");
+            "[Hints] R1+A=LOCO, F1=PASSIVE");
         register_builtin(
             FSMStateName::LOCOMODE,
             &loco_,
             false,
-            "[Hints] R1+X/R1+Y/L1+Y=skill, L3=PASSIVE");
+            "[Hints] R1+X/Y/B, L1+Y/B/X/A=skills, F1=PASSIVE");
         register_builtin(
             FSMStateName::SKILL_COOLDOWN,
             &cooldown_,
             false,
-            "[Hints] auto return to LOCO or L3=PASSIVE");
+            "[Hints] auto return to LOCO or F1=PASSIVE");
         register_builtin(FSMStateName::SKILL_CAST, &skill_cast_);
         register_builtin(FSMStateName::SKILL_KUNGFU, &kungfu_);
         register_builtin(FSMStateName::SKILL_DANCE, &dance_);
@@ -1163,32 +1582,31 @@ private:
         register_builtin(FSMStateName::SKILL_KUNGFU2, &kungfu2_);
         register_builtin(
             FSMStateName::SKILL_BEYOND_MIMIC,
-            &beyond_stub_,
+            &beyond_fallback_,
             true,
-            "[Hints] R1+A=LOCO, L3=PASSIVE, UP=PAUSE");
+            "[Hints] R1+A=LOCO, F1=PASSIVE, UP=PAUSE");
         register_builtin(
             FSMStateName::SKILL_TRACK_MIMIC,
-            &track_stub_,
+            &track_fallback_,
             true,
-            "[Hints] R1+A=LOCO, L3=PASSIVE, UP=PAUSE");
+            "[Hints] R1+A=LOCO, F1=PASSIVE, UP=PAUSE");
         register_builtin(
             FSMStateName::JOINT_ZERO_CHECK,
             &joint_zero_,
             false,
-            "[Hints] joint-zero check, R1+A=LOCO, L3=PASSIVE");
+            "[Hints] joint-zero check, R1+A=LOCO, F1=PASSIVE");
         register_builtin(
             FSMStateName::IMU_CALIB,
             &imu_calib_,
             false,
-            "[Hints] auto return to LOCO or L3=PASSIVE");
+            "[Hints] auto return to LOCO or F1=PASSIVE");
     }
 
     void handle_pause_command()
     {
         if (sc_.skill_cmd != FSMCommand::PAUSE) return;
         sc_.skill_cmd = FSMCommand::INVALID;
-        if (is_mimic_policy()) set_pause(!paused_);
-        else                   set_pause(false);
+        set_pause(!paused_);
     }
 
     void transition_if_needed(FSMStateName requested)
@@ -1263,13 +1681,15 @@ private:
 };
 
 // ============================================================
-// Controller — mirrors Python Controller class
+// Controller — native Controller class
 // ============================================================
 
 class Controller {
 public:
     explicit Controller(const Config& cfg)
         : config_(cfg),
+          virtual_remote_(cfg),
+          joystick_remote_(cfg),
           state_cmd_(cfg.num_joints),
           policy_output_(cfg.num_joints),
           fsm_(state_cmd_, policy_output_, cfg.control_dt),
@@ -1298,9 +1718,13 @@ public:
     /** Send zero-torque commands until START is pressed. */
     void zero_torque_state()
     {
-        printf("[Controller] Zero-torque mode. Press START to continue...\n");
+        printf("[Controller] Zero-torque mode. Press START or R1+A to continue...\n");
         while (true) {
-            if (remote_.is_pressed(KEY_START)) break;
+            poll_remote_inputs();
+            if (remote_.is_pressed(KEY_START) ||
+                (remote_.is_pressed(KEY_R1) && remote_.is_pressed(KEY_A))) {
+                break;
+            }
             create_zero_cmd();
             send_cmd();
             sleep_sec(config_.control_dt);
@@ -1311,6 +1735,7 @@ public:
     void run()
     {
         double t0 = now_sec();
+        poll_remote_inputs();
 
         if (config_.sync_on_lowstate) {
             uint32_t tick_now = 0;
@@ -1328,7 +1753,7 @@ public:
         // ── button → FSM command mapping ─────────────────────────────
         if (remote_.is_pressed(KEY_F1))
             state_cmd_.skill_cmd = FSMCommand::PASSIVE;
-        if (remote_.is_released(KEY_UP))
+        if (remote_.consume_released(KEY_UP))
             state_cmd_.skill_cmd = FSMCommand::PAUSE;
         if (cmd_gate_.trigger("POS_RESET", remote_.is_pressed(KEY_START)))
             state_cmd_.skill_cmd = FSMCommand::POS_RESET;
@@ -1341,9 +1766,15 @@ public:
         if (cmd_gate_.trigger("SKILL_2",
                 remote_.is_pressed(KEY_Y) && remote_.is_pressed(KEY_R1)))
             state_cmd_.skill_cmd = FSMCommand::SKILL_2;
+        if (cmd_gate_.trigger("SKILL_3",
+                remote_.is_pressed(KEY_B) && remote_.is_pressed(KEY_R1)))
+            state_cmd_.skill_cmd = FSMCommand::SKILL_3;
         if (cmd_gate_.trigger("SKILL_4",
                 remote_.is_pressed(KEY_Y) && remote_.is_pressed(KEY_L1)))
             state_cmd_.skill_cmd = FSMCommand::SKILL_4;
+        if (cmd_gate_.trigger("SKILL_5",
+                remote_.is_pressed(KEY_B) && remote_.is_pressed(KEY_L1)))
+            state_cmd_.skill_cmd = FSMCommand::SKILL_5;
         if (cmd_gate_.trigger("SKILL_6",
                 remote_.is_pressed(KEY_X) && remote_.is_pressed(KEY_L1)))
             state_cmd_.skill_cmd = FSMCommand::SKILL_6;
@@ -1437,7 +1868,17 @@ private:
         std::unique_lock<std::shared_mutex> lk(state_mtx_);
         low_state_    = *state;
         mode_machine_ = state->mode_machine();
-        remote_.set(state->wireless_remote());
+        if (!virtual_remote_.enabled() && !joystick_remote_.enabled()) {
+            remote_.set(state->wireless_remote());
+        }
+    }
+
+    void poll_remote_inputs()
+    {
+        const bool virtual_active = virtual_remote_.poll(remote_);
+        if (!virtual_active) {
+            joystick_remote_.poll(remote_);
+        }
     }
 
     void wait_for_low_state()
@@ -1503,6 +1944,8 @@ private:
 
     // ── members ──────────────────────────────────────────────────
     Config         config_;
+    VirtualRemoteUdp virtual_remote_;
+    LinuxJoystickRemote joystick_remote_;
     RemoteController remote_;
     StateAndCmd    state_cmd_;
     PolicyOutput   policy_output_;
@@ -1577,6 +2020,32 @@ int main(int argc, char* argv[])
             config.safety_dry_run = true;
         } else if (arg == "--sync-lowstate") {
             config.sync_on_lowstate = true;
+        } else if (arg == "--virtual-remote") {
+            config.virtual_remote_enable = true;
+        } else if (arg == "--virtual-remote-bind" && i+1 < argc) {
+            config.virtual_remote_bind = argv[++i];
+        } else if (arg == "--virtual-remote-port" && i+1 < argc) {
+            config.virtual_remote_port = std::atoi(argv[++i]);
+        } else if (arg == "--virtual-remote-timeout-s" && i+1 < argc) {
+            config.virtual_remote_timeout_s = std::atof(argv[++i]);
+        } else if (arg == "--joystick") {
+            config.joystick_enable = true;
+        } else if (arg == "--joystick-dev" && i+1 < argc) {
+            config.joystick_dev = argv[++i];
+        } else if (arg == "--joystick-deadzone" && i+1 < argc) {
+            config.joystick_deadzone = std::atof(argv[++i]);
+        } else if (arg == "--joystick-axis-lx" && i+1 < argc) {
+            config.joystick_axis_lx = std::atoi(argv[++i]);
+        } else if (arg == "--joystick-axis-ly" && i+1 < argc) {
+            config.joystick_axis_ly = std::atoi(argv[++i]);
+        } else if (arg == "--joystick-axis-rx" && i+1 < argc) {
+            config.joystick_axis_rx = std::atoi(argv[++i]);
+        } else if (arg == "--joystick-axis-ry" && i+1 < argc) {
+            config.joystick_axis_ry = std::atoi(argv[++i]);
+        } else if (arg == "--joystick-axis-dpad-x" && i+1 < argc) {
+            config.joystick_axis_dpad_x = std::atoi(argv[++i]);
+        } else if (arg == "--joystick-axis-dpad-y" && i+1 < argc) {
+            config.joystick_axis_dpad_y = std::atoi(argv[++i]);
         } else if (arg == "--shadow") {
             shadow = true;              // skip physical start-up sequence
         } else if (i == 1 && arg[0] != '-') {
@@ -1600,6 +2069,27 @@ int main(int argc, char* argv[])
     printf("Shadow    : %s\n", shadow ? "yes (no zero_torque wait)" : "no");
     printf("SyncTick  : %s\n", config.sync_on_lowstate ? "yes" : "no");
     printf("WaitState : %s\n", config.wait_for_lowstate_on_init ? "yes" : "no (shadow prewarm)");
+    printf("VRemote   : %s", config.virtual_remote_enable ? "yes" : "no");
+    if (config.virtual_remote_enable) {
+        printf(" (%s:%d timeout=%.2fs)",
+               config.virtual_remote_bind.c_str(),
+               config.virtual_remote_port,
+               config.virtual_remote_timeout_s);
+    }
+    printf("\n");
+    printf("Joystick : %s", config.joystick_enable ? "yes" : "no");
+    if (config.joystick_enable) {
+        printf(" (%s deadzone=%.2f axes lx=%d ly=%d rx=%d ry=%d dpad=%d/%d)",
+               config.joystick_dev.c_str(),
+               config.joystick_deadzone,
+               config.joystick_axis_lx,
+               config.joystick_axis_ly,
+               config.joystick_axis_rx,
+               config.joystick_axis_ry,
+               config.joystick_axis_dpad_x,
+               config.joystick_axis_dpad_y);
+    }
+    printf("\n");
 #ifdef ENABLE_BEYOND_MIMIC
     printf("ONNX yaml : %s\n", yaml_path.empty() ? "(none)" : yaml_path.c_str());
     printf("Track yaml: %s\n", track_yaml_path.empty() ? "(none)" : track_yaml_path.c_str());
@@ -1770,7 +2260,7 @@ int main(int argc, char* argv[])
                    "(trigger from LOCO: FSMCommand::SKILL_7 / A+L1)\n");
         } catch (const std::exception& e) {
             printf("[Main][WARN] TrackMimic load failed: %s\n", e.what());
-            printf("             Continuing with fallback TrackMimic stub.\n");
+            printf("             Continuing with safe TrackMimic fallback.\n");
         }
     }
 #endif
