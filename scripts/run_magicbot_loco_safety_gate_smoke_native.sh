@@ -42,7 +42,7 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-for tool in python3 rg; do
+for tool in python3 grep; do
     if ! command -v "${tool}" >/dev/null 2>&1; then
         echo "[Smoke][ERROR] required tool not found: ${tool}" >&2
         exit 1
@@ -50,15 +50,15 @@ for tool in python3 rg; do
 done
 
 echo "[Smoke] Checking real runner writes through adapter boundary"
-if rg -n 'publish_(sdk24_command|damping)\(' "${RUNNER_SOURCE}"; then
+if grep -En 'publish_(sdk24_command|damping)\(' "${RUNNER_SOURCE}"; then
     echo "[Smoke][ERROR] magicbot_z1_loco_onnx.cpp must not publish robot commands directly; use MagicbotRealAdapter" >&2
     exit 1
 fi
-if rg -n 'OnnxLocoPolicy[[:space:]]+[A-Za-z_]|\.infer\(' "${RUNNER_SOURCE}"; then
+if grep -En 'OnnxLocoPolicy[[:space:]]+[A-Za-z_]|\.infer\(' "${RUNNER_SOURCE}"; then
     echo "[Smoke][ERROR] magicbot_z1_loco_onnx.cpp must run policy inference through ControllerCore" >&2
     exit 1
 fi
-if rg -n 'MotionSafety[[:space:]]+[A-Za-z_]|safety\.check' "${RUNNER_SOURCE}"; then
+if grep -En 'MotionSafety[[:space:]]+[A-Za-z_]|safety\.check' "${RUNNER_SOURCE}"; then
     echo "[Smoke][ERROR] magicbot_z1_loco_onnx.cpp must run motion safety through ControllerCore" >&2
     exit 1
 fi
@@ -165,7 +165,8 @@ def require_allow_gate(body, state_name, prefix, label):
     )
     skill_pattern = (
         rf"else if \({state_name}\.mode_request\.mode == ml::ControlMode::Skill\) \{{\s*"
-        rf"allowed = skill_request_allowed\(args, \"{re.escape(prefix)}\"\);"
+        rf"allowed = skill_request_allowed\(args, \"{re.escape(prefix)}\", "
+        rf"{state_name}\.mode_request\.external_policy_key\);"
     )
     allowed_pattern = (
         rf"if \(allowed\) \{{\s*"
@@ -303,7 +304,7 @@ trap cleanup EXIT
 
 assert_no_robot_path() {
     local log_path="$1"
-    if rg -q '\[MagicBot\]|\[ConnectCheck\]|\[ReadState\]|\[State\] Robot state ready|\[Stage\]|\[Final\]|MagicBot SDK initialize failed|SetMotionControlLevel|LowLevel controller initialize' "${log_path}"; then
+    if grep -Eq '\[MagicBot\]|\[ConnectCheck\]|\[ReadState\]|\[State\] Robot state ready|\[Stage\]|\[Final\]|MagicBot SDK initialize failed|SetMotionControlLevel|LowLevel controller initialize' "${log_path}"; then
         echo "[Smoke][ERROR] blocked command appears to have entered robot connection path" >&2
         sed -n '1,180p' "${log_path}" >&2
         exit 1
@@ -313,7 +314,7 @@ assert_no_robot_path() {
 echo "[Smoke] Checking explicit dry-run"
 "${RUNNER}" --dry-run >"${dry_log}" 2>&1
 for expected in 'Config:' 'ONNX input/output:' 'Raw target sample range:' 'Command target sample range:'; do
-    if ! rg -q "${expected}" "${dry_log}"; then
+    if ! grep -Fq "${expected}" "${dry_log}"; then
         echo "[Smoke][ERROR] dry-run output missing: ${expected}" >&2
         sed -n '1,180p' "${dry_log}" >&2
         exit 1
@@ -322,7 +323,7 @@ done
 
 echo "[Smoke] Checking default mode is dry-run"
 "${RUNNER}" >"${default_log}" 2>&1
-if ! rg -q 'ONNX input/output:' "${default_log}"; then
+if ! grep -Fq 'ONNX input/output:' "${default_log}"; then
     echo "[Smoke][ERROR] default invocation did not run dry-run" >&2
     sed -n '1,180p' "${default_log}" >&2
     exit 1
@@ -334,7 +335,7 @@ if "${RUNNER}" --run --duration 0.01 >"${blocked_log}" 2>&1; then
     sed -n '1,180p' "${blocked_log}" >&2
     exit 1
 fi
-if ! rg -q 'refusing ONNX loco without --allow-loco' "${blocked_log}"; then
+if ! grep -Fq 'refusing ONNX loco without --allow-loco' "${blocked_log}"; then
     echo "[Smoke][ERROR] --run failure did not report allow-loco gate" >&2
     sed -n '1,180p' "${blocked_log}" >&2
     exit 1
@@ -347,12 +348,12 @@ if "${RUNNER}" --run --pd-stand-only --duration 0.01 --local-ip 203.0.113.254 >"
     sed -n '1,180p' "${pd_stand_preflight_log}" >&2
     exit 1
 fi
-if rg -q 'refusing ONNX loco without --allow-loco' "${pd_stand_preflight_log}"; then
+if grep -Fq 'refusing ONNX loco without --allow-loco' "${pd_stand_preflight_log}"; then
     echo "[Smoke][ERROR] --pd-stand-only was incorrectly blocked by the allow-loco gate" >&2
     sed -n '1,180p' "${pd_stand_preflight_log}" >&2
     exit 1
 fi
-if ! rg -q 'local IP 203\.0\.113\.254 is not assigned to this machine' "${pd_stand_preflight_log}"; then
+if ! grep -Eq 'local IP 203\.0\.113\.254 is not assigned to this machine' "${pd_stand_preflight_log}"; then
     echo "[Smoke][ERROR] --pd-stand-only did not stop at local-IP preflight" >&2
     sed -n '1,180p' "${pd_stand_preflight_log}" >&2
     exit 1
@@ -365,7 +366,7 @@ if "${RUNNER}" --connect-check --read-state >"${exclusive_log}" 2>&1; then
     sed -n '1,180p' "${exclusive_log}" >&2
     exit 1
 fi
-if ! rg -q 'use only one of --dry-run, --connect-check, --read-state, --run, --input-check, --debug-entry-only' "${exclusive_log}"; then
+if ! grep -Fq 'use only one of --dry-run, --connect-check, --read-state, --run, --input-check, --debug-entry-only' "${exclusive_log}"; then
     echo "[Smoke][ERROR] exclusive-mode failure did not report mode gate" >&2
     sed -n '1,180p' "${exclusive_log}" >&2
     exit 1
@@ -378,7 +379,7 @@ if "${RUNNER}" --input-check >"${input_source_log}" 2>&1; then
     sed -n '1,180p' "${input_source_log}" >&2
     exit 1
 fi
-if ! rg -q -- '--input-check requires --keyboard-control, --gamepad-control or --udp-control' "${input_source_log}"; then
+if ! grep -Fq -- '--input-check requires --keyboard-control, --gamepad-control or --udp-control' "${input_source_log}"; then
     echo "[Smoke][ERROR] input-check failure did not report input-source gate" >&2
     sed -n '1,180p' "${input_source_log}" >&2
     exit 1
@@ -391,7 +392,7 @@ if "${RUNNER}" --run --allow-loco --keyboard-control --udp-control --duration 0.
     sed -n '1,180p' "${live_input_log}" >&2
     exit 1
 fi
-if ! rg -q -- 'use only one of --keyboard-control, --gamepad-control or --udp-control' "${live_input_log}"; then
+if ! grep -Fq -- 'use only one of --keyboard-control, --gamepad-control or --udp-control' "${live_input_log}"; then
     echo "[Smoke][ERROR] live-input failure did not report exclusivity gate" >&2
     sed -n '1,180p' "${live_input_log}" >&2
     exit 1
