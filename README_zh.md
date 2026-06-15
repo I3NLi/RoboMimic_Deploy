@@ -202,6 +202,30 @@ scripts/run_closed_loop_sweep_native.sh --axis vx --values "0 0.1 0.2 0.3 0.5 1"
 
 每个点会输出独立 JSON 到 `logs/closed_loop_sweep/`；任一速度点失败时脚本返回 `2`。
 
+无硬件 shared-runtime 烟测套件：
+
+```bash
+scripts/run_shared_runtime_smoke_suite_native.sh --core-only
+scripts/run_shared_runtime_smoke_suite_native.sh --sim-only
+scripts/run_shared_runtime_smoke_suite_native.sh --viewer-only
+scripts/run_shared_runtime_smoke_suite_native.sh --python-only
+scripts/run_shared_runtime_smoke_suite_native.sh --real-only
+```
+
+完整套件会运行上面全部分组：
+
+```bash
+scripts/run_shared_runtime_smoke_suite_native.sh
+```
+
+`--core-only` 检查文本控制、模式切换、ControllerCore 输出模式、
+ControllerRuntime，以及不依赖后端的共享头文件。`--sim-only` 检查
+MuJoCo adapter 的 `JointTargetMode` 翻译，然后运行 pure-sim 闭环外力/impulse
+烟测。`--viewer-only` 检查 native viewer 的 HTTP/UDP/手柄、视频流、
+DANCE/SKILL、安全墙和扰动 API。`--python-only` 通过 Python-facing launcher
+运行同一组 viewer 烟测。`--real-only` 不连接机器人；它检查 MagicBot
+real adapter target-mode 翻译，以及 dry/input/safety/allow-gate 行为。
+
 手动构建：
 
 ```bash

@@ -212,6 +212,31 @@ scripts/run_closed_loop_sweep_native.sh --axis vx --values "0 0.1 0.2 0.3 0.5 1"
 
 Each point writes a JSON summary under `logs/closed_loop_sweep/`; the script exits `2` if any point fails.
 
+No-hardware shared-runtime smoke suite:
+
+```bash
+scripts/run_shared_runtime_smoke_suite_native.sh --core-only
+scripts/run_shared_runtime_smoke_suite_native.sh --sim-only
+scripts/run_shared_runtime_smoke_suite_native.sh --viewer-only
+scripts/run_shared_runtime_smoke_suite_native.sh --python-only
+scripts/run_shared_runtime_smoke_suite_native.sh --real-only
+```
+
+The full suite runs all of the above:
+
+```bash
+scripts/run_shared_runtime_smoke_suite_native.sh
+```
+
+`--core-only` checks text controls, mode transitions, ControllerCore output
+modes, ControllerRuntime, and backend-free shared headers. `--sim-only` checks
+MuJoCo adapter `JointTargetMode` translation, then runs the pure-sim closed-loop
+force/impulse smoke. `--viewer-only` checks native viewer HTTP/UDP/gamepad,
+video stream, DANCE/SKILL, safety wall, and perturb APIs. `--python-only` runs
+the same viewer smokes through the Python-facing launcher. `--real-only` does
+not connect to the robot; it checks MagicBot real-adapter target-mode
+translation plus dry/input/safety/allow-gate behavior.
+
 Manual build:
 
 ```bash
