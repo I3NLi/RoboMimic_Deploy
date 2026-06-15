@@ -267,7 +267,7 @@ scripts/run_magicbot_loco_native.sh \
   --local-ip 192.168.54.119
 ```
 
-Keyboard map: `L` toggles `STAND/LOCO`, `R` re-interpolates to stand and resets the policy, `W/S` adjusts `vx`, `Q/E` adjusts `vy`, `A/D` adjusts `wz`, `X` zeros command, `Space/P` pause-zeros, and `Esc` exits the run loop.
+Keyboard map: `L` toggles `STAND/LOCO`, `R` resets the current policy/target without changing mode, `W/S` adjusts `vx`, `Q/E` adjusts `vy`, `A/D` adjusts `wz`, `X` zeros command, `Space/P` pause-zeros, and `Esc` exits the run loop.
 
 Gamepad control:
 
@@ -283,13 +283,11 @@ scripts/run_magicbot_loco_native.sh \
   --allow-loco \
   --gamepad-control \
   --gamepad-device /dev/input/js0 \
-  --gamepad-deadman-button 4 \
-  --gamepad-stop-button 1 \
   --duration 5 \
   --local-ip 192.168.54.119
 ```
 
-Default gamepad map: left stick Y is `vx`, left stick X is `vy`, right stick X is `wz`. Button 0 enters `LOCO`, button 3 enters `STAND`, button 6 re-interpolates to stand and resets the policy, button 2 pause-zeros, and button 7 toggles pause-zero. Button 4 must be held for nonzero command by default; button 1 exits the run loop. Axis and button indices are CLI-configurable.
+Default Xbox-style gamepad map: left stick Y is `vx`, left stick X is `vy`, right stick X is `wz`. Button 0/A enters `LOCO`, button 1/B enters `PASSIVE`, button 2/X pause-zeros, button 3/Y enters `STAND`, button 4/LB requests BeyondMimic, button 5/RB requests TrackMimic, button 6/Back resets the current policy/target without changing mode, button 7/Start toggles pause-zero, and button 8/L3 exits the run loop. Deadman is disabled by default; set `--gamepad-deadman-button N` if you want one. Axis and button indices are CLI-configurable.
 
 ## Runtime Notes
 

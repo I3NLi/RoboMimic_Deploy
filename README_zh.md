@@ -255,7 +255,7 @@ scripts/run_magicbot_loco_native.sh \
   --local-ip 192.168.54.119
 ```
 
-键盘映射：`L` 切换 `STAND/LOCO`，`R` 重新插值回站姿并 reset policy，`W/S` 调 `vx`，`Q/E` 调 `vy`，`A/D` 调 `wz`，`X` 清零，`Space/P` 暂停清零，`Esc` 退出 run loop。
+键盘映射：`L` 切换 `STAND/LOCO`，`R` 只重置当前 policy/target 且不切换模式，`W/S` 调 `vx`，`Q/E` 调 `vy`，`A/D` 调 `wz`，`X` 清零，`Space/P` 暂停清零，`Esc` 退出 run loop。
 
 手柄控制：
 
@@ -271,13 +271,11 @@ scripts/run_magicbot_loco_native.sh \
   --allow-loco \
   --gamepad-control \
   --gamepad-device /dev/input/js0 \
-  --gamepad-deadman-button 4 \
-  --gamepad-stop-button 1 \
   --duration 5 \
   --local-ip 192.168.54.119
 ```
 
-默认手柄映射：左摇杆 Y 为 `vx`，左摇杆 X 为 `vy`，右摇杆 X 为 `wz`；button 0 进 `LOCO`，button 3 回 `STAND`，button 6 重新插值回站姿并 reset policy，button 2 暂停清零，button 7 切换暂停清零。默认必须按住 button 4 才会输出非零命令，button 1 退出 run loop。轴和按键编号都可以用命令行参数改。
+默认 Xbox 风格手柄映射：左摇杆 Y 为 `vx`，左摇杆 X 为 `vy`，右摇杆 X 为 `wz`；button 0/A 进 `LOCO`，button 1/B 进 `PASSIVE`，button 2/X 暂停清零，button 3/Y 进 `STAND`，button 4/LB 请求 BeyondMimic，button 5/RB 请求 TrackMimic，button 6/Back 只重置当前 policy/target 且不切换模式，button 7/Start 切换暂停清零，button 8/L3 退出 run loop。默认不需要 deadman；如果需要可设置 `--gamepad-deadman-button N`。轴和按键编号都可以用命令行参数改。
 
 完整 FSM 虚拟遥控器：
 

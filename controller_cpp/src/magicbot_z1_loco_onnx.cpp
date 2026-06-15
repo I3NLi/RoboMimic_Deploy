@@ -95,15 +95,16 @@ struct Args {
     float gamepad_axis_vx_sign{-1.0f};
     float gamepad_axis_vy_sign{-1.0f};
     float gamepad_axis_wz_sign{-1.0f};
-    int gamepad_deadman_button{4};
-    int gamepad_stop_button{1};
+    int gamepad_deadman_button{-1};
+    int gamepad_stop_button{8};
     int gamepad_loco_button{0};
+    int gamepad_passive_button{1};
     int gamepad_stand_button{3};
     int gamepad_zero_button{2};
     int gamepad_pause_button{7};
     int gamepad_reset_button{6};
-    int gamepad_dance_button{-1};
-    int gamepad_skill_button{-1};
+    int gamepad_dance_button{4};
+    int gamepad_skill_button{5};
     double state_timeout{10.0};
     std::string prepare_gait{"recovery_stand"};
     double stand_time{2.0};
@@ -177,15 +178,16 @@ void print_usage(const char* argv0)
         << "  --gamepad-axis-vx-sign S         Axis sign for vx, default -1\n"
         << "  --gamepad-axis-vy-sign S         Axis sign for vy, default -1\n"
         << "  --gamepad-axis-wz-sign S         Axis sign for wz, default -1\n"
-        << "  --gamepad-deadman-button N       Button that must be held for nonzero command, default 4\n"
-        << "  --gamepad-stop-button N          Button that stops run loop, default 1\n"
+        << "  --gamepad-deadman-button N       Button that must be held for nonzero command, default disabled (-1)\n"
+        << "  --gamepad-stop-button N          Button that stops run loop, default 8 (L3)\n"
         << "  --gamepad-loco-button N          Button that enters LOCO, default 0\n"
+        << "  --gamepad-passive-button N       Button that enters PASSIVE, default 1\n"
         << "  --gamepad-stand-button N         Button that enters STAND, default 3\n"
         << "  --gamepad-zero-button N          Button that pause-zeros command, default 2\n"
         << "  --gamepad-pause-button N         Button that toggles pause-zero, default 7\n"
-        << "  --gamepad-reset-button N         Button that re-interpolates to STAND, default 6\n"
-        << "  --gamepad-dance-button N         Optional button that enters DANCE/BeyondMimic, default disabled\n"
-        << "  --gamepad-skill-button N         Optional button that enters SKILL/TrackMimic trajectory, default disabled\n"
+        << "  --gamepad-reset-button N         Button that resets current policy/target, default 6\n"
+        << "  --gamepad-dance-button N         Button that enters DANCE/BeyondMimic, default 4\n"
+        << "  --gamepad-skill-button N         Button that enters SKILL/TrackMimic trajectory, default 5\n"
         << "\n"
         << "Debug entry:\n"
         << "  --debug-entry                    TTS, wait, then LowLevel passive damping before run\n"
@@ -321,6 +323,8 @@ Args parse_args(int argc, char** argv)
             args.gamepad_stop_button = std::stoi(take_value(i, argc, argv));
         } else if (a == "--gamepad-loco-button") {
             args.gamepad_loco_button = std::stoi(take_value(i, argc, argv));
+        } else if (a == "--gamepad-passive-button") {
+            args.gamepad_passive_button = std::stoi(take_value(i, argc, argv));
         } else if (a == "--gamepad-stand-button") {
             args.gamepad_stand_button = std::stoi(take_value(i, argc, argv));
         } else if (a == "--gamepad-zero-button") {
@@ -799,6 +803,9 @@ private:
                 if (args_.gamepad_loco_button >= 0 && event.number == args_.gamepad_loco_button) {
                     set_live_input_action_request(out, ml::TextControlAction::Loco, nullptr, &paused_);
                 }
+                if (args_.gamepad_passive_button >= 0 && event.number == args_.gamepad_passive_button) {
+                    set_live_input_action_request(out, ml::TextControlAction::Passive, nullptr, &paused_);
+                }
                 if (args_.gamepad_stand_button >= 0 && event.number == args_.gamepad_stand_button) {
                     set_live_input_action_request(out, ml::TextControlAction::Stand, nullptr, &paused_);
                 }
@@ -969,6 +976,7 @@ public:
                       << args.gamepad_axis_wz << "] deadman_button=" << args.gamepad_deadman_button
                       << " stop_button=" << args.gamepad_stop_button
                       << " loco_button=" << args.gamepad_loco_button
+                      << " passive_button=" << args.gamepad_passive_button
                       << " stand_button=" << args.gamepad_stand_button
                       << " zero_button=" << args.gamepad_zero_button
                       << " pause_button=" << args.gamepad_pause_button

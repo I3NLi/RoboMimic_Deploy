@@ -68,7 +68,7 @@ Live input for the real-robot run loop is explicit:
 ../scripts/run_magicbot_loco_native.sh --run --allow-loco --gamepad-control --gamepad-device /dev/input/js0 --duration 5
 ```
 
-`--input-check` does not connect to the robot. With live input enabled, the run loop starts in `STAND`; `L` or gamepad button 0 enters `LOCO`. Keyboard uses `L`, `R`, `W/S`, `Q/E`, `A/D`, `X`, `Space/P`, and `Esc`. Gamepad defaults to left-stick Y/X for `vx/vy`, right-stick X for `wz`, button 0 as LOCO, button 3 as STAND, button 6 as re-stand/reset, button 4 as deadman, and button 1 as stop.
+`--input-check` does not connect to the robot. With live input enabled, the run loop starts in `STAND`; `L` or gamepad button 0/A enters `LOCO`. Keyboard uses `L`, `R`, `W/S`, `Q/E`, `A/D`, `X`, `Space/P`, and `Esc`. Gamepad defaults to left-stick Y/X for `vx/vy`, right-stick X for `wz`, button 0/A as LOCO, button 1/B as PASSIVE, button 2/X as pause-zero, button 3/Y as STAND, button 4/LB as BeyondMimic, button 5/RB as TrackMimic, button 6/Back as reset-without-mode-change, button 7/Start as pause toggle, and button 8/L3 as stop. Deadman is disabled by default.
 
 ## Native Simulation And Tools
 

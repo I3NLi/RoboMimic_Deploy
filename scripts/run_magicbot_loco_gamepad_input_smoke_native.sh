@@ -77,6 +77,7 @@ body = source[start:end]
 required = [
     "set_live_input_action_request",
     "TextControlAction::Loco",
+    "TextControlAction::Passive",
     "TextControlAction::Stand",
     "TextControlAction::Pause",
     "TextControlAction::ResetStand",
