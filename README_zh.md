@@ -219,7 +219,8 @@ scripts/run_shared_runtime_smoke_suite_native.sh
 ```
 
 `--core-only` 检查文本控制、模式切换、ControllerCore 输出模式、
-ControllerRuntime，以及不依赖后端的共享头文件。`--sim-only` 检查
+LOCO 退出到非策略模式、ControllerRuntime，以及不依赖后端的共享头文件。
+`--sim-only` 检查
 MuJoCo adapter 的 `JointTargetMode` 翻译，然后运行 pure-sim 闭环外力/impulse
 烟测。`--viewer-only` 检查 native viewer 的 HTTP/UDP/手柄、视频流、
 DANCE/SKILL、安全墙和扰动 API。`--python-only` 通过 Python-facing launcher

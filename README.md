@@ -229,7 +229,8 @@ scripts/run_shared_runtime_smoke_suite_native.sh
 ```
 
 `--core-only` checks text controls, mode transitions, ControllerCore output
-modes, ControllerRuntime, and backend-free shared headers. `--sim-only` checks
+modes, LOCO exits to non-policy modes, ControllerRuntime, and backend-free
+shared headers. `--sim-only` checks
 MuJoCo adapter `JointTargetMode` translation, then runs the pure-sim closed-loop
 force/impulse smoke. `--viewer-only` checks native viewer HTTP/UDP/gamepad,
 video stream, DANCE/SKILL, safety wall, and perturb APIs. `--python-only` runs

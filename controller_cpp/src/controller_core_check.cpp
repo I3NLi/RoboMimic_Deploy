@@ -257,6 +257,46 @@ void check_loco_policy_mode(const std::filesystem::path& config_path)
         "held loco target should hold last command target between policy ticks");
 }
 
+void check_loco_exits_to_non_policy_modes(const std::filesystem::path& config_path)
+{
+    ml::LocoConfig cfg = ml::load_loco_config(config_path);
+    ml::ControllerCoreOptions options;
+    options.safety.enabled = false;
+
+    auto require_exit = [&](ml::ControlMode exit_mode, ml::JointTargetMode target_mode, const char* label) {
+        ml::ControllerCore core(cfg, options);
+        const ml::JointArray loco_q = offset_target(cfg.default_motor(), 0.004f);
+        const auto loco = core.step(
+            make_snapshot(loco_q),
+            ml::Command{{0.3f, -0.2f, 0.15f}},
+            ml::mode_request_for_control_mode(ml::ControlMode::Loco),
+            cfg.policy_dt);
+        require(loco.telemetry.mode == ml::ControlMode::Loco, std::string(label) + " setup loco mode");
+        require(loco.telemetry.policy_evaluated, std::string(label) + " setup should evaluate loco");
+        require(loco.telemetry.policy_steps == 1, std::string(label) + " setup policy count");
+
+        const ml::JointArray exit_q = offset_target(cfg.default_motor(), -0.007f);
+        const auto exited = core.step(
+            make_snapshot(exit_q),
+            ml::Command{{-0.8f, 0.6f, -0.4f}},
+            ml::mode_request_for_control_mode(exit_mode),
+            cfg.policy_dt);
+
+        require(exited.telemetry.mode == exit_mode, std::string(label) + " mode telemetry");
+        require_target_mode(exited.target, target_mode, std::string(label) + " target mode");
+        require(!exited.telemetry.policy_evaluated, std::string(label) + " should stop policy evaluation");
+        require(exited.telemetry.policy_steps == 1, std::string(label) + " should not advance policy count");
+        require_joint_array_near(exited.target.q, exit_q, std::string(label) + " should seed target from state");
+        require_joint_array_near(
+            exited.telemetry.command_target,
+            exit_q,
+            std::string(label) + " telemetry target should seed from state");
+    };
+
+    require_exit(ml::ControlMode::Passive, ml::JointTargetMode::ZeroTorque, "LOCO to PASSIVE");
+    require_exit(ml::ControlMode::FinalDamping, ml::JointTargetMode::Damping, "LOCO to DAMPING");
+}
+
 void check_runtime_adapter_flow(const std::filesystem::path& config_path)
 {
     ml::LocoConfig cfg = ml::load_loco_config(config_path);
@@ -675,6 +715,7 @@ int main(int argc, char** argv)
     try {
         check_stand_passive_final_modes(argv[1]);
         check_loco_policy_mode(argv[1]);
+        check_loco_exits_to_non_policy_modes(argv[1]);
         check_runtime_adapter_flow(argv[1]);
         check_shared_target_rate_limit(argv[1]);
         check_shared_motion_safety(argv[1]);
