@@ -320,7 +320,8 @@ produce damping-only targets seeded from the current robot state. It also runs
 behavior, explicit held-target forwarding, shared motion-safety triggering, and
 STAND plus external-policy target-rate clamp checks inside `ControllerCore`. It
 registers fake DANCE/SKILL external policies to verify keyed policy selection,
-reset/step calls, entry command zeroing, and completion back to a damping mode.
+reset/step calls, entry command zeroing, external gains override scaling and
+holdover between lower-rate policy ticks, and completion back to a damping mode.
 Before building the check binary, the script statically scans the shared
 controller headers and fails if `ControllerCore`, `ControllerRuntime`,
 `ModeManager`, policy adapters, `RobotAdapter`, text-control helpers, or shared

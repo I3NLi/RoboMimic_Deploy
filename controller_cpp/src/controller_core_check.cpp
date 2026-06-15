@@ -84,6 +84,12 @@ public:
         out.target_motor = offset_target(input.snapshot.q, target_scale_);
         out.complete = complete_next_step;
         out.next_mode = next_mode;
+        if (override_gains) {
+            out.override_gains = true;
+            out.kp_motor = kp_motor;
+            out.kd_motor = kd_motor;
+            out.tau_limit_motor = tau_limit_motor;
+        }
         complete_next_step = false;
         return out;
     }
@@ -91,7 +97,11 @@ public:
     int resets{0};
     int steps{0};
     bool complete_next_step{false};
+    bool override_gains{false};
     ml::ControlMode next_mode{ml::ControlMode::Stand};
+    ml::JointArray kp_motor{};
+    ml::JointArray kd_motor{};
+    ml::JointArray tau_limit_motor{};
     ml::JointArray last_reset_q{};
     std::array<float, 3> last_velocity{0.0f, 0.0f, 0.0f};
 
@@ -409,6 +419,61 @@ void check_external_policy_flow(const std::filesystem::path& config_path)
         require(out.telemetry.policy_evaluated, "skill should evaluate external policy");
         require(skill.resets == 1, "skill policy should reset on entry");
         require(skill.steps == 1, "skill policy should step on entry");
+    }
+
+    {
+        ml::ControllerCoreOptions scaled_options = options;
+        scaled_options.kp_scale = 1.5f;
+        scaled_options.kd_scale = 0.5f;
+        ml::ControllerCore core(cfg, scaled_options);
+        FakeExternalPolicy skill(ml::ControlMode::Skill, "GainsSkill");
+        skill.override_gains = true;
+        for (int i = 0; i < ml::kNumJoints; ++i) {
+            skill.kp_motor[static_cast<size_t>(i)] = 2.0f + 0.01f * static_cast<float>(i);
+            skill.kd_motor[static_cast<size_t>(i)] = 0.4f + 0.005f * static_cast<float>(i);
+            skill.tau_limit_motor[static_cast<size_t>(i)] = 8.0f + 0.1f * static_cast<float>(i);
+        }
+        core.register_external_policy("GainsSkill", skill, true);
+
+        const auto entered = core.step(
+            make_snapshot(offset_target(cfg.default_motor(), 0.002f)),
+            ml::Command{},
+            ml::mode_request_for_control_mode(ml::ControlMode::Skill, "GainsSkill"),
+            cfg.policy_dt);
+        require(entered.telemetry.policy_evaluated, "gains skill should evaluate on entry");
+        require(skill.steps == 1, "gains skill should step once on entry");
+        for (int i = 0; i < ml::kNumJoints; ++i) {
+            const size_t index = static_cast<size_t>(i);
+            require(
+                near(entered.target.gains.kp[index], skill.kp_motor[index] * scaled_options.kp_scale),
+                "external gains should apply kp scale");
+            require(
+                near(entered.target.gains.kd[index], skill.kd_motor[index] * scaled_options.kd_scale),
+                "external gains should apply kd scale");
+            require(
+                near(entered.target.gains.tau_limit[index], skill.tau_limit_motor[index]),
+                "external gains should apply tau limit override");
+        }
+
+        const auto held = core.step(
+            make_snapshot(offset_target(cfg.default_motor(), 0.002f)),
+            ml::Command{},
+            ml::ModeRequest::none(),
+            cfg.policy_dt * 0.25f);
+        require(!held.telemetry.policy_evaluated, "external gains hold tick should not evaluate policy");
+        require(skill.steps == 1, "external gains hold tick should not step policy");
+        for (int i = 0; i < ml::kNumJoints; ++i) {
+            const size_t index = static_cast<size_t>(i);
+            require(
+                near(held.target.gains.kp[index], entered.target.gains.kp[index]),
+                "external gains kp should hold between policy ticks");
+            require(
+                near(held.target.gains.kd[index], entered.target.gains.kd[index]),
+                "external gains kd should hold between policy ticks");
+            require(
+                near(held.target.gains.tau_limit[index], entered.target.gains.tau_limit[index]),
+                "external gains tau limit should hold between policy ticks");
+        }
     }
 
     {
