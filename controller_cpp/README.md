@@ -98,7 +98,9 @@ The same target can publish the configured head-camera stream:
 ../scripts/run_mujoco_loco_viewer_native.sh --camera-stream --camera-port 18080
 ```
 
-It serves `/health`, `/frame.jpg`, `/frame.png`, and `/stream.mjpg`.
+It serves `/health`, `/status`, `/frame.jpg`, `/frame.png`, `/stream.mjpg`,
+`POST /control`, `POST /reset`, and `POST /viewer-event`. `/control` accepts
+mode/velocity/pause fields plus `safety=on|off|toggle`.
 
 If ROS2 Humble is installed, the same viewer can publish RGB/RGBA image topics:
 

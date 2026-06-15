@@ -109,9 +109,11 @@ Endpoints:
 
 ```text
 /health
+/status         JSON: viewer, adapter, command, mode, and safety telemetry
 /frame.jpg
 /frame.png
 /stream.mjpg
+/control        POST: mode/vx/vy/wz/pause plus safety=on|off|toggle
 /reset          POST: request a simulation reset
 /viewer-event   POST: forward remote pointer drag events for perturb/camera control
 ```
@@ -287,7 +289,7 @@ scripts/run_magicbot_loco_native.sh \
   --local-ip 192.168.54.119
 ```
 
-Default Xbox-style gamepad map: left stick Y is `vx`, left stick X is `vy`, right stick X is `wz`. Button 0/A enters `LOCO`, button 1/B enters `PASSIVE`, button 2/X pause-zeros, button 3/Y enters `STAND`, button 4/LB requests BeyondMimic, button 5/RB requests TrackMimic, button 6/Back resets the current policy/target without changing mode, button 7/Start toggles pause-zero, and button 8/L3 exits the run loop. Deadman is disabled by default; set `--gamepad-deadman-button N` if you want one. Axis and button indices are CLI-configurable.
+Default Xbox-style gamepad map: left stick Y is `vx`, left stick X is `vy`, right stick X is `wz`. Button 0/A enters `LOCO`, button 1/B enters zero-torque `PASSIVE`, button 2/X pause-zeros, button 3/Y enters `STAND`, button 4/LB requests BeyondMimic, button 5/RB requests TrackMimic, button 6/Back resets the current policy/target without changing mode, button 7/Start toggles pause-zero, button 8/L3 exits the run loop, and button 9/R3 toggles the runtime motion-safety wall. Deadman is disabled by default; set `--gamepad-deadman-button N` if you want one. Axis and button indices are CLI-configurable.
 
 ## Runtime Notes
 
@@ -296,6 +298,7 @@ Default Xbox-style gamepad map: left stick Y is `vx`, left stick X is `vy`, righ
 - `--pd-stand-only` runs default-pose standing without ONNX loco.
 - `--duration <= 0` holds the selected mode until interrupted.
 - `--keyboard-control` and `--gamepad-control` are mutually exclusive; both drive `STAND/LOCO/reset/zero/stop` and normalized velocity commands.
+- `PASSIVE` publishes zero torque, while `FINAL_DAMPING`/`damping` publishes light damping. The runtime safety wall can be controlled with text UDP `safety=on|off|toggle`, viewer HTTP `/control`, or gamepad R3.
 - On exit or safety trip, the runner publishes a final damping command.
 - The policy runs at the configured `policy_dt`; the low-level command loop targets 500 Hz.
 

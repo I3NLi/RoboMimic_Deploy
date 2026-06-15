@@ -56,7 +56,7 @@ inline const char* control_mode_name(ControlMode mode)
     case ControlMode::Skill:
         return "SKILL";
     case ControlMode::FinalDamping:
-        return "FINAL_DAMPING";
+        return "DAMPING";
     }
     return "UNKNOWN";
 }

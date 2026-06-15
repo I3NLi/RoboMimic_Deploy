@@ -210,6 +210,8 @@ struct ViewerControlCommand {
     std::array<float, 3> velocity{0.0f, 0.0f, 0.0f};
     bool has_pause{false};
     bool paused{false};
+    bool has_safety{false};
+    magicbot_loco::TextControlSafetyCommand safety{magicbot_loco::TextControlSafetyCommand::None};
 };
 
 struct CameraStreamState {
@@ -224,6 +226,7 @@ struct CameraStreamState {
     std::string adapter_backend;
     double adapter_state_age_ms{-1.0};
     bool adapter_command_published{false};
+    bool safety_enabled{false};
     std::array<float, 3> command{0.0f, 0.0f, 0.0f};
     double timestamp{0.0};
     double sim_time_s{0.0};
@@ -324,6 +327,7 @@ public:
         std::string mode,
         std::string external_policy,
         const magicbot_loco::AdapterTelemetry& adapter,
+        bool safety_enabled,
         bool paused,
         const std::array<float, 3>& command,
         int sim_steps,
@@ -340,6 +344,7 @@ public:
         state_->adapter_backend = adapter.backend;
         state_->adapter_state_age_ms = adapter.state_age_ms;
         state_->adapter_command_published = adapter.command_published;
+        state_->safety_enabled = safety_enabled;
         state_->paused = paused;
         state_->command = command;
         state_->sim_steps = sim_steps;
@@ -574,6 +579,21 @@ private:
             command.has_pause = true;
             any = true;
         }
+        const std::string raw_safety = lower_ascii(query_value(query, "safety"));
+        const std::string raw_safety_wall = lower_ascii(query_value(query, "safety_wall"));
+        const std::string raw_motion_safety = lower_ascii(query_value(query, "motion_safety"));
+        const std::string safety_value = !raw_safety.empty()
+            ? raw_safety
+            : (!raw_safety_wall.empty() ? raw_safety_wall : raw_motion_safety);
+        if (!safety_value.empty()) {
+            magicbot_loco::TextControlSafetyCommand safety{};
+            if (!magicbot_loco::text_control_safety_from_word(safety_value, safety)) {
+                throw std::runtime_error("invalid safety control field");
+            }
+            command.has_safety = true;
+            command.safety = safety;
+            any = true;
+        }
         if (!any) {
             throw std::runtime_error("missing control fields");
         }
@@ -624,6 +644,7 @@ private:
                  << "\"adapter_state_age_ms\":" << state->adapter_state_age_ms << ","
                  << "\"adapter_command_published\":"
                  << (state->adapter_command_published ? "true" : "false") << ","
+                 << "\"safety_enabled\":" << (state->safety_enabled ? "true" : "false") << ","
                  << "\"paused\":" << (state->paused ? "true" : "false") << ","
                  << "\"cmd\":[" << state->command[0] << "," << state->command[1] << "," << state->command[2] << "],"
                  << "\"sim_time_s\":" << state->sim_time_s << ","
@@ -1455,6 +1476,7 @@ std::string viewer_summary_json(
     magicbot_loco::ControlMode current_core_mode,
     const std::string& external_policy,
     const magicbot_loco::AdapterTelemetry& adapter,
+    bool safety_enabled,
     bool paused,
     double wall_s,
     int push_body_id)
@@ -1467,6 +1489,7 @@ std::string viewer_summary_json(
         << "\"adapter_backend\":\"" << json_escape(adapter.backend) << "\","
         << "\"adapter_state_age_ms\":" << adapter.state_age_ms << ","
         << "\"adapter_command_published\":" << (adapter.command_published ? "true" : "false") << ","
+        << "\"safety_enabled\":" << (safety_enabled ? "true" : "false") << ","
         << "\"paused\":" << (paused ? "true" : "false") << ","
         << "\"wall_s\":" << wall_s << ","
         << "\"sim_time_s\":" << data->time << ","
@@ -1891,6 +1914,24 @@ private:
     int fd_{-1};
 };
 
+bool apply_core_safety_request(
+    magicbot_loco::ControllerCore& core,
+    magicbot_loco::TextControlSafetyCommand request)
+{
+    if (request == magicbot_loco::TextControlSafetyCommand::None) return false;
+    bool enabled = core.safety_enabled();
+    if (request == magicbot_loco::TextControlSafetyCommand::Enable) {
+        enabled = true;
+    } else if (request == magicbot_loco::TextControlSafetyCommand::Disable) {
+        enabled = false;
+    } else if (request == magicbot_loco::TextControlSafetyCommand::Toggle) {
+        enabled = !enabled;
+    }
+    core.set_safety_enabled(enabled);
+    std::printf("[Viewer] motion safety %s\n", enabled ? "ON" : "OFF");
+    return true;
+}
+
 class ViewerUdpCommandInput {
 public:
     explicit ViewerUdpCommandInput(
@@ -1931,6 +1972,7 @@ public:
     }
 
     bool poll(
+        magicbot_loco::ControllerCore& core,
         std::array<float, 3>& cmd,
         magicbot_loco::ControlMode& desired_mode,
         std::string& desired_external_policy_key,
@@ -1954,8 +1996,10 @@ public:
                 const bool old_paused = paused;
                 const bool old_running = running;
                 const bool old_reset_requested = reset_requested;
+                const bool old_safety_enabled = core.safety_enabled();
                 handle_message(
                     std::string(buffer, static_cast<size_t>(n)),
+                    core,
                     cmd,
                     desired_mode,
                     desired_external_policy_key,
@@ -1968,7 +2012,8 @@ public:
                           old_desired_mode != desired_mode ||
                           old_desired_external_policy_key != desired_external_policy_key ||
                           old_paused != paused ||
-                          old_running != running || old_reset_requested != reset_requested;
+                          old_running != running || old_reset_requested != reset_requested ||
+                          old_safety_enabled != core.safety_enabled();
                 continue;
             }
             if (n < 0 && errno != EAGAIN && errno != EWOULDBLOCK) {
@@ -1989,6 +2034,7 @@ public:
 private:
     void handle_message(
         std::string message,
+        magicbot_loco::ControllerCore& core,
         std::array<float, 3>& cmd,
         magicbot_loco::ControlMode& desired_mode,
         std::string& desired_external_policy_key,
@@ -2002,7 +2048,7 @@ private:
                 if (op.axis >= 0 && op.axis < 3) {
                     cmd[static_cast<size_t>(op.axis)] = op.value;
                 }
-            } else {
+            } else if (op.type == magicbot_loco::TextControlOperation::Type::Action) {
                 apply_viewer_text_action(
                     op.action,
                     cmd,
@@ -2015,6 +2061,8 @@ private:
                     reset_requested,
                     op.external_policy_key,
                     op.action == magicbot_loco::TextControlAction::ResetStand);
+            } else if (op.type == magicbot_loco::TextControlOperation::Type::Safety) {
+                apply_core_safety_request(core, op.safety);
             }
         }
     }
@@ -2043,6 +2091,7 @@ void print_cmd(
 
 void apply_viewer_control_command(
     const ViewerControlCommand& control,
+    magicbot_loco::ControllerCore& core,
     std::array<float, 3>& cmd,
     magicbot_loco::ControlMode& desired_mode,
     std::string& desired_external_policy_key,
@@ -2052,6 +2101,9 @@ void apply_viewer_control_command(
     bool& running,
     bool& reset_requested)
 {
+    if (control.has_safety) {
+        apply_core_safety_request(core, control.safety);
+    }
     if (control.has_vx) cmd[0] = clamp_cmd(control.velocity[0]);
     if (control.has_vy) cmd[1] = clamp_cmd(control.velocity[1]);
     if (control.has_wz) cmd[2] = clamp_cmd(control.velocity[2]);
@@ -2887,6 +2939,7 @@ int main(int argc, char** argv)
                     for (const ViewerControlCommand& control : control_commands) {
                         apply_viewer_control_command(
                             control,
+                            core,
                             cmd,
                             desired_mode,
                             desired_external_policy_key,
@@ -2901,6 +2954,7 @@ int main(int argc, char** argv)
             }
             if (udp_input &&
                 udp_input->poll(
+                    core,
                     cmd,
                     desired_mode,
                     desired_external_policy_key,
@@ -3015,6 +3069,7 @@ int main(int argc, char** argv)
                     magicbot_loco::control_mode_name(current_core_mode),
                     current_external_policy,
                     current_adapter_telemetry,
+                    core.safety_enabled(),
                     paused,
                     cmd,
                     sim_step,
@@ -3129,6 +3184,7 @@ int main(int argc, char** argv)
                 current_core_mode,
                 current_external_policy,
                 current_adapter_telemetry,
+                core.safety_enabled(),
                 paused,
                 wall_s,
                 push_body_id);

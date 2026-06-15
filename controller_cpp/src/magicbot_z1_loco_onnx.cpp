@@ -105,6 +105,7 @@ struct Args {
     int gamepad_reset_button{6};
     int gamepad_dance_button{4};
     int gamepad_skill_button{5};
+    int gamepad_safety_button{9};
     double state_timeout{10.0};
     std::string prepare_gait{"recovery_stand"};
     double stand_time{2.0};
@@ -188,6 +189,7 @@ void print_usage(const char* argv0)
         << "  --gamepad-reset-button N         Button that resets current policy/target, default 6\n"
         << "  --gamepad-dance-button N         Button that enters DANCE/BeyondMimic, default 4\n"
         << "  --gamepad-skill-button N         Button that enters SKILL/TrackMimic trajectory, default 5\n"
+        << "  --gamepad-safety-button N        Button that toggles motion safety, default 9 (R3)\n"
         << "\n"
         << "Debug entry:\n"
         << "  --debug-entry                    TTS, wait, then LowLevel passive damping before run\n"
@@ -337,6 +339,8 @@ Args parse_args(int argc, char** argv)
             args.gamepad_dance_button = std::stoi(take_value(i, argc, argv));
         } else if (a == "--gamepad-skill-button") {
             args.gamepad_skill_button = std::stoi(take_value(i, argc, argv));
+        } else if (a == "--gamepad-safety-button") {
+            args.gamepad_safety_button = std::stoi(take_value(i, argc, argv));
         } else if (a == "--state-timeout") {
             args.state_timeout = std::stod(take_value(i, argc, argv));
         } else if (a == "--prepare-gait") {
@@ -468,6 +472,7 @@ float apply_axis_deadzone(float value, float deadzone)
 struct LiveInputState {
     std::array<float, 3> command{0.0f, 0.0f, 0.0f};
     ml::ModeRequest mode_request{ml::ModeRequest::none()};
+    ml::TextControlSafetyCommand safety_request{ml::TextControlSafetyCommand::None};
     bool stop_requested{false};
     bool toggle_loco_requested{false};
     bool reset_stand_requested{false};
@@ -527,6 +532,22 @@ void set_live_input_action_request(
 bool live_input_requested_mode(const LiveInputState& input, ml::ControlMode mode)
 {
     return input.mode_request.requested && input.mode_request.mode == mode;
+}
+
+bool apply_safety_request(ml::ControllerCore& core, ml::TextControlSafetyCommand request, const char* prefix)
+{
+    if (request == ml::TextControlSafetyCommand::None) return false;
+    bool enabled = core.safety_enabled();
+    if (request == ml::TextControlSafetyCommand::Enable) {
+        enabled = true;
+    } else if (request == ml::TextControlSafetyCommand::Disable) {
+        enabled = false;
+    } else if (request == ml::TextControlSafetyCommand::Toggle) {
+        enabled = !enabled;
+    }
+    core.set_safety_enabled(enabled);
+    std::cout << prefix << " Motion safety -> " << (enabled ? "ON" : "OFF") << std::endl;
+    return true;
 }
 
 bool dance_request_allowed(const Args& args, const char* prefix)
@@ -828,6 +849,9 @@ private:
                 if (args_.gamepad_skill_button >= 0 && event.number == args_.gamepad_skill_button) {
                     set_live_input_action_request(out, ml::TextControlAction::Skill, nullptr, &paused_);
                 }
+                if (args_.gamepad_safety_button >= 0 && event.number == args_.gamepad_safety_button) {
+                    out.safety_request = ml::TextControlSafetyCommand::Toggle;
+                }
             }
         }
     }
@@ -928,8 +952,10 @@ private:
                 if (op.axis >= 0 && op.axis < 3) {
                     cmd[static_cast<size_t>(op.axis)] = op.value;
                 }
-            } else {
+            } else if (op.type == ml::TextControlOperation::Type::Action) {
                 handle_action(op.action, op.external_policy_key, out, cmd);
+            } else if (op.type == ml::TextControlOperation::Type::Safety) {
+                out.safety_request = op.safety;
             }
         }
 
@@ -982,7 +1008,8 @@ public:
                       << " pause_button=" << args.gamepad_pause_button
                       << " reset_button=" << args.gamepad_reset_button
                       << " dance_button=" << args.gamepad_dance_button
-                      << " skill_button=" << args.gamepad_skill_button << std::endl;
+                      << " skill_button=" << args.gamepad_skill_button
+                      << " safety_button=" << args.gamepad_safety_button << std::endl;
         }
         if (args.udp_control) {
             udp_ = std::make_unique<UdpCommandInput>(args, initial_command);
@@ -1240,6 +1267,7 @@ int input_check_only(const Args& args)
 
     ml::ControlMode mode = ml::ControlMode::Stand;
     std::string external_policy_key;
+    bool safety_enabled = args.safety.enabled;
     const auto start = std::chrono::steady_clock::now();
     auto last_log = start - std::chrono::seconds(60);
     while (g_running.load()) {
@@ -1256,6 +1284,13 @@ int input_check_only(const Args& args)
         if (state.reset_stand_requested) {
             // Reset is intentionally local to policy/target state. It must not
             // change the selected mode; mode changes have their own buttons.
+        }
+        if (state.safety_request == ml::TextControlSafetyCommand::Enable) {
+            safety_enabled = true;
+        } else if (state.safety_request == ml::TextControlSafetyCommand::Disable) {
+            safety_enabled = false;
+        } else if (state.safety_request == ml::TextControlSafetyCommand::Toggle) {
+            safety_enabled = !safety_enabled;
         }
         if (state.mode_request.requested) {
             bool allowed = true;
@@ -1278,6 +1313,9 @@ int input_check_only(const Args& args)
             if (state.zeroed_by_deadman) std::cout << " deadman=open";
             if (state.pause_zero) std::cout << " pause-zero";
             if (state.reset_stand_requested) std::cout << " reset";
+            if (state.safety_request != ml::TextControlSafetyCommand::None) {
+                std::cout << " safety=" << (safety_enabled ? "on" : "off");
+            }
             if (live_input_requested_mode(state, ml::ControlMode::Passive)) std::cout << " passive";
             if (live_input_requested_mode(state, ml::ControlMode::Dance)) std::cout << " dance";
             if (live_input_requested_mode(state, ml::ControlMode::Skill)) {
@@ -1432,6 +1470,7 @@ int run_robot_with_finally(const Args& args, const ml::LocoConfig& cfg, ml::Cont
                         std::cout << "[Input] Stop requested; leaving run loop" << std::endl;
                         break;
                     }
+                    const bool safety_changed = apply_safety_request(core, input.safety_request, "[Input]");
                     raw_cmd = input.command;
                     ml::ControlMode requested_mode = run_mode;
                     bool mode_requested = false;
@@ -1470,6 +1509,19 @@ int run_robot_with_finally(const Args& args, const ml::LocoConfig& cfg, ml::Cont
                               run_external_policy_key)
                         : ml::ModeRequest::none();
                     if (requested_mode_change.requested) {
+                        const bool recover_to_stand =
+                            requested_mode == ml::ControlMode::Stand &&
+                            (run_mode == ml::ControlMode::Passive ||
+                             run_mode == ml::ControlMode::FinalDamping);
+                        if (recover_to_stand) {
+                            std::cout << "[Input] Recovering to STAND from "
+                                      << ml::control_mode_name(run_mode) << std::endl;
+                            command_target = stand_interpolation(robot, state, cfg, args, rate_watchdog);
+                            core.seed_target(command_target);
+                            core.reset_policy();
+                            next_control_t = std::chrono::steady_clock::now();
+                            last_log = next_control_t - std::chrono::seconds(60);
+                        }
                         run_mode = requested_mode;
                         if (run_mode != ml::ControlMode::Loco) raw_cmd = {0.0f, 0.0f, 0.0f};
                         run_external_policy_key = requested_mode_change.external_policy_key;
@@ -1477,7 +1529,8 @@ int run_robot_with_finally(const Args& args, const ml::LocoConfig& cfg, ml::Cont
                         std::cout << "[Input] Mode -> " << ml::control_mode_name(run_mode) << std::endl;
                     }
                     raw_cmd = ml::command_for_control_mode(raw_cmd, run_mode);
-                    if (input.changed && std::chrono::duration<double>(now - last_log).count() < args.log_interval) {
+                    if ((input.changed || safety_changed) &&
+                        std::chrono::duration<double>(now - last_log).count() < args.log_interval) {
                         std::cout << "[Input] " << input.status << " mode=" << ml::control_mode_name(run_mode)
                                   << " cmd=[" << raw_cmd[0] << " " << raw_cmd[1] << " " << raw_cmd[2] << "]";
                         if (input.zeroed_by_deadman) std::cout << " deadman=open";
@@ -1489,6 +1542,9 @@ int run_robot_with_finally(const Args& args, const ml::LocoConfig& cfg, ml::Cont
                         }
                         if (live_input_requested_mode(input, ml::ControlMode::FinalDamping)) {
                             std::cout << " final-damping";
+                        }
+                        if (input.safety_request != ml::TextControlSafetyCommand::None) {
+                            std::cout << " safety=" << (core.safety_enabled() ? "on" : "off");
                         }
                         std::cout << std::endl;
                     }
@@ -1507,6 +1563,7 @@ int run_robot_with_finally(const Args& args, const ml::LocoConfig& cfg, ml::Cont
                               << " q=" << range_string(tick.snapshot.q)
                               << " target=" << range_string(command_target)
                               << " cmd=[" << raw_cmd[0] << " " << raw_cmd[1] << " " << raw_cmd[2] << "]"
+                              << " safety=" << (tick.core.telemetry.safety_enabled ? "on" : "off")
                               << " counts=" << ml::counts_string(tick.snapshot.counts) << std::endl;
                     last_log = now;
                 }

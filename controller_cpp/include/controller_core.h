@@ -39,6 +39,7 @@ struct ControllerTelemetry {
     JointArray raw_policy_target{};
     JointArray command_target{};
     std::array<float, 3> projected_gravity{0.0f, 0.0f, -1.0f};
+    bool safety_enabled{true};
 };
 
 struct ControllerCoreOutput {
@@ -113,6 +114,14 @@ public:
 
     const JointGains& gains() const { return gains_; }
 
+    bool safety_enabled() const { return safety_.enabled(); }
+
+    void set_safety_enabled(bool enabled)
+    {
+        options_.safety.enabled = enabled;
+        safety_.set_enabled(enabled);
+    }
+
     void register_external_policy(ExternalPolicyAdapter& policy)
     {
         register_external_policy(
@@ -173,7 +182,6 @@ public:
         if (active_mode == ControlMode::Passive || active_mode == ControlMode::FinalDamping) {
             projected_gravity_ = gravity_orientation(snapshot.quat);
             command_target_ = snapshot.q;
-            safety_.check(snapshot, &command_target_, nullptr, nullptr);
             return make_output(false);
         }
         if (active_mode == ControlMode::Stand) {
@@ -358,7 +366,7 @@ private:
         out.target.gains = command_gains_;
         out.target.damping_only =
             mode_manager_.mode() == ControlMode::Passive || mode_manager_.mode() == ControlMode::FinalDamping;
-        out.target.damping_kd = options_.damping_kd;
+        out.target.damping_kd = mode_manager_.mode() == ControlMode::Passive ? 0.0f : options_.damping_kd;
         out.telemetry.mode = mode_manager_.mode();
         if (is_external_policy_mode(mode_manager_.mode())) {
             ExternalPolicyAdapter* policy = external_policy(mode_manager_.mode());
@@ -369,6 +377,7 @@ private:
         out.telemetry.raw_policy_target = raw_policy_target_;
         out.telemetry.command_target = command_target_;
         out.telemetry.projected_gravity = projected_gravity_;
+        out.telemetry.safety_enabled = safety_.enabled();
         return out;
     }
 

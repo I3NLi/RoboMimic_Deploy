@@ -17,7 +17,7 @@ Usage: $0 [options] [-- extra magicbot_z1_loco_onnx args]
 
 Smoke-test the real runner input path without connecting to a robot. The script
 starts magicbot_z1_loco_onnx in --input-check mode, sends UDP text controls,
-asserts that LOCO, PASSIVE, and FINAL_DAMPING are observed, and verifies DANCE
+asserts that LOCO, PASSIVE, DAMPING, and safety toggles are observed, and verifies DANCE
 and SKILL are blocked by default unless the real runner is started with the
 explicit gates.
 
@@ -240,6 +240,7 @@ packets = [
     b"mode=passive",
     b"mode=stand",
     b"mode=reset",
+    b"safety=toggle",
     b"mode=final_damping",
 ]
 
@@ -256,7 +257,7 @@ if ! wait "${runner_pid}"; then
 fi
 runner_pid=""
 
-for expected in 'mode=LOCO' 'cmd=\[0.25 0 0\]' 'cmd=\[0.65 0 0\]' 'pause-zero' 'mode=PASSIVE' ' reset' 'mode=FINAL_DAMPING'; do
+for expected in 'mode=LOCO' 'cmd=\[0.25 0 0\]' 'cmd=\[0.65 0 0\]' 'pause-zero' 'mode=PASSIVE' ' reset' 'safety=off' 'mode=DAMPING'; do
     if ! grep -E -q "${expected}" "${log_path}"; then
         echo "[Smoke][ERROR] missing expected input-check output: ${expected}" >&2
         sed -n '1,220p' "${log_path}" >&2
@@ -295,4 +296,4 @@ echo "[Smoke] PASSED real-runner UDP input-check"
 if [[ "${keep_log}" -eq 1 ]]; then
     echo "[Smoke] log=${log_path}"
 fi
-grep -E 'mode=(LOCO|PASSIVE|STAND|FINAL_DAMPING)|pause-zero| reset|DANCE ignored|SKILL ignored' "${log_path}"
+grep -E 'mode=(LOCO|PASSIVE|STAND|DAMPING)|pause-zero| reset|safety=off|DANCE ignored|SKILL ignored' "${log_path}"

@@ -308,9 +308,23 @@ void check_shared_motion_safety(const std::filesystem::path& config_path)
         require(threw, std::string("ControllerCore should run shared motion safety checks in ") + label);
     };
 
+    auto require_damping_mode_runs = [&](ml::ControlMode mode, const char* label) {
+        ml::ControllerCoreOptions options;
+        options.safety.enabled = true;
+        options.safety.max_gravity_xy = 0.01f;
+        ml::ControllerCore core(cfg, options);
+
+        const auto out = core.step(
+            unsafe,
+            ml::Command{},
+            ml::mode_request_for_control_mode(mode),
+            static_cast<float>(ml::kControlDt));
+        require(out.target.damping_only, std::string(label) + " should publish damping-only output");
+    };
+
     require_unsafe_rejected(ml::ControlMode::Stand, "STAND");
-    require_unsafe_rejected(ml::ControlMode::Passive, "PASSIVE");
-    require_unsafe_rejected(ml::ControlMode::FinalDamping, "FINAL_DAMPING");
+    require_damping_mode_runs(ml::ControlMode::Passive, "PASSIVE");
+    require_damping_mode_runs(ml::ControlMode::FinalDamping, "DAMPING");
 }
 
 void check_external_policy_flow(const std::filesystem::path& config_path)
@@ -541,6 +555,53 @@ void check_external_policy_flow(const std::filesystem::path& config_path)
     }
 }
 
+void check_runtime_safety_toggle(const std::filesystem::path& config_path)
+{
+    ml::LocoConfig cfg = ml::load_loco_config(config_path);
+    ml::ControllerCoreOptions options;
+    options.safety.enabled = true;
+    options.safety.max_gravity_xy = 0.01f;
+    ml::ControllerCore core(cfg, options);
+
+    ml::RobotSnapshot snapshot = make_snapshot(cfg.default_motor());
+    snapshot.quat = {0.70710677f, 0.70710677f, 0.0f, 0.0f};
+
+    bool threw = false;
+    try {
+        (void)core.step(
+            snapshot,
+            ml::Command{},
+            ml::mode_request_for_control_mode(ml::ControlMode::Stand),
+            static_cast<float>(ml::kControlDt));
+    } catch (const std::exception& error) {
+        threw = std::string(error.what()).find("motion safety: projected gravity xy") != std::string::npos;
+    }
+    require(threw, "runtime safety should start enabled");
+
+    core.set_safety_enabled(false);
+    require(!core.safety_enabled(), "runtime safety should disable");
+    const auto disabled = core.step(
+        snapshot,
+        ml::Command{},
+        ml::ModeRequest::none(),
+        static_cast<float>(ml::kControlDt));
+    require(!disabled.telemetry.safety_enabled, "telemetry should report disabled safety");
+
+    core.set_safety_enabled(true);
+    require(core.safety_enabled(), "runtime safety should re-enable");
+    threw = false;
+    try {
+        (void)core.step(
+            snapshot,
+            ml::Command{},
+            ml::ModeRequest::none(),
+            static_cast<float>(ml::kControlDt));
+    } catch (const std::exception& error) {
+        threw = std::string(error.what()).find("motion safety: projected gravity xy") != std::string::npos;
+    }
+    require(threw, "runtime safety should re-enable checks");
+}
+
 }  // namespace
 
 int main(int argc, char** argv)
@@ -555,6 +616,7 @@ int main(int argc, char** argv)
         check_runtime_adapter_flow(argv[1]);
         check_shared_target_rate_limit(argv[1]);
         check_shared_motion_safety(argv[1]);
+        check_runtime_safety_toggle(argv[1]);
         check_external_policy_flow(argv[1]);
     } catch (const std::exception& error) {
         std::cerr << "[controller_core_check][FAIL] " << error.what() << "\n";

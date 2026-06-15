@@ -148,6 +148,9 @@ class MotionSafety {
 public:
     MotionSafety(SafetyConfig cfg, const LocoConfig& loco_cfg);
 
+    bool enabled() const { return cfg_.enabled; }
+    void set_enabled(bool enabled) { cfg_.enabled = enabled; }
+
     void check(
         const RobotSnapshot& state,
         const JointArray* command_target = nullptr,

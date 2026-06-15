@@ -46,16 +46,23 @@ void expect_action(
     require(op.external_policy_key == external_policy_key, "unexpected external policy key");
 }
 
+void expect_safety(const ml::TextControlOperation& op, ml::TextControlSafetyCommand command)
+{
+    require(op.type == ml::TextControlOperation::Type::Safety, "expected safety op");
+    require(op.safety == command, "unexpected safety command");
+}
+
 void check_named_velocity_and_mode()
 {
     const auto ops =
-        ml::parse_text_control_operations("VX=2.0 vy=-2.0 wz=0.125 mode=LoCo mode=skill:TrackVariant");
-    require(ops.size() == 5, "named velocity and mode op count");
+        ml::parse_text_control_operations("VX=2.0 vy=-2.0 wz=0.125 mode=LoCo mode=skill:TrackVariant safety=toggle");
+    require(ops.size() == 6, "named velocity and mode op count");
     expect_velocity(ops[0], 0, 1.0f);
     expect_velocity(ops[1], 1, -1.0f);
     expect_velocity(ops[2], 2, 0.125f);
     expect_action(ops[3], ml::TextControlAction::Loco);
     expect_action(ops[4], ml::TextControlAction::Skill, "TrackVariant");
+    expect_safety(ops[5], ml::TextControlSafetyCommand::Toggle);
 }
 
 void check_numeric_tokens_and_clear_modes()
@@ -80,8 +87,10 @@ void check_aliases()
     require(action == ml::TextControlAction::RunForward, "run_forward should map to run-forward preset");
     require(ml::text_control_action_from_word("sprint", action), "sprint alias");
     require(action == ml::TextControlAction::RunForward, "sprint should map to run-forward preset");
+    require(ml::text_control_action_from_word("zero_torque", action), "zero_torque alias");
+    require(action == ml::TextControlAction::Passive, "zero_torque should map to passive");
     require(ml::text_control_action_from_word("damping", action), "damping alias");
-    require(action == ml::TextControlAction::Passive, "damping should map to passive");
+    require(action == ml::TextControlAction::FinalDamping, "damping should map to final damping");
     require(ml::text_control_action_from_word("beyondmimic", action), "beyondmimic alias");
     require(action == ml::TextControlAction::Dance, "beyondmimic should map to dance");
     require(ml::text_control_action_from_word("track_mimic", action), "track_mimic alias");
@@ -91,6 +100,14 @@ void check_aliases()
     require(ml::text_control_action_from_word("x", action), "x alias");
     require(action == ml::TextControlAction::Zero, "x should map to zero");
     require(!ml::text_control_action_from_word("teleport", action), "teleport should be invalid");
+
+    ml::TextControlSafetyCommand safety{};
+    require(ml::text_control_safety_from_word("safety_on", safety), "safety_on alias");
+    require(safety == ml::TextControlSafetyCommand::Enable, "safety_on should enable safety");
+    require(ml::text_control_safety_from_word("motion_safety_disable", safety), "motion_safety_disable alias");
+    require(safety == ml::TextControlSafetyCommand::Disable, "motion_safety_disable should disable safety");
+    require(ml::text_control_safety_from_word("safety_toggle", safety), "safety_toggle alias");
+    require(safety == ml::TextControlSafetyCommand::Toggle, "safety_toggle should toggle safety");
 }
 
 void check_order_preserved()
@@ -110,7 +127,7 @@ void check_order_preserved()
 
 void check_invalid_tokens_are_ignored()
 {
-    const auto ops = ml::parse_text_control_operations("vx=nan mode=teleport garbage vy=0.3");
+    const auto ops = ml::parse_text_control_operations("vx=nan mode=teleport safety=maybe garbage vy=0.3");
     require(ops.size() == 1, "invalid tokens ignored op count");
     expect_velocity(ops[0], 1, 0.3f);
 }

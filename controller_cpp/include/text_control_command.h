@@ -32,6 +32,13 @@ enum class TextControlAction {
     ToggleLoco,
 };
 
+enum class TextControlSafetyCommand {
+    None,
+    Enable,
+    Disable,
+    Toggle,
+};
+
 struct TextControlActionEffect {
     bool mode_requested{false};
     ControlMode mode{ControlMode::Stand};
@@ -86,12 +93,14 @@ struct TextControlOperation {
     enum class Type {
         Velocity,
         Action,
+        Safety,
     };
 
     Type type{Type::Action};
     int axis{-1};
     float value{0.0f};
     TextControlAction action{TextControlAction::Zero};
+    TextControlSafetyCommand safety{TextControlSafetyCommand::None};
     std::string external_policy_key;
 
     static TextControlOperation velocity(int axis_index, float axis_value)
@@ -109,6 +118,14 @@ struct TextControlOperation {
         op.type = Type::Action;
         op.action = next_action;
         op.external_policy_key = std::move(policy_key);
+        return op;
+    }
+
+    static TextControlOperation safety_op(TextControlSafetyCommand command)
+    {
+        TextControlOperation op;
+        op.type = Type::Safety;
+        op.safety = command;
         return op;
     }
 };
@@ -160,7 +177,7 @@ inline bool text_control_action_from_word(const std::string& word, TextControlAc
         action = TextControlAction::ResetStand;
         return true;
     }
-    if (word == "passive" || word == "damping") {
+    if (word == "passive" || word == "zero_torque" || word == "zerotorque") {
         action = TextControlAction::Passive;
         return true;
     }
@@ -172,7 +189,8 @@ inline bool text_control_action_from_word(const std::string& word, TextControlAc
         action = TextControlAction::Skill;
         return true;
     }
-    if (word == "final" || word == "finaldamping" || word == "final_damping" ||
+    if (word == "damping" || word == "damp" ||
+        word == "final" || word == "finaldamping" || word == "final_damping" ||
         word == "fail_safe" || word == "failsafe") {
         action = TextControlAction::FinalDamping;
         return true;
@@ -195,6 +213,37 @@ inline bool text_control_action_from_word(const std::string& word, TextControlAc
     }
     if (word == "toggle") {
         action = TextControlAction::ToggleLoco;
+        return true;
+    }
+    return false;
+}
+
+inline bool text_control_safety_from_word(const std::string& word, TextControlSafetyCommand& command)
+{
+    if (word == "on" || word == "enable" || word == "enabled" || word == "1" || word == "true") {
+        command = TextControlSafetyCommand::Enable;
+        return true;
+    }
+    if (word == "off" || word == "disable" || word == "disabled" || word == "0" || word == "false") {
+        command = TextControlSafetyCommand::Disable;
+        return true;
+    }
+    if (word == "toggle" || word == "switch") {
+        command = TextControlSafetyCommand::Toggle;
+        return true;
+    }
+    if (word == "safety_on" || word == "safety_enable" || word == "safety_enabled" ||
+        word == "motion_safety_on" || word == "motion_safety_enable") {
+        command = TextControlSafetyCommand::Enable;
+        return true;
+    }
+    if (word == "safety_off" || word == "safety_disable" || word == "safety_disabled" ||
+        word == "motion_safety_off" || word == "motion_safety_disable") {
+        command = TextControlSafetyCommand::Disable;
+        return true;
+    }
+    if (word == "safety_toggle" || word == "safety_wall" || word == "motion_safety_toggle") {
+        command = TextControlSafetyCommand::Toggle;
         return true;
     }
     return false;
@@ -406,6 +455,11 @@ inline std::vector<TextControlOperation> parse_text_control_operations(std::stri
                     operations.push_back(
                         TextControlOperation::action_op(action, std::move(external_policy_key)));
                 }
+            } else if (key == "safety" || key == "safety_wall" || key == "motion_safety") {
+                TextControlSafetyCommand command{};
+                if (text_control_safety_from_word(value, command)) {
+                    operations.push_back(TextControlOperation::safety_op(command));
+                }
             }
             continue;
         }
@@ -421,6 +475,12 @@ inline std::vector<TextControlOperation> parse_text_control_operations(std::stri
         std::string external_policy_key;
         if (parse_text_control_action_token(token, action, external_policy_key)) {
             operations.push_back(TextControlOperation::action_op(action, std::move(external_policy_key)));
+            continue;
+        }
+
+        TextControlSafetyCommand safety{};
+        if (text_control_safety_from_word(lower_ascii_copy(token), safety)) {
+            operations.push_back(TextControlOperation::safety_op(safety));
         }
     }
 
