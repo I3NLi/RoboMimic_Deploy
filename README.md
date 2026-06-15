@@ -389,7 +389,7 @@ scripts/run_magicbot_loco_native.sh \
 
 In the remote UI set `Remote Host` to the controller host IP and `Loco UDP` to
 `15000`; the shared runner consumes `loco/passive/stand/final_damping`,
-`vx/vy/wz`, `reset`, `pause/resume`, `beyond/track_mimic`, and
+`walk/run_forward`, `vx/vy/wz`, `reset`, `pause/resume`, `beyond/track_mimic`, and
 `safety=on|off|toggle`. The `FSM UDP` `15001` field is only needed for the
 legacy FSM / `wireless_remote` path:
 

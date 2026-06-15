@@ -1015,7 +1015,7 @@ public:
             udp_ = std::make_unique<UdpCommandInput>(args, initial_command);
             std::cout << "[Input] UDP command enabled: bind=" << args.udp_bind << ":" << args.udp_port
                       << " timeout_s=" << args.udp_timeout_s
-                      << " format='vx vy wz [loco|stand|passive|final_damping|beyond|stop]'"
+                      << " format='vx vy wz [walk|run_forward|loco|stand|passive|final_damping|beyond|stop]'"
                          " or 'vx=... vy=... wz=... mode=loco'"
                       << std::endl;
         }

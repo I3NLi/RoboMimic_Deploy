@@ -2941,7 +2941,7 @@ int main(int argc, char** argv)
         if (udp_input) {
             std::printf(
                 "UDP    : command input on %s:%d, timeout %.2fs "
-                "(text: vx=0.3 vy=0 wz=0 mode=loco|passive|final_damping|track_mimic)\n",
+                "(text: walk|run_forward or vx=0.3 vy=0 wz=0 mode=loco|passive|final_damping|track_mimic)\n",
                 args.udp_bind.c_str(),
                 args.udp_port,
                 args.udp_timeout_s);

@@ -376,7 +376,7 @@ scripts/run_magicbot_loco_native.sh \
 ```
 
 遥控器页面里把 `Remote Host` 填成控制器主机 IP，`Loco UDP` 填 `15000`；
-共享 runner 接收 `loco/passive/stand/final_damping`、`vx/vy/wz`、`reset`、
+共享 runner 接收 `loco/passive/stand/final_damping`、`walk/run_forward`、`vx/vy/wz`、`reset`、
 `pause/resume`、`beyond/track_mimic` 和 `safety=on|off|toggle`。`FSM UDP`
 的 `15001` 只给旧 FSM / `wireless_remote` 链路使用：
 
