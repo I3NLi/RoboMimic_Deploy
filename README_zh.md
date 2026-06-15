@@ -212,6 +212,7 @@ scripts/run_closed_loop_sweep_native.sh --axis vx --values "0 0.1 0.2 0.3 0.5 1"
 scripts/run_shared_runtime_smoke_suite_native.sh --core-only
 scripts/run_shared_runtime_smoke_suite_native.sh --sim-only
 scripts/run_shared_runtime_smoke_suite_native.sh --viewer-only
+scripts/run_python_mujoco_viewer_smoke_native.sh
 scripts/run_shared_runtime_smoke_suite_native.sh --python-only
 scripts/run_shared_runtime_smoke_suite_native.sh --real-only
 ```
@@ -228,7 +229,8 @@ LOCO 退出到非策略模式、ControllerRuntime，以及不依赖后端的共�
 MuJoCo adapter 的 `JointTargetMode` 翻译，然后运行 pure-sim 闭环外力/impulse
 烟测。`--viewer-only` 检查 native viewer 的 HTTP/UDP/手柄、视频流、
 DANCE/SKILL、HTTP 和手柄安全墙控制，以及扰动 API。`--python-only` 通过
-Python-facing launcher 运行同一组 viewer 烟测。`--real-only` 不连接机器人；
+`scripts/run_python_mujoco_viewer_smoke_native.sh` 对 Python-facing launcher
+运行同一组 viewer 烟测。`--real-only` 不连接机器人；
 它检查 MagicBot real adapter target-mode 翻译、real operator loop 的
 `ControllerRuntime.tick` 边界，以及 dry/input/手柄 LOCO/PASSIVE/STAND/
 安全墙和 allow-gate 行为。

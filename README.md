@@ -222,6 +222,7 @@ No-hardware shared-runtime smoke suite:
 scripts/run_shared_runtime_smoke_suite_native.sh --core-only
 scripts/run_shared_runtime_smoke_suite_native.sh --sim-only
 scripts/run_shared_runtime_smoke_suite_native.sh --viewer-only
+scripts/run_python_mujoco_viewer_smoke_native.sh
 scripts/run_shared_runtime_smoke_suite_native.sh --python-only
 scripts/run_shared_runtime_smoke_suite_native.sh --real-only
 ```
@@ -239,7 +240,8 @@ MuJoCo adapter `JointTargetMode` translation, then runs the pure-sim closed-loop
 force/impulse smoke. `--viewer-only` checks native viewer HTTP/UDP/gamepad,
 video stream, DANCE/SKILL, HTTP and gamepad safety-wall controls, and perturb
 APIs. `--python-only` runs the same viewer smokes through the Python-facing
-launcher. `--real-only` does
+launcher by calling `scripts/run_python_mujoco_viewer_smoke_native.sh`.
+`--real-only` does
 not connect to the robot; it checks MagicBot real-adapter target-mode
 translation, the real operator loop's `ControllerRuntime.tick` boundary, plus
 dry/input/gamepad LOCO/PASSIVE/STAND/safety and allow-gate behavior.
