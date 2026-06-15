@@ -79,47 +79,74 @@ import sys
 
 header = pathlib.Path(sys.argv[1])
 src = header.read_text()
-start = src.find("void register_track_mimic")
-if start < 0:
-    print("[Smoke][ERROR] NativeBeyondMimicExternalPolicyRegistry is missing register_track_mimic", file=sys.stderr)
-    sys.exit(1)
-brace = src.find("{", start)
-if brace < 0:
-    print("[Smoke][ERROR] register_track_mimic body not found", file=sys.stderr)
-    sys.exit(1)
 
-depth = 0
-end = -1
-for idx in range(brace, len(src)):
-    if src[idx] == "{":
-        depth += 1
-    elif src[idx] == "}":
-        depth -= 1
-        if depth == 0:
-            end = idx + 1
+def method_body(name: str) -> str:
+    start = src.find(f"void {name}")
+    if start < 0:
+        print(
+            f"[Smoke][ERROR] NativeBeyondMimicExternalPolicyRegistry is missing {name}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    paren_depth = 0
+    brace = -1
+    for idx in range(start, len(src)):
+        char = src[idx]
+        if char == "(":
+            paren_depth += 1
+        elif char == ")" and paren_depth > 0:
+            paren_depth -= 1
+        elif char == "{" and paren_depth == 0:
+            brace = idx
             break
-if end < 0:
-    print("[Smoke][ERROR] register_track_mimic body is not balanced", file=sys.stderr)
+        elif char == ";" and paren_depth == 0:
+            break
+    if brace < 0:
+        print(f"[Smoke][ERROR] {name} body not found", file=sys.stderr)
+        sys.exit(1)
+
+    depth = 0
+    end = -1
+    for idx in range(brace, len(src)):
+        if src[idx] == "{":
+            depth += 1
+        elif src[idx] == "}":
+            depth -= 1
+            if depth == 0:
+                end = idx + 1
+                break
+    if end < 0:
+        print(f"[Smoke][ERROR] {name} body is not balanced", file=sys.stderr)
+        sys.exit(1)
+    return src[brace:end]
+
+track_body = method_body("register_track_mimic")
+if 'register_trajectory_variant(core, kTrackMimicPolicyKey, yaml_path, "TrackMimic", true)' not in track_body:
+    print(
+        "[Smoke][ERROR] register_track_mimic must delegate to the shared BeyondMimic trajectory variant path",
+        file=sys.stderr,
+    )
     sys.exit(1)
 
-body = src[brace:end]
+variant_body = method_body("register_trajectory_variant")
 required = [
     "std::make_unique<::BeyondMimicPolicy>",
     "::FSMStateName::SKILL_TRACK_MIMIC",
     "ControlMode::Skill",
-    "kTrackMimicPolicyKey",
+    "policy_key",
     "/*require_motion_file=*/true",
-    "core.register_external_policy(kTrackMimicPolicyKey",
+    "core.register_external_policy(policy_key",
+    "trajectory_variants_.push_back",
 ]
-missing = [item for item in required if item not in body]
+missing = [item for item in required if item not in variant_body]
 if missing:
     print(
-        "[Smoke][ERROR] TrackMimic must stay a SKILL-keyed BeyondMimic trajectory path; missing: "
+        "[Smoke][ERROR] TrackMimic variants must stay SKILL-keyed BeyondMimic trajectory paths; missing: "
         + ", ".join(missing),
         file=sys.stderr,
     )
     sys.exit(1)
-if "std::make_unique<::TrackMimicPolicy>" in body or "class TrackMimicPolicy" in src:
+if "std::make_unique<::TrackMimicPolicy>" in variant_body or "class TrackMimicPolicy" in src:
     print("[Smoke][ERROR] TrackMimic was split into a separate policy implementation", file=sys.stderr)
     sys.exit(1)
 PY

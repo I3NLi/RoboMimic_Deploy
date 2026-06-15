@@ -249,7 +249,10 @@ both use that helper instead of maintaining separate return-mode mappings.
 `NativeBeyondMimicExternalPolicyRegistry` now owns the native BeyondMimic
 policy/adapters for both plain `DANCE/BeyondMimic` and trajectory-conditioned
 `SKILL/TrackMimic`, so viewer and real runner only pass resolved YAML paths into
-the shared registration path.
+the shared registration path. It also exposes `register_trajectory_variant()`
+for additional SKILL keys backed by the same `BeyondMimicPolicy` implementation
+and their own required `motion_file` YAMLs; `TrackMimic` is just the default
+trajectory-conditioned BeyondMimic key, not another policy family.
 The real-runner dry-run path uses the same registry and steps the shared core
 once through each requested external mode, so YAML/model checks also cover the
 registered DANCE/BeyondMimic and SKILL/TrackMimic trajectory selection path.
@@ -405,10 +408,10 @@ scripts/run_magicbot_loco_external_policy_smoke_native.sh
 This dry-runs BeyondMimic and BeyondMimic trajectory/TrackMimic through the
 shared external-policy registry, then runs `--input-check` with explicit
 `--allow-dance` and `--allow-skill` gates. It also statically guards that
-`register_track_mimic()` still creates a `BeyondMimicPolicy` registered as the
-shared `SKILL/TrackMimic` key, rather than introducing a separate TrackMimic
-policy family, and that the TrackMimic registration requires `motion_file`. The
-smoke helper generates a temporary minimal trajectory YAML for this test. It
+`register_track_mimic()` delegates to the shared BeyondMimic trajectory-variant
+registration path, that the variant path still creates `BeyondMimicPolicy`
+adapters for `SKILL` keys, and that trajectory variants require `motion_file`.
+The smoke helper generates a temporary minimal trajectory YAML for this test. It
 first sends `mode=beyond` and `mode=track_mimic` with both YAML paths present
 but without `--allow-dance` / `--allow-skill`, verifying that YAML presence does
 not bypass the explicit gates. The allowed UDP portion then sends `mode=beyond`,
@@ -661,9 +664,8 @@ entrypoint, keeping the Python command aligned with the native shared runtime.
 
 ## Next cuts
 
-1. Register additional BeyondMimic trajectory variants through
-   `FsmExternalPolicyAdapter` as distinct keys with their own `motion_file`
-   YAMLs; do not introduce a separate TrackMimic policy family for the same
-   trained architecture.
+1. Expose additional BeyondMimic trajectory variants through CLI/control-station
+   selection as distinct SKILL keys with their own `motion_file` YAMLs, using
+   `NativeBeyondMimicExternalPolicyRegistry::register_trajectory_variant()`.
 2. Move viewer mode/control API code to send requests only; it must not duplicate
    core policy or safety logic.
