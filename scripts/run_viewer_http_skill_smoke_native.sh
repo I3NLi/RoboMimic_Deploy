@@ -186,7 +186,7 @@ fi
 status_ready=0
 for _ in $(seq 1 80); do
     if curl -sf "${status_url}" -o "${status_body}" &&
-       jq -e '.mode == "SKILL" and .external_policy == "TrackMimic" and .adapter_backend == "mujoco-sim" and .adapter_command_published == true and .paused == false and .http_control_commands >= 1 and .policy_steps > 0 and .sim_steps > 0' "${status_body}" >/dev/null; then
+       jq -e '.mode == "SKILL" and .external_policy == "TrackMimic" and (.skill_policy_keys | index("TrackMimic")) != null and (.skill_policy_keys | index("ClipA")) != null and .adapter_backend == "mujoco-sim" and .adapter_command_published == true and .paused == false and .http_control_commands >= 1 and .policy_steps > 0 and .sim_steps > 0' "${status_body}" >/dev/null; then
         status_ready=1
         break
     fi
@@ -210,7 +210,7 @@ fi
 variant_ready=0
 for _ in $(seq 1 80); do
     if curl -sf "${status_url}" -o "${status_body}" &&
-       jq -e '.mode == "SKILL" and .external_policy == "ClipA" and .adapter_backend == "mujoco-sim" and .adapter_command_published == true and .paused == false and .http_control_commands >= 2 and .policy_steps > 0 and .sim_steps > 0' "${status_body}" >/dev/null; then
+       jq -e '.mode == "SKILL" and .external_policy == "ClipA" and (.skill_policy_keys | index("TrackMimic")) != null and (.skill_policy_keys | index("ClipA")) != null and .adapter_backend == "mujoco-sim" and .adapter_command_published == true and .paused == false and .http_control_commands >= 2 and .policy_steps > 0 and .sim_steps > 0' "${status_body}" >/dev/null; then
         variant_ready=1
         break
     fi

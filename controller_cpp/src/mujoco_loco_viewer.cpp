@@ -219,6 +219,7 @@ struct CameraStreamState {
     std::vector<ViewerControlCommand> control_commands;
     std::string mode{"STAND"};
     std::string external_policy;
+    std::vector<std::string> skill_policy_keys;
     std::string adapter_backend;
     double adapter_state_age_ms{-1.0};
     bool adapter_command_published{false};
@@ -260,7 +261,8 @@ public:
         int port,
         const Args& args,
         int push_body_id,
-        std::string push_body_resolved)
+        std::string push_body_resolved,
+        std::vector<std::string> skill_policy_keys)
         : host_(std::move(host)),
           port_(port),
           state_(std::make_shared<CameraStreamState>())
@@ -284,6 +286,7 @@ public:
         state_->push_impulse_time_s = args.push_impulse_time_s;
         state_->push_force_norm = vec3_norm(args.push_force);
         state_->push_impulse_norm = vec3_norm(args.push_impulse);
+        state_->skill_policy_keys = std::move(skill_policy_keys);
     }
 
     ~CameraStreamServer() { stop(); }
@@ -610,6 +613,12 @@ private:
                  << "\"timestamp\":" << state->timestamp << ","
                  << "\"mode\":\"" << state->mode << "\","
                  << "\"external_policy\":\"" << json_escape(state->external_policy) << "\","
+                 << "\"skill_policy_keys\":[";
+            for (size_t i = 0; i < state->skill_policy_keys.size(); ++i) {
+                if (i > 0) body << ",";
+                body << "\"" << json_escape(state->skill_policy_keys[i]) << "\"";
+            }
+            body << "],"
                  << "\"adapter_backend\":\"" << json_escape(state->adapter_backend) << "\","
                  << "\"adapter_state_age_ms\":" << state->adapter_state_age_ms << ","
                  << "\"adapter_command_published\":"
@@ -2660,7 +2669,8 @@ int main(int argc, char** argv)
                 args.camera_port,
                 args,
                 push_body_id,
-                body_name(model, push_body_id));
+                body_name(model, push_body_id),
+                skill_policy_keys);
             camera_server->start();
             std::printf("[CameraStream] %s/health\n", camera_server->url().c_str());
             std::printf("[CameraStream] %s/frame.jpg\n", camera_server->url().c_str());

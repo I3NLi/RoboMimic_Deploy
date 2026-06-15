@@ -206,10 +206,11 @@ inputs only update the desired mode/key before the shared runtime consumes it.
 The same HTTP server exposes `GET /status` for control-station telemetry:
 current `ControllerCore` mode, active external policy key/name, pause state,
 adapter backend/command-published telemetry from `ControllerRuntime`, velocity
-command, sim/policy steps, base pose, queue depths, and disturbance/control
-counters. The on-screen overlay, periodic viewer stdout, `/status`, and summary
-JSON all report the mode from `ControllerCore` telemetry rather than from local
-viewer input intent flags. This is display/telemetry only; it does not move
+command, registered `skill_policy_keys`, sim/policy steps, base pose, queue
+depths, and disturbance/control counters. The on-screen overlay, periodic
+viewer stdout, `/status`, and summary JSON all report the mode from
+`ControllerCore` telemetry rather than from local viewer input intent flags.
+This is display/telemetry only; it does not move
 policy or safety logic out of `ControllerCore`.
 Both the viewer and real runner now build `ModeRequest` objects through the
 shared mode helper, including the default `DANCE -> BeyondMimic` external policy
@@ -535,7 +536,8 @@ TrackMimic plus a keyed `ClipA` BeyondMimic trajectory variant as shared
 `SKILL` external policies in the viewer, posts `mode=track_mimic` and then
 `mode=skill&policy=ClipA` through `/control`, then checks live `/status` and the
 summary for `mode == SKILL`, advancing `sim_steps` and `policy_steps`, active
-`external_policy == ClipA`, `adapter_backend == mujoco-sim`,
+`external_policy == ClipA`, registered `skill_policy_keys` containing both
+`TrackMimic` and `ClipA`, `adapter_backend == mujoco-sim`,
 `adapter_command_published == true`, and at least two HTTP control commands.
 This is an entry-path smoke, not a stability acceptance test.
 
@@ -674,8 +676,7 @@ entrypoint, keeping the Python command aligned with the native shared runtime.
 
 ## Next cuts
 
-1. Surface registered BeyondMimic trajectory SKILL keys in the web/control
-   station UI so operators can choose available variants without typing raw
-   `policy=KEY` values.
+1. Keep the web/control-station trajectory key picker synchronized with viewer
+   `/status.skill_policy_keys` as additional deployment presets are added.
 2. Move viewer mode/control API code to send requests only; it must not duplicate
    core policy or safety logic.
