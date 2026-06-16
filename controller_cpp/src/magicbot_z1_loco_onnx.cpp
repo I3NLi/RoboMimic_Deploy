@@ -287,8 +287,8 @@ void apply_gamepad_profile(Args& args, const std::string& raw_profile)
     if (profile == "beitong-kp20" || profile == "kp20" || profile == "beitong") {
         args.gamepad_profile = "beitong-kp20";
         args.gamepad_axis_vx = 1;
-        args.gamepad_axis_vy = 0;
-        args.gamepad_axis_wz = 3;
+        args.gamepad_axis_vy = 2;
+        args.gamepad_axis_wz = 0;
         args.gamepad_axis_vx_sign = -1.0f;
         args.gamepad_axis_vy_sign = -1.0f;
         args.gamepad_axis_wz_sign = -1.0f;

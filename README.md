@@ -366,7 +366,8 @@ scripts/run_magicbot_loco_native.sh \
 Default Xbox-style gamepad map: left stick Y is `vx`, left stick X is `vy`, right stick X is `wz`. Button 0/A enters `LOCO`, button 1/B enters zero-torque `PASSIVE`, button 2/X pause-zeros, button 3/Y enters `STAND`, button 4/LB requests BeyondMimic, button 5/RB requests TrackMimic, button 6/Back resets the current policy/target without changing mode, button 7/Start toggles pause-zero, button 8/L3 exits the run loop, and button 9/R3 toggles the runtime motion-safety wall. Deadman is disabled by default; set `--gamepad-deadman-button N` if you want one. Axis and button indices are CLI-configurable.
 
 For the BEITONG KP20 profile, use `--gamepad-profile beitong-kp20`: physical
-`A` enters `LOCO` (button 0), `X` enters `STAND` (button 3), `Y` requests
+`axis1` is `vx`, `axis2` is `vy`, and `axis0` is `wz`. Physical `A` enters
+`LOCO` (button 0), `X` enters `STAND` (button 3), `Y` requests
 `DANCE`/BeyondMimic (button 4), `Start` enters zero-torque `PASSIVE`
 (button 11), `Back` resets the current policy/target (button 10), and `RB`
 requests SKILL when a skill policy is configured (button 7). `RB` is not bound

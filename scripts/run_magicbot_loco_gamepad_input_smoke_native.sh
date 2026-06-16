@@ -114,6 +114,9 @@ if profile_start < 0 or profile_end < 0:
     sys.exit(1)
 profile_body = source[profile_start:profile_end]
 profile_required = [
+    "args.gamepad_axis_vx = 1;",
+    "args.gamepad_axis_vy = 2;",
+    "args.gamepad_axis_wz = 0;",
     "args.gamepad_stop_button = -1;",
     "args.gamepad_loco_button = 0;",
     "args.gamepad_passive_button = 11;",
