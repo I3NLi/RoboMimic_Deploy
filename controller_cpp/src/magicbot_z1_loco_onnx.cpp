@@ -907,12 +907,13 @@ private:
 class GamepadInput {
 public:
     explicit GamepadInput(const Args& args)
-        : args_(args), axes_(16, 0.0f), buttons_(16, 0), last_poll_t_(std::chrono::steady_clock::now())
+        : args_(args),
+          axes_(16, 0.0f),
+          buttons_(16, 0),
+          last_poll_t_(std::chrono::steady_clock::now()),
+          last_open_attempt_t_(std::chrono::steady_clock::now() - std::chrono::seconds(10))
     {
-        fd_ = open(args_.gamepad_device.c_str(), O_RDONLY | O_NONBLOCK);
-        if (fd_ < 0) {
-            throw std::runtime_error("failed to open " + args_.gamepad_device + ": " + std::strerror(errno));
-        }
+        (void)try_open(true);
     }
 
     ~GamepadInput()
@@ -923,6 +924,12 @@ public:
     LiveInputState poll()
     {
         LiveInputState out;
+        if (!try_open(false)) {
+            out.command = {0.0f, 0.0f, 0.0f};
+            out.status = "gamepad unavailable";
+            return out;
+        }
+
         js_event event{};
         while (true) {
             const ssize_t n = read(fd_, &event, sizeof(event));
@@ -931,7 +938,13 @@ public:
                 continue;
             }
             if (n < 0 && errno != EAGAIN && errno != EWOULDBLOCK) {
-                throw std::runtime_error(std::string("gamepad read failed: ") + std::strerror(errno));
+                close_gamepad();
+                out.command = {0.0f, 0.0f, 0.0f};
+                out.changed = true;
+                out.status = "gamepad disconnected";
+                std::cerr << "[Input][WARN] gamepad read failed; will retry open: "
+                          << std::strerror(errno) << std::endl;
+                return out;
             }
             break;
         }
@@ -981,6 +994,7 @@ public:
 
     void flush_pending(const char* reason)
     {
+        if (!try_open(false)) return;
         int drained = 0;
         js_event event{};
         while (true) {
@@ -991,7 +1005,10 @@ public:
                 continue;
             }
             if (n < 0 && errno != EAGAIN && errno != EWOULDBLOCK) {
-                throw std::runtime_error(std::string("gamepad flush failed: ") + std::strerror(errno));
+                close_gamepad();
+                std::cerr << "[Input][WARN] gamepad flush failed; will retry open: "
+                          << std::strerror(errno) << std::endl;
+                return;
             }
             break;
         }
@@ -1002,6 +1019,42 @@ public:
     }
 
 private:
+    bool try_open(bool force)
+    {
+        if (fd_ >= 0) return true;
+        const auto now = std::chrono::steady_clock::now();
+        if (!force && std::chrono::duration<double>(now - last_open_attempt_t_).count() < 1.0) return false;
+        last_open_attempt_t_ = now;
+
+        fd_ = open(args_.gamepad_device.c_str(), O_RDONLY | O_NONBLOCK);
+        if (fd_ < 0) {
+            if (!open_warning_printed_) {
+                std::cerr << "[Input][WARN] gamepad device unavailable: " << args_.gamepad_device
+                          << ": " << std::strerror(errno) << "; retrying while other inputs stay active"
+                          << std::endl;
+                open_warning_printed_ = true;
+            }
+            return false;
+        }
+
+        axes_.assign(16, 0.0f);
+        buttons_.assign(16, 0);
+        vx_command_ = 0.0f;
+        last_poll_t_ = now;
+        open_warning_printed_ = false;
+        std::cout << "[Input] Gamepad device opened: " << args_.gamepad_device << std::endl;
+        return true;
+    }
+
+    void close_gamepad()
+    {
+        if (fd_ >= 0) close(fd_);
+        fd_ = -1;
+        axes_.assign(16, 0.0f);
+        buttons_.assign(16, 0);
+        vx_command_ = 0.0f;
+    }
+
     uint8_t event_type(const js_event& event) const
     {
         return event.type & static_cast<uint8_t>(~JS_EVENT_INIT);
@@ -1104,6 +1157,8 @@ private:
     bool paused_{false};
     float vx_command_{0.0f};
     std::chrono::steady_clock::time_point last_poll_t_;
+    std::chrono::steady_clock::time_point last_open_attempt_t_;
+    bool open_warning_printed_{false};
 };
 
 class UdpCommandInput {
