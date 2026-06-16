@@ -303,6 +303,18 @@ Vec scale_command(const Vec& deadzone_cmd, const LocoConfig& cfg, bool apply_obs
             cmd[i] = (value + 1.0f) * (hi - lo) * 0.5f + lo;
         }
     }
+    if (cfg.command_dim >= 3 && cfg.cmd_range.vx[1] > 1e-6f) {
+        const float forward_alpha = std::clamp(cmd[0] / cfg.cmd_range.vx[1], 0.0f, 1.0f);
+        const float turn_slide_scale = 1.0f - 0.5f * forward_alpha;
+        auto clamp_coupled_axis = [turn_slide_scale](float value, const std::array<float, 2>& range) {
+            if (range[0] < 0.0f && range[1] > 0.0f) {
+                return std::clamp(value, range[0] * turn_slide_scale, range[1] * turn_slide_scale);
+            }
+            return value;
+        };
+        cmd[1] = clamp_coupled_axis(cmd[1], cfg.cmd_range.vy);
+        cmd[2] = clamp_coupled_axis(cmd[2], cfg.cmd_range.wz);
+    }
     if (cfg.command_dim >= 4) cmd[3] = cfg.root_height_command;
     if (apply_obs_scale) {
         for (int i = 0; i < cfg.command_dim; ++i) cmd[i] *= cfg.cmd_scale[i];

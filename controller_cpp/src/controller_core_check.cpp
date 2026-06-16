@@ -257,6 +257,24 @@ void check_loco_policy_mode(const std::filesystem::path& config_path)
         "held loco target should hold last command target between policy ticks");
 }
 
+void check_forward_coupled_command_limits(const std::filesystem::path& config_path)
+{
+    const ml::LocoConfig cfg = ml::load_loco_config(config_path);
+
+    const ml::Vec stationary_turn_slide = ml::scale_command(ml::Vec{0.0f, 1.0f, 1.0f}, cfg, false);
+    require(near(stationary_turn_slide[1], cfg.cmd_range.vy[1]), "stationary vy should keep full max");
+    require(near(stationary_turn_slide[2], cfg.cmd_range.wz[1]), "stationary wz should keep full max");
+
+    const ml::Vec full_forward_turn_slide = ml::scale_command(ml::Vec{1.0f, 1.0f, 1.0f}, cfg, false);
+    require(near(full_forward_turn_slide[0], cfg.cmd_range.vx[1]), "full forward vx should keep full max");
+    require(near(full_forward_turn_slide[1], cfg.cmd_range.vy[1] * 0.5f), "full forward vy should cap at half");
+    require(near(full_forward_turn_slide[2], cfg.cmd_range.wz[1] * 0.5f), "full forward wz should cap at half");
+
+    const ml::Vec reverse_turn_slide = ml::scale_command(ml::Vec{-1.0f, -1.0f, -1.0f}, cfg, false);
+    require(near(reverse_turn_slide[1], cfg.cmd_range.vy[0]), "reverse vy should keep full min");
+    require(near(reverse_turn_slide[2], cfg.cmd_range.wz[0]), "reverse wz should keep full min");
+}
+
 void check_loco_exits_to_non_policy_modes(const std::filesystem::path& config_path)
 {
     ml::LocoConfig cfg = ml::load_loco_config(config_path);
@@ -715,6 +733,7 @@ int main(int argc, char** argv)
     try {
         check_stand_passive_final_modes(argv[1]);
         check_loco_policy_mode(argv[1]);
+        check_forward_coupled_command_limits(argv[1]);
         check_loco_exits_to_non_policy_modes(argv[1]);
         check_runtime_adapter_flow(argv[1]);
         check_shared_target_rate_limit(argv[1]);
