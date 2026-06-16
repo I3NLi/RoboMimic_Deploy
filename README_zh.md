@@ -333,6 +333,7 @@ scripts/run_magicbot_loco_native.sh \
 scripts/run_magicbot_loco_native.sh \
   --input-check \
   --gamepad-control \
+  --gamepad-profile beitong-kp20 \
   --gamepad-device /dev/input/js0 \
   --duration 10
 
@@ -340,12 +341,17 @@ scripts/run_magicbot_loco_native.sh \
   --run \
   --allow-loco \
   --gamepad-control \
+  --gamepad-profile beitong-kp20 \
   --gamepad-device /dev/input/js0 \
   --duration 5 \
   --local-ip 192.168.54.119
 ```
 
 默认 Xbox 风格手柄映射：左摇杆 Y 为 `vx`，左摇杆 X 为 `vy`，右摇杆 X 为 `wz`；button 0/A 进 `LOCO`，button 1/B 进零力矩 `PASSIVE`，button 2/X 暂停清零，button 3/Y 进 `STAND`，button 4/LB 请求 BeyondMimic，button 5/RB 请求 TrackMimic，button 6/Back 只重置当前 policy/target 且不切换模式，button 7/Start 切换暂停清零，button 8/L3 退出 run loop，button 9/R3 切换运行时 safety wall。默认不需要 deadman；如果需要可设置 `--gamepad-deadman-button N`。轴和按键编号都可以用命令行参数改。
+
+北通 KP20 使用 `--gamepad-profile beitong-kp20`：实体 `X` 进入 `STAND`，
+实体 `Y` 请求 `DANCE`/BeyondMimic，`Start` 进入零力矩 `PASSIVE`，`RB` 不再
+绑定退出。
 
 共享 UDP 虚拟遥控器：
 

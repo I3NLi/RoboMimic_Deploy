@@ -346,6 +346,7 @@ Gamepad control:
 scripts/run_magicbot_loco_native.sh \
   --input-check \
   --gamepad-control \
+  --gamepad-profile beitong-kp20 \
   --gamepad-device /dev/input/js0 \
   --duration 10
 
@@ -353,12 +354,17 @@ scripts/run_magicbot_loco_native.sh \
   --run \
   --allow-loco \
   --gamepad-control \
+  --gamepad-profile beitong-kp20 \
   --gamepad-device /dev/input/js0 \
   --duration 5 \
   --local-ip 192.168.54.119
 ```
 
 Default Xbox-style gamepad map: left stick Y is `vx`, left stick X is `vy`, right stick X is `wz`. Button 0/A enters `LOCO`, button 1/B enters zero-torque `PASSIVE`, button 2/X pause-zeros, button 3/Y enters `STAND`, button 4/LB requests BeyondMimic, button 5/RB requests TrackMimic, button 6/Back resets the current policy/target without changing mode, button 7/Start toggles pause-zero, button 8/L3 exits the run loop, and button 9/R3 toggles the runtime motion-safety wall. Deadman is disabled by default; set `--gamepad-deadman-button N` if you want one. Axis and button indices are CLI-configurable.
+
+For the BEITONG KP20 profile, use `--gamepad-profile beitong-kp20`: physical
+`X` enters `STAND`, physical `Y` requests `DANCE`/BeyondMimic, `Start` enters
+zero-torque `PASSIVE`, and `RB` is no longer bound to stop.
 
 Virtual remote over shared UDP input:
 

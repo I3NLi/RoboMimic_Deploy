@@ -76,6 +76,8 @@ if end < 0:
 body = source[start:end]
 required = [
     "set_live_input_action_request",
+    "flush_pending",
+    "record_event_state",
     "TextControlAction::Loco",
     "TextControlAction::Passive",
     "TextControlAction::Stand",
@@ -104,6 +106,48 @@ if re.search(r"out\\.mode_request\\s*=", body):
     sys.exit(1)
 if "command_for_control_mode" not in source:
     print("[Smoke][ERROR] real runner must sanitize live commands by current mode through the shared helper", file=sys.stderr)
+    sys.exit(1)
+profile_start = source.find('if (profile == "beitong-kp20"')
+profile_end = source.find('throw std::runtime_error("--gamepad-profile', profile_start)
+if profile_start < 0 or profile_end < 0:
+    print("[Smoke][ERROR] real runner is missing the BEITONG KP20 gamepad profile", file=sys.stderr)
+    sys.exit(1)
+profile_body = source[profile_start:profile_end]
+profile_required = [
+    "args.gamepad_stop_button = -1;",
+    "args.gamepad_passive_button = 7;",
+    "args.gamepad_stand_button = 3;",
+    "args.gamepad_zero_button = -1;",
+    "args.gamepad_pause_button = -1;",
+    "args.gamepad_dance_button = 2;",
+    "args.gamepad_skill_button = 8;",
+]
+missing_profile = [item for item in profile_required if item not in profile_body]
+if missing_profile:
+    print(
+        "[Smoke][ERROR] BEITONG KP20 profile is missing expected observed button mapping: "
+        + ", ".join(missing_profile),
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
+operator_start = source.find("OperatorInput operator_input(args, raw_cmd);")
+operator_end = source.find("if (args.final_stand_time", operator_start)
+if operator_start < 0 or operator_end < 0:
+    print("[Smoke][ERROR] could not locate real runner operator loop", file=sys.stderr)
+    sys.exit(1)
+operator_body = source[operator_start:operator_end]
+recover_start = operator_body.find("const bool recover_to_stand")
+recover_end = operator_body.find("run_mode = requested_mode;", recover_start)
+if recover_start < 0 or recover_end < 0:
+    print("[Smoke][ERROR] could not locate recover-to-stand branch", file=sys.stderr)
+    sys.exit(1)
+recover_body = operator_body[recover_start:recover_end]
+if "stand_interpolation(robot, state, cfg, args, rate_watchdog)" not in recover_body:
+    print("[Smoke][ERROR] recover-to-stand branch should keep staged stand interpolation", file=sys.stderr)
+    sys.exit(1)
+if 'operator_input.flush_pending("recover-to-stand")' not in recover_body:
+    print("[Smoke][ERROR] recover-to-stand must flush queued gamepad input after blocking interpolation", file=sys.stderr)
     sys.exit(1)
 PY
 

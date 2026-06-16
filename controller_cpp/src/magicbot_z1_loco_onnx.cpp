@@ -83,6 +83,7 @@ struct Args {
     bool keyboard_control{false};
     bool gamepad_control{false};
     bool udp_control{false};
+    std::string gamepad_profile{"xbox"};
     std::string gamepad_device{"/dev/input/js0"};
     std::string udp_bind{"0.0.0.0"};
     int udp_port{15000};
@@ -168,6 +169,7 @@ void print_usage(const char* argv0)
         << "                                   L stand/loco, R reset, W/S vx, Q/E vy, A/D wz,\n"
         << "                                   B beyond/dance, T track/skill, X zero, Space/P pause-zero, Esc stop\n"
         << "  --gamepad-control                Live Linux joystick input in run loop\n"
+        << "  --gamepad-profile NAME           xbox or beitong-kp20; profile can be overridden by explicit button flags\n"
         << "  --gamepad-device PATH            Joystick device, default /dev/input/js0\n"
         << "  --udp-control                    Live UDP command input in run loop\n"
         << "  --udp-bind IP                    UDP bind address, default 0.0.0.0\n"
@@ -237,6 +239,54 @@ void apply_motion_safety_preset(Args& args, const std::string& raw_preset)
         return;
     }
     throw std::runtime_error("--motion-safety-preset must be strict or relaxed");
+}
+
+void apply_gamepad_profile(Args& args, const std::string& raw_profile)
+{
+    const std::string profile = lower_ascii(raw_profile);
+    if (profile == "xbox") {
+        args.gamepad_profile = "xbox";
+        args.gamepad_axis_vx = 1;
+        args.gamepad_axis_vy = 0;
+        args.gamepad_axis_wz = 3;
+        args.gamepad_axis_vx_sign = -1.0f;
+        args.gamepad_axis_vy_sign = -1.0f;
+        args.gamepad_axis_wz_sign = -1.0f;
+        args.gamepad_deadman_button = -1;
+        args.gamepad_stop_button = 8;
+        args.gamepad_loco_button = 0;
+        args.gamepad_passive_button = 1;
+        args.gamepad_stand_button = 3;
+        args.gamepad_zero_button = 2;
+        args.gamepad_pause_button = 7;
+        args.gamepad_reset_button = 6;
+        args.gamepad_dance_button = 4;
+        args.gamepad_skill_button = 5;
+        args.gamepad_safety_button = 9;
+        return;
+    }
+    if (profile == "beitong-kp20" || profile == "kp20" || profile == "beitong") {
+        args.gamepad_profile = "beitong-kp20";
+        args.gamepad_axis_vx = 1;
+        args.gamepad_axis_vy = 0;
+        args.gamepad_axis_wz = 3;
+        args.gamepad_axis_vx_sign = -1.0f;
+        args.gamepad_axis_vy_sign = -1.0f;
+        args.gamepad_axis_wz_sign = -1.0f;
+        args.gamepad_deadman_button = -1;
+        args.gamepad_stop_button = -1;
+        args.gamepad_loco_button = 0;
+        args.gamepad_passive_button = 7;
+        args.gamepad_stand_button = 3;
+        args.gamepad_zero_button = -1;
+        args.gamepad_pause_button = -1;
+        args.gamepad_reset_button = 6;
+        args.gamepad_dance_button = 2;
+        args.gamepad_skill_button = 8;
+        args.gamepad_safety_button = 9;
+        return;
+    }
+    throw std::runtime_error("--gamepad-profile must be xbox or beitong-kp20");
 }
 
 SkillTrajectoryYaml parse_skill_trajectory_yaml_arg(const std::string& value)
@@ -329,6 +379,8 @@ Args parse_args(int argc, char** argv)
             args.gamepad_control = true;
         } else if (a == "--udp-control") {
             args.udp_control = true;
+        } else if (a == "--gamepad-profile") {
+            apply_gamepad_profile(args, take_value(i, argc, argv));
         } else if (a == "--gamepad-device") {
             args.gamepad_device = take_value(i, argc, argv);
         } else if (a == "--udp-bind") {
@@ -842,17 +894,54 @@ public:
         return out;
     }
 
-private:
-    void handle_event(const js_event& event, LiveInputState& out)
+    void flush_pending(const char* reason)
     {
-        const uint8_t type = event.type & static_cast<uint8_t>(~JS_EVENT_INIT);
+        int drained = 0;
+        js_event event{};
+        while (true) {
+            const ssize_t n = read(fd_, &event, sizeof(event));
+            if (n == static_cast<ssize_t>(sizeof(event))) {
+                record_event_state(event);
+                ++drained;
+                continue;
+            }
+            if (n < 0 && errno != EAGAIN && errno != EWOULDBLOCK) {
+                throw std::runtime_error(std::string("gamepad flush failed: ") + std::strerror(errno));
+            }
+            break;
+        }
+        if (drained > 0) {
+            std::cout << "[Input] Flushed " << drained << " pending gamepad events after "
+                      << reason << std::endl;
+        }
+    }
+
+private:
+    uint8_t event_type(const js_event& event) const
+    {
+        return event.type & static_cast<uint8_t>(~JS_EVENT_INIT);
+    }
+
+    void record_event_state(const js_event& event)
+    {
+        const uint8_t type = event_type(event);
         if (type == JS_EVENT_AXIS) {
             if (event.number >= axes_.size()) axes_.resize(static_cast<size_t>(event.number) + 1, 0.0f);
             axes_[event.number] = normalized_axis_value(event.value);
-            out.changed = true;
         } else if (type == JS_EVENT_BUTTON) {
             if (event.number >= buttons_.size()) buttons_.resize(static_cast<size_t>(event.number) + 1, 0);
             buttons_[event.number] = event.value ? 1 : 0;
+        }
+    }
+
+    void handle_event(const js_event& event, LiveInputState& out)
+    {
+        const uint8_t type = event_type(event);
+        if (type == JS_EVENT_AXIS) {
+            record_event_state(event);
+            out.changed = true;
+        } else if (type == JS_EVENT_BUTTON) {
+            record_event_state(event);
             out.changed = true;
             if (args_.gamepad_stop_button >= 0 && event.number == args_.gamepad_stop_button && event.value) {
                 set_live_input_action_request(out, ml::TextControlAction::Stop, nullptr, &paused_);
@@ -1034,7 +1123,8 @@ public:
         }
         if (args.gamepad_control) {
             gamepad_ = std::make_unique<GamepadInput>(args);
-            std::cout << "[Input] Gamepad control enabled: device=" << args.gamepad_device
+            std::cout << "[Input] Gamepad control enabled: profile=" << args.gamepad_profile
+                      << " device=" << args.gamepad_device
                       << " axes(vx,vy,wz)=[" << args.gamepad_axis_vx << " " << args.gamepad_axis_vy << " "
                       << args.gamepad_axis_wz << "] deadman_button=" << args.gamepad_deadman_button
                       << " stop_button=" << args.gamepad_stop_button
@@ -1066,6 +1156,11 @@ public:
         if (gamepad_) return gamepad_->poll();
         if (udp_) return udp_->poll();
         return {};
+    }
+
+    void flush_pending(const char* reason)
+    {
+        if (gamepad_) gamepad_->flush_pending(reason);
     }
 
 private:
@@ -1563,6 +1658,7 @@ int run_robot_with_finally(const Args& args, const ml::LocoConfig& cfg, ml::Cont
                             command_target = stand_interpolation(robot, state, cfg, args, rate_watchdog);
                             core.seed_target(command_target);
                             core.reset_policy();
+                            operator_input.flush_pending("recover-to-stand");
                             next_control_t = std::chrono::steady_clock::now();
                             last_log = next_control_t - std::chrono::seconds(60);
                         }
