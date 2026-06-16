@@ -97,6 +97,12 @@ struct Args {
     float gamepad_axis_vx_sign{-1.0f};
     float gamepad_axis_vy_sign{-1.0f};
     float gamepad_axis_wz_sign{-1.0f};
+    float gamepad_axis_vy_positive_limit{1.0f};
+    float gamepad_axis_vy_negative_limit{1.0f};
+    bool gamepad_vx_slew{false};
+    float gamepad_vx_accel_rate{1.2f};
+    float gamepad_vx_brake_rate{1.8f};
+    float gamepad_vx_coast_rate{0.7f};
     int gamepad_deadman_button{-1};
     int gamepad_stop_button{8};
     int gamepad_loco_button{0};
@@ -189,6 +195,15 @@ void print_usage(const char* argv0)
         << "  --gamepad-axis-vx-sign S         Axis sign for vx, default -1\n"
         << "  --gamepad-axis-vy-sign S         Axis sign for vy, default -1\n"
         << "  --gamepad-axis-wz-sign S         Axis sign for wz, default -1\n"
+        << "  --gamepad-axis-vy-positive-limit V\n"
+        << "                                   Positive normalized vy limit, default 1\n"
+        << "  --gamepad-axis-vy-negative-limit V\n"
+        << "                                   Negative normalized vy magnitude, default 1; KP20 default 0.6\n"
+        << "  --gamepad-vx-slew                Ramp gamepad vx toward stick target instead of direct mapping\n"
+        << "  --disable-gamepad-vx-slew        Disable gamepad vx ramping\n"
+        << "  --gamepad-vx-accel-rate R        Normalized vx/s while accelerating, KP20 default 1.2\n"
+        << "  --gamepad-vx-brake-rate R        Normalized vx/s while braking/reversing, KP20 default 1.8\n"
+        << "  --gamepad-vx-coast-rate R        Normalized vx/s back to zero after release, KP20 default 0.7\n"
         << "  --gamepad-deadman-button N       Button that must be held for nonzero command, default disabled (-1)\n"
         << "  --gamepad-stop-button N          Button that stops run loop, default 8 (L3)\n"
         << "  --gamepad-loco-button N          Button that enters LOCO, default 0\n"
@@ -271,6 +286,9 @@ void apply_gamepad_profile(Args& args, const std::string& raw_profile)
         args.gamepad_axis_vx_sign = -1.0f;
         args.gamepad_axis_vy_sign = -1.0f;
         args.gamepad_axis_wz_sign = -1.0f;
+        args.gamepad_axis_vy_positive_limit = 1.0f;
+        args.gamepad_axis_vy_negative_limit = 1.0f;
+        args.gamepad_vx_slew = false;
         args.gamepad_deadman_button = -1;
         args.gamepad_stop_button = 8;
         args.gamepad_loco_button = 0;
@@ -286,12 +304,18 @@ void apply_gamepad_profile(Args& args, const std::string& raw_profile)
     }
     if (profile == "beitong-kp20" || profile == "kp20" || profile == "beitong") {
         args.gamepad_profile = "beitong-kp20";
-        args.gamepad_axis_vx = 1;
-        args.gamepad_axis_vy = 2;
+        args.gamepad_axis_vx = 3;
+        args.gamepad_axis_vy = 1;
         args.gamepad_axis_wz = 0;
         args.gamepad_axis_vx_sign = -1.0f;
         args.gamepad_axis_vy_sign = -1.0f;
         args.gamepad_axis_wz_sign = -1.0f;
+        args.gamepad_axis_vy_positive_limit = 1.0f;
+        args.gamepad_axis_vy_negative_limit = 0.6f;
+        args.gamepad_vx_slew = true;
+        args.gamepad_vx_accel_rate = 1.2f;
+        args.gamepad_vx_brake_rate = 1.8f;
+        args.gamepad_vx_coast_rate = 0.7f;
         args.gamepad_deadman_button = -1;
         args.gamepad_stop_button = -1;
         args.gamepad_loco_button = 0;
@@ -424,6 +448,20 @@ Args parse_args(int argc, char** argv)
             args.gamepad_axis_vy_sign = std::stof(take_value(i, argc, argv));
         } else if (a == "--gamepad-axis-wz-sign") {
             args.gamepad_axis_wz_sign = std::stof(take_value(i, argc, argv));
+        } else if (a == "--gamepad-axis-vy-positive-limit") {
+            args.gamepad_axis_vy_positive_limit = std::stof(take_value(i, argc, argv));
+        } else if (a == "--gamepad-axis-vy-negative-limit") {
+            args.gamepad_axis_vy_negative_limit = std::stof(take_value(i, argc, argv));
+        } else if (a == "--gamepad-vx-slew") {
+            args.gamepad_vx_slew = true;
+        } else if (a == "--disable-gamepad-vx-slew") {
+            args.gamepad_vx_slew = false;
+        } else if (a == "--gamepad-vx-accel-rate") {
+            args.gamepad_vx_accel_rate = std::stof(take_value(i, argc, argv));
+        } else if (a == "--gamepad-vx-brake-rate") {
+            args.gamepad_vx_brake_rate = std::stof(take_value(i, argc, argv));
+        } else if (a == "--gamepad-vx-coast-rate") {
+            args.gamepad_vx_coast_rate = std::stof(take_value(i, argc, argv));
         } else if (a == "--gamepad-deadman-button") {
             args.gamepad_deadman_button = std::stoi(take_value(i, argc, argv));
         } else if (a == "--gamepad-stop-button") {
@@ -534,6 +572,11 @@ Args parse_args(int argc, char** argv)
     }
     args.input_step = std::clamp(args.input_step, 0.001f, 1.0f);
     args.input_deadzone = std::clamp(args.input_deadzone, 0.0f, 0.95f);
+    args.gamepad_axis_vy_positive_limit = std::clamp(args.gamepad_axis_vy_positive_limit, 0.0f, 1.0f);
+    args.gamepad_axis_vy_negative_limit = std::clamp(args.gamepad_axis_vy_negative_limit, 0.0f, 1.0f);
+    args.gamepad_vx_accel_rate = std::clamp(args.gamepad_vx_accel_rate, 0.01f, 10.0f);
+    args.gamepad_vx_brake_rate = std::clamp(args.gamepad_vx_brake_rate, 0.01f, 10.0f);
+    args.gamepad_vx_coast_rate = std::clamp(args.gamepad_vx_coast_rate, 0.01f, 10.0f);
     args.udp_port = std::clamp(args.udp_port, 1, 65535);
     args.udp_timeout_s = std::clamp(args.udp_timeout_s, 0.02, 10.0);
     args.tilt_stand_min_body_ground_angle_deg =
@@ -864,7 +907,7 @@ private:
 class GamepadInput {
 public:
     explicit GamepadInput(const Args& args)
-        : args_(args), axes_(16, 0.0f), buttons_(16, 0)
+        : args_(args), axes_(16, 0.0f), buttons_(16, 0), last_poll_t_(std::chrono::steady_clock::now())
     {
         fd_ = open(args_.gamepad_device.c_str(), O_RDONLY | O_NONBLOCK);
         if (fd_ < 0) {
@@ -895,20 +938,41 @@ public:
 
         const bool deadman_required = args_.gamepad_deadman_button >= 0;
         const bool deadman_pressed = !deadman_required || button_pressed(args_.gamepad_deadman_button);
+        const auto now = std::chrono::steady_clock::now();
+        const float dt = std::clamp(
+            static_cast<float>(std::chrono::duration<double>(now - last_poll_t_).count()),
+            0.0f,
+            0.05f);
+        last_poll_t_ = now;
+
+        const float vx_target = axis_command(args_.gamepad_axis_vx, args_.gamepad_axis_vx_sign);
+        if (args_.gamepad_vx_slew) {
+            vx_command_ = slew_axis(vx_command_, vx_target, dt);
+        } else {
+            vx_command_ = vx_target;
+        }
+
         out.command = {
-            axis_command(args_.gamepad_axis_vx, args_.gamepad_axis_vx_sign),
-            axis_command(args_.gamepad_axis_vy, args_.gamepad_axis_vy_sign),
+            vx_command_,
+            axis_command(
+                args_.gamepad_axis_vy,
+                args_.gamepad_axis_vy_sign,
+                args_.gamepad_axis_vy_positive_limit,
+                args_.gamepad_axis_vy_negative_limit),
             axis_command(args_.gamepad_axis_wz, args_.gamepad_axis_wz_sign),
         };
         if (out.mode_request.requested && out.mode_request.mode != ml::ControlMode::Loco) {
             out.command = {0.0f, 0.0f, 0.0f};
+            vx_command_ = 0.0f;
         }
         if (!deadman_pressed) {
             out.command = {0.0f, 0.0f, 0.0f};
+            vx_command_ = 0.0f;
             out.zeroed_by_deadman = true;
         }
         if (paused_) {
             out.command = {0.0f, 0.0f, 0.0f};
+            vx_command_ = 0.0f;
             out.pause_zero = true;
         }
         out.status = paused_ ? "gamepad paused" : (deadman_pressed ? "gamepad" : "gamepad deadman-open");
@@ -1008,10 +1072,29 @@ private:
         return index >= 0 && index < static_cast<int>(buttons_.size()) && buttons_[static_cast<size_t>(index)] != 0;
     }
 
-    float axis_command(int index, float sign) const
+    float axis_command(
+        int index,
+        float sign,
+        float positive_limit = 1.0f,
+        float negative_limit = 1.0f) const
     {
         if (index < 0 || index >= static_cast<int>(axes_.size())) return 0.0f;
-        return clamp_command(apply_axis_deadzone(axes_[static_cast<size_t>(index)], args_.input_deadzone) * sign);
+        const float value = apply_axis_deadzone(axes_[static_cast<size_t>(index)], args_.input_deadzone) * sign;
+        const float limited = value >= 0.0f ? value * positive_limit : value * negative_limit;
+        return clamp_command(limited);
+    }
+
+    float slew_axis(float current, float target, float dt) const
+    {
+        float rate = args_.gamepad_vx_accel_rate;
+        if (std::fabs(target) < 1e-4f) {
+            rate = args_.gamepad_vx_coast_rate;
+        } else if (current * target < -1e-4f || std::fabs(target) < std::fabs(current)) {
+            rate = args_.gamepad_vx_brake_rate;
+        }
+        const float max_step = rate * dt;
+        if (std::fabs(target - current) <= max_step) return target;
+        return current + std::copysign(max_step, target - current);
     }
 
     const Args& args_;
@@ -1019,6 +1102,8 @@ private:
     std::vector<float> axes_;
     std::vector<int> buttons_;
     bool paused_{false};
+    float vx_command_{0.0f};
+    std::chrono::steady_clock::time_point last_poll_t_;
 };
 
 class UdpCommandInput {
@@ -1149,6 +1234,12 @@ public:
                       << " device=" << args.gamepad_device
                       << " axes(vx,vy,wz)=[" << args.gamepad_axis_vx << " " << args.gamepad_axis_vy << " "
                       << args.gamepad_axis_wz << "] deadman_button=" << args.gamepad_deadman_button
+                      << " vy_limits=[-" << args.gamepad_axis_vy_negative_limit
+                      << " +" << args.gamepad_axis_vy_positive_limit << "]"
+                      << " vx_slew=" << (args.gamepad_vx_slew ? "yes" : "no")
+                      << " vx_rates(accel,brake,coast)=[" << args.gamepad_vx_accel_rate
+                      << " " << args.gamepad_vx_brake_rate
+                      << " " << args.gamepad_vx_coast_rate << "]"
                       << " stop_button=" << args.gamepad_stop_button
                       << " loco_button=" << args.gamepad_loco_button
                       << " passive_button=" << args.gamepad_passive_button
