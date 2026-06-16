@@ -92,13 +92,18 @@ struct Args {
     float input_step{0.05f};
     float input_deadzone{0.08f};
     int gamepad_axis_vx{1};
+    int gamepad_axis_vx_direct{-1};
     int gamepad_axis_vy{0};
     int gamepad_axis_wz{3};
     float gamepad_axis_vx_sign{-1.0f};
+    float gamepad_axis_vx_direct_sign{-1.0f};
     float gamepad_axis_vy_sign{-1.0f};
     float gamepad_axis_wz_sign{-1.0f};
+    float gamepad_axis_vx_direct_positive_limit{1.0f};
+    float gamepad_axis_vx_direct_negative_limit{1.0f};
     float gamepad_axis_vy_positive_limit{1.0f};
     float gamepad_axis_vy_negative_limit{1.0f};
+    float gamepad_axis_wz_scale{1.0f};
     bool gamepad_vx_slew{false};
     float gamepad_vx_accel_rate{1.2f};
     float gamepad_vx_brake_rate{1.8f};
@@ -189,21 +194,28 @@ void print_usage(const char* argv0)
         << "  --udp-timeout-s S                Zero command after no UDP packet, default 0.35\n"
         << "  --input-step V                   Keyboard normalized command step, default 0.05\n"
         << "  --input-deadzone V               Gamepad axis deadzone, default 0.08\n"
-        << "  --gamepad-axis-vx N              Axis index for vx, default 1\n"
+        << "  --gamepad-axis-vx N              Axis index for ramped vx, default 1\n"
+        << "  --gamepad-axis-vx-direct N       Axis index for direct vx override, default disabled (-1)\n"
         << "  --gamepad-axis-vy N              Axis index for vy, default 0\n"
         << "  --gamepad-axis-wz N              Axis index for wz, default 3\n"
         << "  --gamepad-axis-vx-sign S         Axis sign for vx, default -1\n"
+        << "  --gamepad-axis-vx-direct-sign S  Axis sign for direct vx, default -1\n"
         << "  --gamepad-axis-vy-sign S         Axis sign for vy, default -1\n"
         << "  --gamepad-axis-wz-sign S         Axis sign for wz, default -1\n"
+        << "  --gamepad-axis-vx-direct-positive-limit V\n"
+        << "                                   Positive normalized direct vx limit, KP20 default 1\n"
+        << "  --gamepad-axis-vx-direct-negative-limit V\n"
+        << "                                   Negative normalized direct vx magnitude, KP20 default 0.6\n"
         << "  --gamepad-axis-vy-positive-limit V\n"
         << "                                   Positive normalized vy limit, default 1\n"
         << "  --gamepad-axis-vy-negative-limit V\n"
-        << "                                   Negative normalized vy magnitude, default 1; KP20 default 0.6\n"
+        << "                                   Negative normalized vy magnitude, default 1\n"
+        << "  --gamepad-axis-wz-scale V        Normalized wz scale after deadzone, KP20 default 0.5\n"
         << "  --gamepad-vx-slew                Ramp gamepad vx toward stick target instead of direct mapping\n"
         << "  --disable-gamepad-vx-slew        Disable gamepad vx ramping\n"
-        << "  --gamepad-vx-accel-rate R        Normalized vx/s while accelerating, KP20 default 1.2\n"
-        << "  --gamepad-vx-brake-rate R        Normalized vx/s while braking/reversing, KP20 default 1.8\n"
-        << "  --gamepad-vx-coast-rate R        Normalized vx/s back to zero after release, KP20 default 0.7\n"
+        << "  --gamepad-vx-accel-rate R        Normalized vx/s while accelerating, KP20 default 0.8\n"
+        << "  --gamepad-vx-brake-rate R        Normalized vx/s while braking/reversing, KP20 default 1.2\n"
+        << "  --gamepad-vx-coast-rate R        Normalized vx/s back to zero after release, KP20 default 0.45\n"
         << "  --gamepad-deadman-button N       Button that must be held for nonzero command, default disabled (-1)\n"
         << "  --gamepad-stop-button N          Button that stops run loop, default 8 (L3)\n"
         << "  --gamepad-loco-button N          Button that enters LOCO, default 0\n"
@@ -281,13 +293,18 @@ void apply_gamepad_profile(Args& args, const std::string& raw_profile)
     if (profile == "xbox") {
         args.gamepad_profile = "xbox";
         args.gamepad_axis_vx = 1;
+        args.gamepad_axis_vx_direct = -1;
         args.gamepad_axis_vy = 0;
         args.gamepad_axis_wz = 3;
         args.gamepad_axis_vx_sign = -1.0f;
+        args.gamepad_axis_vx_direct_sign = -1.0f;
         args.gamepad_axis_vy_sign = -1.0f;
         args.gamepad_axis_wz_sign = -1.0f;
+        args.gamepad_axis_vx_direct_positive_limit = 1.0f;
+        args.gamepad_axis_vx_direct_negative_limit = 1.0f;
         args.gamepad_axis_vy_positive_limit = 1.0f;
         args.gamepad_axis_vy_negative_limit = 1.0f;
+        args.gamepad_axis_wz_scale = 1.0f;
         args.gamepad_vx_slew = false;
         args.gamepad_deadman_button = -1;
         args.gamepad_stop_button = 8;
@@ -305,17 +322,22 @@ void apply_gamepad_profile(Args& args, const std::string& raw_profile)
     if (profile == "beitong-kp20" || profile == "kp20" || profile == "beitong") {
         args.gamepad_profile = "beitong-kp20";
         args.gamepad_axis_vx = 3;
-        args.gamepad_axis_vy = 1;
+        args.gamepad_axis_vx_direct = 1;
+        args.gamepad_axis_vy = 2;
         args.gamepad_axis_wz = 0;
         args.gamepad_axis_vx_sign = -1.0f;
+        args.gamepad_axis_vx_direct_sign = -1.0f;
         args.gamepad_axis_vy_sign = -1.0f;
         args.gamepad_axis_wz_sign = -1.0f;
+        args.gamepad_axis_vx_direct_positive_limit = 1.0f;
+        args.gamepad_axis_vx_direct_negative_limit = 0.6f;
         args.gamepad_axis_vy_positive_limit = 1.0f;
-        args.gamepad_axis_vy_negative_limit = 0.6f;
+        args.gamepad_axis_vy_negative_limit = 1.0f;
+        args.gamepad_axis_wz_scale = 0.5f;
         args.gamepad_vx_slew = true;
-        args.gamepad_vx_accel_rate = 1.2f;
-        args.gamepad_vx_brake_rate = 1.8f;
-        args.gamepad_vx_coast_rate = 0.7f;
+        args.gamepad_vx_accel_rate = 0.8f;
+        args.gamepad_vx_brake_rate = 1.2f;
+        args.gamepad_vx_coast_rate = 0.45f;
         args.gamepad_deadman_button = -1;
         args.gamepad_stop_button = -1;
         args.gamepad_loco_button = 0;
@@ -438,20 +460,30 @@ Args parse_args(int argc, char** argv)
             args.input_deadzone = std::stof(take_value(i, argc, argv));
         } else if (a == "--gamepad-axis-vx") {
             args.gamepad_axis_vx = std::stoi(take_value(i, argc, argv));
+        } else if (a == "--gamepad-axis-vx-direct") {
+            args.gamepad_axis_vx_direct = std::stoi(take_value(i, argc, argv));
         } else if (a == "--gamepad-axis-vy") {
             args.gamepad_axis_vy = std::stoi(take_value(i, argc, argv));
         } else if (a == "--gamepad-axis-wz") {
             args.gamepad_axis_wz = std::stoi(take_value(i, argc, argv));
         } else if (a == "--gamepad-axis-vx-sign") {
             args.gamepad_axis_vx_sign = std::stof(take_value(i, argc, argv));
+        } else if (a == "--gamepad-axis-vx-direct-sign") {
+            args.gamepad_axis_vx_direct_sign = std::stof(take_value(i, argc, argv));
         } else if (a == "--gamepad-axis-vy-sign") {
             args.gamepad_axis_vy_sign = std::stof(take_value(i, argc, argv));
         } else if (a == "--gamepad-axis-wz-sign") {
             args.gamepad_axis_wz_sign = std::stof(take_value(i, argc, argv));
+        } else if (a == "--gamepad-axis-vx-direct-positive-limit") {
+            args.gamepad_axis_vx_direct_positive_limit = std::stof(take_value(i, argc, argv));
+        } else if (a == "--gamepad-axis-vx-direct-negative-limit") {
+            args.gamepad_axis_vx_direct_negative_limit = std::stof(take_value(i, argc, argv));
         } else if (a == "--gamepad-axis-vy-positive-limit") {
             args.gamepad_axis_vy_positive_limit = std::stof(take_value(i, argc, argv));
         } else if (a == "--gamepad-axis-vy-negative-limit") {
             args.gamepad_axis_vy_negative_limit = std::stof(take_value(i, argc, argv));
+        } else if (a == "--gamepad-axis-wz-scale") {
+            args.gamepad_axis_wz_scale = std::stof(take_value(i, argc, argv));
         } else if (a == "--gamepad-vx-slew") {
             args.gamepad_vx_slew = true;
         } else if (a == "--disable-gamepad-vx-slew") {
@@ -572,8 +604,13 @@ Args parse_args(int argc, char** argv)
     }
     args.input_step = std::clamp(args.input_step, 0.001f, 1.0f);
     args.input_deadzone = std::clamp(args.input_deadzone, 0.0f, 0.95f);
+    args.gamepad_axis_vx_direct_positive_limit =
+        std::clamp(args.gamepad_axis_vx_direct_positive_limit, 0.0f, 1.0f);
+    args.gamepad_axis_vx_direct_negative_limit =
+        std::clamp(args.gamepad_axis_vx_direct_negative_limit, 0.0f, 1.0f);
     args.gamepad_axis_vy_positive_limit = std::clamp(args.gamepad_axis_vy_positive_limit, 0.0f, 1.0f);
     args.gamepad_axis_vy_negative_limit = std::clamp(args.gamepad_axis_vy_negative_limit, 0.0f, 1.0f);
+    args.gamepad_axis_wz_scale = std::clamp(args.gamepad_axis_wz_scale, 0.0f, 1.0f);
     args.gamepad_vx_accel_rate = std::clamp(args.gamepad_vx_accel_rate, 0.01f, 10.0f);
     args.gamepad_vx_brake_rate = std::clamp(args.gamepad_vx_brake_rate, 0.01f, 10.0f);
     args.gamepad_vx_coast_rate = std::clamp(args.gamepad_vx_coast_rate, 0.01f, 10.0f);
@@ -964,15 +1001,29 @@ public:
         } else {
             vx_command_ = vx_target;
         }
+        const float vx_direct = axis_command(
+            args_.gamepad_axis_vx_direct,
+            args_.gamepad_axis_vx_direct_sign,
+            args_.gamepad_axis_vx_direct_positive_limit,
+            args_.gamepad_axis_vx_direct_negative_limit);
+        const bool vx_direct_active = std::fabs(vx_direct) > 1e-4f;
+        const float vx_output = vx_direct_active ? vx_direct : vx_command_;
+        if (vx_direct_active) {
+            vx_command_ = vx_direct;
+        }
 
         out.command = {
-            vx_command_,
+            vx_output,
             axis_command(
                 args_.gamepad_axis_vy,
                 args_.gamepad_axis_vy_sign,
                 args_.gamepad_axis_vy_positive_limit,
                 args_.gamepad_axis_vy_negative_limit),
-            axis_command(args_.gamepad_axis_wz, args_.gamepad_axis_wz_sign),
+            axis_command(
+                args_.gamepad_axis_wz,
+                args_.gamepad_axis_wz_sign,
+                args_.gamepad_axis_wz_scale,
+                args_.gamepad_axis_wz_scale),
         };
         if (out.mode_request.requested && out.mode_request.mode != ml::ControlMode::Loco) {
             out.command = {0.0f, 0.0f, 0.0f};
@@ -1287,10 +1338,15 @@ public:
             gamepad_ = std::make_unique<GamepadInput>(args);
             std::cout << "[Input] Gamepad control enabled: profile=" << args.gamepad_profile
                       << " device=" << args.gamepad_device
-                      << " axes(vx,vy,wz)=[" << args.gamepad_axis_vx << " " << args.gamepad_axis_vy << " "
-                      << args.gamepad_axis_wz << "] deadman_button=" << args.gamepad_deadman_button
+                      << " axes(vx_slew,vx_linear,vy,wz)=[" << args.gamepad_axis_vx
+                      << " " << args.gamepad_axis_vx_direct
+                      << " " << args.gamepad_axis_vy
+                      << " " << args.gamepad_axis_wz << "] deadman_button=" << args.gamepad_deadman_button
+                      << " vx_linear_limits=[-" << args.gamepad_axis_vx_direct_negative_limit
+                      << " +" << args.gamepad_axis_vx_direct_positive_limit << "]"
                       << " vy_limits=[-" << args.gamepad_axis_vy_negative_limit
                       << " +" << args.gamepad_axis_vy_positive_limit << "]"
+                      << " wz_scale=" << args.gamepad_axis_wz_scale
                       << " vx_slew=" << (args.gamepad_vx_slew ? "yes" : "no")
                       << " vx_rates(accel,brake,coast)=[" << args.gamepad_vx_accel_rate
                       << " " << args.gamepad_vx_brake_rate

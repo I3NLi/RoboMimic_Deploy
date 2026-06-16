@@ -114,9 +114,16 @@ if profile_start < 0 or profile_end < 0:
     sys.exit(1)
 profile_body = source[profile_start:profile_end]
 profile_required = [
-    "args.gamepad_axis_vx = 1;",
+    "args.gamepad_axis_vx = 3;",
+    "args.gamepad_axis_vx_direct = 1;",
     "args.gamepad_axis_vy = 2;",
     "args.gamepad_axis_wz = 0;",
+    "args.gamepad_axis_vx_direct_positive_limit = 1.0f;",
+    "args.gamepad_axis_vx_direct_negative_limit = 0.6f;",
+    "args.gamepad_axis_wz_scale = 0.5f;",
+    "args.gamepad_vx_accel_rate = 0.8f;",
+    "args.gamepad_vx_brake_rate = 1.2f;",
+    "args.gamepad_vx_coast_rate = 0.45f;",
     "args.gamepad_stop_button = -1;",
     "args.gamepad_loco_button = 0;",
     "args.gamepad_passive_button = 11;",
