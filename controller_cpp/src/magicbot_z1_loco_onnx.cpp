@@ -210,7 +210,7 @@ void print_usage(const char* argv0)
         << "                                   Positive normalized vy limit, default 1\n"
         << "  --gamepad-axis-vy-negative-limit V\n"
         << "                                   Negative normalized vy magnitude, default 1\n"
-        << "  --gamepad-axis-wz-scale V        Normalized wz scale after deadzone, KP20 default 0.5\n"
+        << "  --gamepad-axis-wz-scale V        Normalized wz scale after deadzone, KP20 default 0.25\n"
         << "  --gamepad-vx-slew                Ramp gamepad vx toward stick target instead of direct mapping\n"
         << "  --disable-gamepad-vx-slew        Disable gamepad vx ramping\n"
         << "  --gamepad-vx-accel-rate R        Normalized vx/s while accelerating, KP20 default 0.8\n"
@@ -333,7 +333,7 @@ void apply_gamepad_profile(Args& args, const std::string& raw_profile)
         args.gamepad_axis_vx_direct_negative_limit = 0.6f;
         args.gamepad_axis_vy_positive_limit = 1.0f;
         args.gamepad_axis_vy_negative_limit = 1.0f;
-        args.gamepad_axis_wz_scale = 0.5f;
+        args.gamepad_axis_wz_scale = 0.25f;
         args.gamepad_vx_slew = true;
         args.gamepad_vx_accel_rate = 0.8f;
         args.gamepad_vx_brake_rate = 1.2f;
