@@ -532,11 +532,6 @@ Args parse_args(int argc, char** argv)
     if (args.safety.joint_scope != "body" && args.safety.joint_scope != "legs" && args.safety.joint_scope != "all") {
         throw std::runtime_error("--motion-safety-joint-scope must be body, legs or all");
     }
-    const int live_inputs = static_cast<int>(args.keyboard_control) + static_cast<int>(args.gamepad_control) +
-                            static_cast<int>(args.udp_control);
-    if (live_inputs > 1) {
-        throw std::runtime_error("use only one of --keyboard-control, --gamepad-control or --udp-control");
-    }
     args.input_step = std::clamp(args.input_step, 0.001f, 1.0f);
     args.input_deadzone = std::clamp(args.input_deadzone, 0.0f, 0.95f);
     args.udp_port = std::clamp(args.udp_port, 1, 65535);
@@ -1140,6 +1135,7 @@ private:
 class OperatorInput {
 public:
     OperatorInput(const Args& args, std::array<float, 3> initial_command)
+        : command_(initial_command)
     {
         if (args.keyboard_control) {
             keyboard_ = std::make_unique<TerminalKeyboardInput>(initial_command, args.input_step);
@@ -1178,10 +1174,50 @@ public:
 
     LiveInputState poll()
     {
-        if (keyboard_) return keyboard_->poll();
-        if (gamepad_) return gamepad_->poll();
-        if (udp_) return udp_->poll();
-        return {};
+        std::vector<SourcePoll> polls;
+        if (keyboard_) polls.push_back({InputSource::Keyboard, keyboard_->poll()});
+        if (udp_) polls.push_back({InputSource::Udp, udp_->poll()});
+        if (gamepad_) polls.push_back({InputSource::Gamepad, gamepad_->poll()});
+        if (polls.empty()) return {};
+
+        LiveInputState out;
+        std::string changed_status;
+        int chosen_changed = -1;
+        for (int i = 0; i < static_cast<int>(polls.size()); ++i) {
+            const SourcePoll& poll = polls[static_cast<size_t>(i)];
+            const LiveInputState& state = poll.state;
+            merge_requests(out, state);
+
+            if (!state.changed) continue;
+            const bool inactive_udp_timeout =
+                poll.source == InputSource::Udp && state.status == "udp timeout" && active_source_ != InputSource::Udp;
+            if (inactive_udp_timeout) continue;
+
+            if (!changed_status.empty()) changed_status += "+";
+            changed_status += state.status;
+            chosen_changed = i;
+            out.changed = true;
+        }
+
+        if (chosen_changed >= 0) {
+            active_source_ = polls[static_cast<size_t>(chosen_changed)].source;
+        }
+
+        const int active_index = active_poll_index(polls);
+        if (active_index >= 0) {
+            const LiveInputState& active = polls[static_cast<size_t>(active_index)].state;
+            command_ = active.command;
+            status_ = active.status;
+            pause_zero_ = active.pause_zero;
+            zeroed_by_deadman_ = active.zeroed_by_deadman;
+        }
+
+        out.command = command_;
+        out.pause_zero = pause_zero_;
+        out.zeroed_by_deadman = zeroed_by_deadman_;
+        out.status = changed_status.empty() ? status_ : changed_status;
+        if (out.status.empty()) out.status = "input";
+        return out;
     }
 
     void flush_pending(const char* reason)
@@ -1190,9 +1226,45 @@ public:
     }
 
 private:
+    enum class InputSource {
+        None,
+        Keyboard,
+        Udp,
+        Gamepad,
+    };
+
+    struct SourcePoll {
+        InputSource source{InputSource::None};
+        LiveInputState state;
+    };
+
+    static void merge_requests(LiveInputState& out, const LiveInputState& state)
+    {
+        out.stop_requested = out.stop_requested || state.stop_requested;
+        out.toggle_loco_requested = out.toggle_loco_requested || state.toggle_loco_requested;
+        out.reset_stand_requested = out.reset_stand_requested || state.reset_stand_requested;
+        if (state.mode_request.requested) out.mode_request = state.mode_request;
+        if (state.safety_request != ml::TextControlSafetyCommand::None) {
+            out.safety_request = state.safety_request;
+        }
+    }
+
+    int active_poll_index(const std::vector<SourcePoll>& polls) const
+    {
+        for (int i = 0; i < static_cast<int>(polls.size()); ++i) {
+            if (polls[static_cast<size_t>(i)].source == active_source_) return i;
+        }
+        return -1;
+    }
+
     std::unique_ptr<TerminalKeyboardInput> keyboard_;
     std::unique_ptr<GamepadInput> gamepad_;
     std::unique_ptr<UdpCommandInput> udp_;
+    InputSource active_source_{InputSource::None};
+    std::array<float, 3> command_{0.0f, 0.0f, 0.0f};
+    std::string status_{"input"};
+    bool pause_zero_{false};
+    bool zeroed_by_deadman_{false};
 };
 
 ml::RobotSnapshot dry_run_snapshot(const ml::LocoConfig& cfg)
