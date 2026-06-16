@@ -123,6 +123,7 @@ struct Args {
     float damping_kd{3.0f};
     ml::RateWatchdogConfig rate;
     ml::SafetyConfig safety;
+    std::string motion_safety_preset{"strict"};
     double log_interval{1.0};
 };
 
@@ -160,6 +161,7 @@ void print_usage(const char* argv0)
         << "  --final-stand-hold-s S           Stand hold before final damping\n"
         << "  --hold-final-stand               Hold final stand until signal\n"
         << "  --max-target-rate R              Max target slew rate in rad/s, default 25\n"
+        << "  --motion-safety-preset P         strict or relaxed; relaxed keeps hard stops but allows broad LOCO motion\n"
         << "\n"
         << "Operator input:\n"
         << "  --keyboard-control               Live terminal keyboard input in run loop\n"
@@ -203,6 +205,38 @@ std::string take_value(int& i, int argc, char** argv)
 {
     if (i + 1 >= argc) throw std::runtime_error(std::string("missing value for ") + argv[i]);
     return argv[++i];
+}
+
+std::string lower_ascii(std::string value)
+{
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+    return value;
+}
+
+void apply_motion_safety_preset(Args& args, const std::string& raw_preset)
+{
+    const std::string preset = lower_ascii(raw_preset);
+    if (preset == "strict") {
+        args.motion_safety_preset = "strict";
+        args.safety = ml::SafetyConfig{};
+        return;
+    }
+    if (preset == "relaxed") {
+        args.motion_safety_preset = "relaxed";
+        args.safety.enabled = true;
+        args.safety.joint_scope = "body";
+        args.safety.max_joint_vel = 35.0f;
+        args.safety.max_ang_vel = 12.0f;
+        args.safety.max_gravity_xy = 0.98f;
+        args.safety.max_default_dev = 2.2f;
+        args.safety.max_target_error = 1.8f;
+        args.safety.max_policy_target_dev = 0.0f;
+        args.safety.max_policy_target_jump = 0.0f;
+        return;
+    }
+    throw std::runtime_error("--motion-safety-preset must be strict or relaxed");
 }
 
 SkillTrajectoryYaml parse_skill_trajectory_yaml_arg(const std::string& value)
@@ -379,8 +413,11 @@ Args parse_args(int argc, char** argv)
             args.rate.window_s = std::stod(take_value(i, argc, argv));
         } else if (a == "--rate-watchdog-max-gap-ms") {
             args.rate.max_gap_s = std::stod(take_value(i, argc, argv)) / 1000.0;
+        } else if (a == "--motion-safety-preset") {
+            apply_motion_safety_preset(args, take_value(i, argc, argv));
         } else if (a == "--disable-motion-safety") {
             args.safety.enabled = false;
+            args.motion_safety_preset = "disabled";
         } else if (a == "--motion-safety-joint-scope") {
             args.safety.joint_scope = take_value(i, argc, argv);
         } else if (a == "--motion-max-joint-vel") {
@@ -1392,10 +1429,17 @@ int run_robot_with_finally(const Args& args, const ml::LocoConfig& cfg, ml::Cont
                       << " max_gap_ms=" << args.rate.max_gap_s * 1000.0 << std::endl;
         }
         if (args.safety.enabled) {
-            std::cout << "[Safety] Motion safety: scope=" << args.safety.joint_scope
+            std::cout << "[Safety] Motion safety: preset=" << args.motion_safety_preset
+                      << " scope=" << args.safety.joint_scope
                       << " max_dq=" << args.safety.max_joint_vel
                       << " max_body_w=" << args.safety.max_ang_vel
-                      << " max_gxy=" << args.safety.max_gravity_xy << std::endl;
+                      << " max_gxy=" << args.safety.max_gravity_xy
+                      << " max_default_dev=" << args.safety.max_default_dev
+                      << " max_target_error=" << args.safety.max_target_error
+                      << " max_policy_dev=" << args.safety.max_policy_target_dev
+                      << " max_policy_jump=" << args.safety.max_policy_target_jump << std::endl;
+        } else {
+            std::cout << "[Safety] Motion safety: disabled" << std::endl;
         }
 
         if (debug_entry) {

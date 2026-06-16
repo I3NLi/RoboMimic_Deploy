@@ -65,6 +65,7 @@ fi
 
 echo "[Smoke] Checking README real safety ladder order"
 python3 - "${README_PATH}" "${README_ZH_PATH}" <<'PY'
+import re
 import sys
 from pathlib import Path
 
@@ -76,6 +77,7 @@ required = [
     "--pd-stand-only",
     "scripts/run_dual_push_smoke_native.sh",
     "--allow-loco",
+    "--motion-safety-preset relaxed",
 ]
 
 sections = [
@@ -105,6 +107,9 @@ for path, start_marker, end_marker, label in sections:
         sys.exit(1)
     if "--allow-loco" in section[: section.find("scripts/run_dual_push_smoke_native.sh")]:
         print(f"[Smoke][ERROR] {label} safety ladder must not allow LOCO before sim closed-loop smoke", file=sys.stderr)
+        sys.exit(1)
+    if re.search(r"(?m)^\s*--disable-motion-safety\b", section):
+        print(f"[Smoke][ERROR] {label} safety ladder must not disable motion safety", file=sys.stderr)
         sys.exit(1)
 
 remote_requirements = [
@@ -154,6 +159,51 @@ for path, label, required_items in remote_requirements:
             file=sys.stderr,
         )
         sys.exit(1)
+PY
+
+echo "[Smoke] Checking relaxed motion-safety preset remains guarded"
+python3 - "${RUNNER_SOURCE}" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+source = Path(sys.argv[1]).read_text(encoding="utf-8")
+
+required = [
+    "--motion-safety-preset",
+    "apply_motion_safety_preset",
+    'if (preset == "relaxed")',
+    "args.safety.enabled = true;",
+    "args.safety.joint_scope = \"body\";",
+    "args.safety.max_joint_vel = 35.0f;",
+    "args.safety.max_ang_vel = 12.0f;",
+    "args.safety.max_gravity_xy = 0.98f;",
+    "args.safety.max_default_dev = 2.2f;",
+    "args.safety.max_target_error = 1.8f;",
+    "args.safety.max_policy_target_dev = 0.0f;",
+    "args.safety.max_policy_target_jump = 0.0f;",
+]
+missing = [item for item in required if item not in source]
+if missing:
+    print(
+        "[Smoke][ERROR] relaxed safety preset is missing expected guarded thresholds: "
+        + ", ".join(missing),
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
+match = re.search(
+    r'if \(preset == "relaxed"\) \{(?P<body>.*?)\n    \}\n    throw std::runtime_error\("--motion-safety-preset',
+    source,
+    re.S,
+)
+if not match:
+    print("[Smoke][ERROR] could not parse relaxed motion-safety preset body", file=sys.stderr)
+    sys.exit(1)
+relaxed_body = match.group("body")
+if "enabled = false" in relaxed_body or "disable" in relaxed_body.lower():
+    print("[Smoke][ERROR] relaxed motion-safety preset must not disable safety", file=sys.stderr)
+    sys.exit(1)
 PY
 
 echo "[Smoke] Checking real runner wrapper rebuilds on shared headers"

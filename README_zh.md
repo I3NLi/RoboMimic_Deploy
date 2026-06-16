@@ -305,15 +305,13 @@ scripts/run_magicbot_loco_native.sh \
   --final-stand-hold-s 0.5 \
   --rate-watchdog-min-hz 180 \
   --rate-watchdog-max-gap-ms 80 \
-  --motion-safety-joint-scope body \
-  --motion-max-joint-vel 25 \
-  --motion-max-ang-vel 8 \
-  --motion-max-gravity-xy 0.95 \
-  --motion-max-default-dev 1.5 \
-  --motion-max-target-error 1.2 \
-  --motion-max-policy-target-dev 0 \
-  --motion-max-policy-target-jump 0
+  --motion-safety-preset relaxed
 ```
+
+`--motion-safety-preset relaxed` 不是 `--disable-motion-safety`。它仍保留
+数值合法、速度、机身倾斜、离默认姿态过远、命令目标误差过大的拦截，只放宽
+LOCO 前几帧很容易误触发的 policy target dev/jump。需要单独收紧或放宽某个
+阈值时，把对应 `--motion-max-*` 参数放在 preset 后面。
 
 交互输入只在完成前置站立后生效，不能跳过前面的站立和安全墙。启用键盘/手柄时，run loop 默认先保持 `STAND`，需要显式切到 `LOCO`。键盘控制：
 

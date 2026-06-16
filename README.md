@@ -316,15 +316,15 @@ scripts/run_magicbot_loco_native.sh \
   --final-stand-hold-s 0.5 \
   --rate-watchdog-min-hz 180 \
   --rate-watchdog-max-gap-ms 80 \
-  --motion-safety-joint-scope body \
-  --motion-max-joint-vel 25 \
-  --motion-max-ang-vel 8 \
-  --motion-max-gravity-xy 0.95 \
-  --motion-max-default-dev 1.5 \
-  --motion-max-target-error 1.2 \
-  --motion-max-policy-target-dev 0 \
-  --motion-max-policy-target-jump 0
+  --motion-safety-preset relaxed
 ```
+
+`--motion-safety-preset relaxed` is not the same as
+`--disable-motion-safety`. It keeps finite-state, velocity, body-tilt, default
+posture deviation, and command-target error stops, while relaxing the policy
+target dev/jump tripwires that are too easy to hit during the first LOCO
+frames. Put explicit `--motion-max-*` flags after the preset when a local test
+needs a tighter or looser single threshold.
 
 Interactive input is only applied after the staged stand sequence. With keyboard/gamepad enabled, the run loop starts in `STAND` and requires an explicit `LOCO` request. Keyboard control:
 
