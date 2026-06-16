@@ -310,8 +310,11 @@ scripts/run_magicbot_loco_native.sh \
 
 `--motion-safety-preset relaxed` 不是 `--disable-motion-safety`。它仍保留
 数值合法、速度、机身倾斜、离默认姿态过远、命令目标误差过大的拦截，只放宽
-LOCO 前几帧很容易误触发的 policy target dev/jump。需要单独收紧或放宽某个
-阈值时，把对应 `--motion-max-*` 参数放在 preset 后面。
+LOCO 前几帧很容易误触发的 policy target dev/jump。`--motion-safety-preset open`
+会彻底打开 motion-safety wall 的异常拦截，但仍保留倾角 `STAND` 保护：机身与
+地面夹角低于 `--tilt-stand-protect-min-angle-deg`（默认 25 度）时，会把
+LOCO/DANCE/SKILL 清回 `STAND`，不会做 reset。需要单独收紧或放宽某个阈值时，
+把对应 `--motion-max-*` 参数放在 preset 后面。
 
 交互输入只在完成前置站立后生效，不能跳过前面的站立和安全墙。启用键盘/手柄时，run loop 默认先保持 `STAND`，需要显式切到 `LOCO`。键盘控制：
 

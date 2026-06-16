@@ -323,8 +323,11 @@ scripts/run_magicbot_loco_native.sh \
 `--disable-motion-safety`. It keeps finite-state, velocity, body-tilt, default
 posture deviation, and command-target error stops, while relaxing the policy
 target dev/jump tripwires that are too easy to hit during the first LOCO
-frames. Put explicit `--motion-max-*` flags after the preset when a local test
-needs a tighter or looser single threshold.
+frames. `--motion-safety-preset open` fully opens the motion-safety wall stops,
+but still keeps tilt STAND protection: when the body-ground angle drops below
+`--tilt-stand-protect-min-angle-deg` (default 25), LOCO/DANCE/SKILL are cleared
+back to `STAND` without doing a reset. Put explicit `--motion-max-*` flags after
+the preset when a local test needs a tighter or looser single threshold.
 
 Interactive input is only applied after the staged stand sequence. With keyboard/gamepad enabled, the run loop starts in `STAND` and requires an explicit `LOCO` request. Keyboard control:
 

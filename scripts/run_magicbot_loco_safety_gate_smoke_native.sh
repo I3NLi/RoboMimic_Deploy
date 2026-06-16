@@ -193,7 +193,7 @@ if missing:
     sys.exit(1)
 
 match = re.search(
-    r'if \(preset == "relaxed"\) \{(?P<body>.*?)\n    \}\n    throw std::runtime_error\("--motion-safety-preset',
+    r'if \(preset == "relaxed"\) \{(?P<body>.*?)\n    \}\n    if \(preset == "open"',
     source,
     re.S,
 )
@@ -203,6 +203,26 @@ if not match:
 relaxed_body = match.group("body")
 if "enabled = false" in relaxed_body or "disable" in relaxed_body.lower():
     print("[Smoke][ERROR] relaxed motion-safety preset must not disable safety", file=sys.stderr)
+    sys.exit(1)
+
+open_required = [
+    'if (preset == "open" || preset == "unlocked" || preset == "off")',
+    'args.motion_safety_preset = "open";',
+    "args.safety.enabled = false;",
+    "args.tilt_stand_protect = true;",
+    "tilt_stand_protection_triggered",
+    "body_ground_angle_deg",
+    "entering STAND protection",
+    "core.seed_target(command_target);",
+    "pending_mode_request = ml::mode_request_for_control_mode(ml::ControlMode::Stand);",
+]
+missing = [item for item in open_required if item not in source]
+if missing:
+    print(
+        "[Smoke][ERROR] open safety preset must disable wall stops while keeping tilt STAND protection: "
+        + ", ".join(missing),
+        file=sys.stderr,
+    )
     sys.exit(1)
 PY
 

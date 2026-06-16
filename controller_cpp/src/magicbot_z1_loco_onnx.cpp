@@ -11,6 +11,7 @@
 #include <atomic>
 #include <cerrno>
 #include <chrono>
+#include <cmath>
 #include <csignal>
 #include <cstring>
 #include <cstdlib>
@@ -125,6 +126,8 @@ struct Args {
     ml::RateWatchdogConfig rate;
     ml::SafetyConfig safety;
     std::string motion_safety_preset{"strict"};
+    bool tilt_stand_protect{true};
+    float tilt_stand_min_body_ground_angle_deg{25.0f};
     double log_interval{1.0};
 };
 
@@ -162,7 +165,10 @@ void print_usage(const char* argv0)
         << "  --final-stand-hold-s S           Stand hold before final damping\n"
         << "  --hold-final-stand               Hold final stand until signal\n"
         << "  --max-target-rate R              Max target slew rate in rad/s, default 25\n"
-        << "  --motion-safety-preset P         strict or relaxed; relaxed keeps hard stops but allows broad LOCO motion\n"
+        << "  --motion-safety-preset P         strict, relaxed, or open; open disables wall stops but keeps tilt stand protect\n"
+        << "  --tilt-stand-protect-min-angle-deg D\n"
+        << "                                   Enter STAND if body-ground angle drops below D, default 25\n"
+        << "  --disable-tilt-stand-protect     Disable body tilt STAND protection\n"
         << "\n"
         << "Operator input:\n"
         << "  --keyboard-control               Live terminal keyboard input in run loop\n"
@@ -238,7 +244,20 @@ void apply_motion_safety_preset(Args& args, const std::string& raw_preset)
         args.safety.max_policy_target_jump = 0.0f;
         return;
     }
-    throw std::runtime_error("--motion-safety-preset must be strict or relaxed");
+    if (preset == "open" || preset == "unlocked" || preset == "off") {
+        args.motion_safety_preset = "open";
+        args.safety.enabled = false;
+        args.safety.max_joint_vel = 0.0f;
+        args.safety.max_ang_vel = 0.0f;
+        args.safety.max_gravity_xy = 0.0f;
+        args.safety.max_default_dev = 0.0f;
+        args.safety.max_target_error = 0.0f;
+        args.safety.max_policy_target_dev = 0.0f;
+        args.safety.max_policy_target_jump = 0.0f;
+        args.tilt_stand_protect = true;
+        return;
+    }
+    throw std::runtime_error("--motion-safety-preset must be strict, relaxed, or open");
 }
 
 void apply_gamepad_profile(Args& args, const std::string& raw_profile)
@@ -470,6 +489,11 @@ Args parse_args(int argc, char** argv)
         } else if (a == "--disable-motion-safety") {
             args.safety.enabled = false;
             args.motion_safety_preset = "disabled";
+        } else if (a == "--tilt-stand-protect-min-angle-deg") {
+            args.tilt_stand_min_body_ground_angle_deg = std::stof(take_value(i, argc, argv));
+            args.tilt_stand_protect = true;
+        } else if (a == "--disable-tilt-stand-protect") {
+            args.tilt_stand_protect = false;
         } else if (a == "--motion-safety-joint-scope") {
             args.safety.joint_scope = take_value(i, argc, argv);
         } else if (a == "--motion-max-joint-vel") {
@@ -517,6 +541,8 @@ Args parse_args(int argc, char** argv)
     args.input_deadzone = std::clamp(args.input_deadzone, 0.0f, 0.95f);
     args.udp_port = std::clamp(args.udp_port, 1, 65535);
     args.udp_timeout_s = std::clamp(args.udp_timeout_s, 0.02, 10.0);
+    args.tilt_stand_min_body_ground_angle_deg =
+        std::clamp(args.tilt_stand_min_body_ground_angle_deg, 1.0f, 89.0f);
     return args;
 }
 
@@ -1221,6 +1247,27 @@ void dry_run_external_policy(
               << yaml_path << std::endl;
 }
 
+float body_ground_angle_deg(const ml::RobotSnapshot& snapshot)
+{
+    constexpr float kRadToDeg = 57.29577951308232f;
+    const auto gravity = ml::gravity_orientation(snapshot.quat);
+    const float vertical_component = std::clamp(std::fabs(gravity[2]), 0.0f, 1.0f);
+    if (!std::isfinite(vertical_component)) return 0.0f;
+    return std::asin(vertical_component) * kRadToDeg;
+}
+
+bool tilt_stand_protection_triggered(
+    const Args& args,
+    ml::ControlMode mode,
+    const ml::RobotSnapshot& snapshot,
+    float* angle_deg)
+{
+    if (!args.tilt_stand_protect || !ml::is_policy_mode(mode)) return false;
+    const float angle = body_ground_angle_deg(snapshot);
+    if (angle_deg != nullptr) *angle_deg = angle;
+    return angle < args.tilt_stand_min_body_ground_angle_deg;
+}
+
 ml::JointTarget make_position_joint_target(
     const ml::JointArray& q,
     const ml::JointArray& kp,
@@ -1536,6 +1583,12 @@ int run_robot_with_finally(const Args& args, const ml::LocoConfig& cfg, ml::Cont
         } else {
             std::cout << "[Safety] Motion safety: disabled" << std::endl;
         }
+        if (args.tilt_stand_protect) {
+            std::cout << "[Safety] Tilt stand protection: min_body_ground_angle_deg="
+                      << args.tilt_stand_min_body_ground_angle_deg << std::endl;
+        } else {
+            std::cout << "[Safety] Tilt stand protection: disabled" << std::endl;
+        }
 
         if (debug_entry) {
             publish_damping_for_duration(robot, state, core, args, rate_watchdog, args.debug_entry_passive_s);
@@ -1688,6 +1741,23 @@ int run_robot_with_finally(const Args& args, const ml::LocoConfig& cfg, ml::Cont
                         }
                         std::cout << std::endl;
                     }
+                }
+
+                float body_ground_angle = 90.0f;
+                const ml::RobotSnapshot protection_snapshot = state.snapshot();
+                if (tilt_stand_protection_triggered(args, run_mode, protection_snapshot, &body_ground_angle)) {
+                    std::cout << "[Safety] Body-ground angle " << body_ground_angle
+                              << "deg below " << args.tilt_stand_min_body_ground_angle_deg
+                              << "deg; entering STAND protection" << std::endl;
+                    raw_cmd = {0.0f, 0.0f, 0.0f};
+                    command_target = protection_snapshot.q;
+                    core.seed_target(command_target);
+                    core.reset_policy();
+                    run_mode = ml::ControlMode::Stand;
+                    run_external_policy_key.clear();
+                    pending_mode_request = ml::mode_request_for_control_mode(ml::ControlMode::Stand);
+                    next_control_t = std::chrono::steady_clock::now();
+                    last_log = next_control_t - std::chrono::seconds(60);
                 }
 
                 ml::RuntimeTickInput tick_input;
