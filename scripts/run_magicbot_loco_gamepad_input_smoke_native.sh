@@ -115,12 +115,14 @@ if profile_start < 0 or profile_end < 0:
 profile_body = source[profile_start:profile_end]
 profile_required = [
     "args.gamepad_stop_button = -1;",
-    "args.gamepad_passive_button = 7;",
+    "args.gamepad_loco_button = 0;",
+    "args.gamepad_passive_button = 11;",
     "args.gamepad_stand_button = 3;",
     "args.gamepad_zero_button = -1;",
     "args.gamepad_pause_button = -1;",
-    "args.gamepad_dance_button = 2;",
-    "args.gamepad_skill_button = 8;",
+    "args.gamepad_reset_button = 10;",
+    "args.gamepad_dance_button = 4;",
+    "args.gamepad_skill_button = 7;",
 ]
 missing_profile = [item for item in profile_required if item not in profile_body]
 if missing_profile:

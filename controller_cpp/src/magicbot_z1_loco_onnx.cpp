@@ -295,13 +295,13 @@ void apply_gamepad_profile(Args& args, const std::string& raw_profile)
         args.gamepad_deadman_button = -1;
         args.gamepad_stop_button = -1;
         args.gamepad_loco_button = 0;
-        args.gamepad_passive_button = 7;
+        args.gamepad_passive_button = 11;
         args.gamepad_stand_button = 3;
         args.gamepad_zero_button = -1;
         args.gamepad_pause_button = -1;
-        args.gamepad_reset_button = 6;
-        args.gamepad_dance_button = 2;
-        args.gamepad_skill_button = 8;
+        args.gamepad_reset_button = 10;
+        args.gamepad_dance_button = 4;
+        args.gamepad_skill_button = 7;
         args.gamepad_safety_button = 9;
         return;
     }
