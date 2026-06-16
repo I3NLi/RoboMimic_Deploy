@@ -193,7 +193,7 @@ if missing:
     sys.exit(1)
 
 match = re.search(
-    r'if \(preset == "relaxed"\) \{(?P<body>.*?)\n    \}\n    if \(preset == "open"',
+    r'if \(preset == "relaxed"\) \{(?P<body>.*?)\n    \}\n    if \(preset == "permissive"',
     source,
     re.S,
 )
@@ -203,6 +203,28 @@ if not match:
 relaxed_body = match.group("body")
 if "enabled = false" in relaxed_body or "disable" in relaxed_body.lower():
     print("[Smoke][ERROR] relaxed motion-safety preset must not disable safety", file=sys.stderr)
+    sys.exit(1)
+
+permissive_required = [
+    'if (preset == "permissive" || preset == "wide")',
+    'args.motion_safety_preset = "permissive";',
+    "args.safety.enabled = true;",
+    "args.safety.joint_scope = \"body\";",
+    "args.safety.max_joint_vel = 80.0f;",
+    "args.safety.max_ang_vel = 25.0f;",
+    "args.safety.max_gravity_xy = 1.05f;",
+    "args.safety.max_default_dev = 4.0f;",
+    "args.safety.max_target_error = 3.0f;",
+    "args.safety.max_policy_target_dev = 0.0f;",
+    "args.safety.max_policy_target_jump = 0.0f;",
+]
+missing = [item for item in permissive_required if item not in source]
+if missing:
+    print(
+        "[Smoke][ERROR] permissive safety preset is missing expected wide guarded thresholds: "
+        + ", ".join(missing),
+        file=sys.stderr,
+    )
     sys.exit(1)
 
 open_required = [
@@ -543,14 +565,19 @@ if ! grep -Fq -- '--input-check requires --keyboard-control, --gamepad-control o
 fi
 assert_no_robot_path "${input_source_log}"
 
-echo "[Smoke] Checking live input sources are mutually exclusive before connection"
-if "${RUNNER}" --run --allow-loco --keyboard-control --udp-control --duration 0.01 >"${live_input_log}" 2>&1; then
-    echo "[Smoke][ERROR] multiple live input sources unexpectedly succeeded" >&2
+echo "[Smoke] Checking combined live input sources reach network preflight"
+if "${RUNNER}" --run --allow-loco --keyboard-control --udp-control --duration 0.01 --local-ip 203.0.113.254 >"${live_input_log}" 2>&1; then
+    echo "[Smoke][ERROR] combined live input sources unexpectedly passed with an unassigned local IP" >&2
     sed -n '1,180p' "${live_input_log}" >&2
     exit 1
 fi
-if ! grep -Fq -- 'use only one of --keyboard-control, --gamepad-control or --udp-control' "${live_input_log}"; then
-    echo "[Smoke][ERROR] live-input failure did not report exclusivity gate" >&2
+if grep -Fq -- 'use only one of --keyboard-control, --gamepad-control or --udp-control' "${live_input_log}"; then
+    echo "[Smoke][ERROR] combined live input sources were incorrectly blocked by exclusivity gate" >&2
+    sed -n '1,180p' "${live_input_log}" >&2
+    exit 1
+fi
+if ! grep -Eq 'local IP 203\.0\.113\.254 is not assigned to this machine' "${live_input_log}"; then
+    echo "[Smoke][ERROR] combined live input sources did not stop at local-IP preflight" >&2
     sed -n '1,180p' "${live_input_log}" >&2
     exit 1
 fi

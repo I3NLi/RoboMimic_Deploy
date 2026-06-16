@@ -108,6 +108,9 @@ struct Args {
     float gamepad_vx_accel_rate{1.2f};
     float gamepad_vx_brake_rate{1.8f};
     float gamepad_vx_coast_rate{0.7f};
+    bool yaw_gyro_compensation{false};
+    float yaw_gyro_compensation_gain{0.35f};
+    float yaw_gyro_compensation_limit{0.25f};
     int gamepad_deadman_button{-1};
     int gamepad_stop_button{8};
     int gamepad_loco_button{0};
@@ -176,7 +179,7 @@ void print_usage(const char* argv0)
         << "  --final-stand-hold-s S           Stand hold before final damping\n"
         << "  --hold-final-stand               Hold final stand until signal\n"
         << "  --max-target-rate R              Max target slew rate in rad/s, default 25\n"
-        << "  --motion-safety-preset P         strict, relaxed, or open; open disables wall stops but keeps tilt stand protect\n"
+        << "  --motion-safety-preset P         strict, relaxed, permissive, or open; open disables wall stops\n"
         << "  --tilt-stand-protect-min-angle-deg D\n"
         << "                                   Enter STAND if body-ground angle drops below D, default 25\n"
         << "  --disable-tilt-stand-protect     Disable body tilt STAND protection\n"
@@ -216,6 +219,10 @@ void print_usage(const char* argv0)
         << "  --gamepad-vx-accel-rate R        Normalized vx/s while accelerating, KP20 default 0.8\n"
         << "  --gamepad-vx-brake-rate R        Normalized vx/s while braking/reversing, KP20 default 1.2\n"
         << "  --gamepad-vx-coast-rate R        Normalized vx/s back to zero after release, KP20 default 0.45\n"
+        << "  --yaw-gyro-compensation          Dampen normalized wz with measured IMU yaw rate\n"
+        << "  --disable-yaw-gyro-compensation  Disable IMU yaw-rate damping\n"
+        << "  --yaw-gyro-compensation-gain G   Yaw-rate damping gain, KP20 default 0.35\n"
+        << "  --yaw-gyro-compensation-limit L  Max normalized damping correction, KP20 default 0.25\n"
         << "  --gamepad-deadman-button N       Button that must be held for nonzero command, default disabled (-1)\n"
         << "  --gamepad-stop-button N          Button that stops run loop, default 8 (L3)\n"
         << "  --gamepad-loco-button N          Button that enters LOCO, default 0\n"
@@ -271,6 +278,20 @@ void apply_motion_safety_preset(Args& args, const std::string& raw_preset)
         args.safety.max_policy_target_jump = 0.0f;
         return;
     }
+    if (preset == "permissive" || preset == "wide") {
+        args.motion_safety_preset = "permissive";
+        args.safety.enabled = true;
+        args.safety.joint_scope = "body";
+        args.safety.max_joint_vel = 80.0f;
+        args.safety.max_ang_vel = 25.0f;
+        args.safety.max_gravity_xy = 1.05f;
+        args.safety.max_default_dev = 4.0f;
+        args.safety.max_target_error = 3.0f;
+        args.safety.max_policy_target_dev = 0.0f;
+        args.safety.max_policy_target_jump = 0.0f;
+        args.tilt_stand_protect = true;
+        return;
+    }
     if (preset == "open" || preset == "unlocked" || preset == "off") {
         args.motion_safety_preset = "open";
         args.safety.enabled = false;
@@ -284,7 +305,7 @@ void apply_motion_safety_preset(Args& args, const std::string& raw_preset)
         args.tilt_stand_protect = true;
         return;
     }
-    throw std::runtime_error("--motion-safety-preset must be strict, relaxed, or open");
+    throw std::runtime_error("--motion-safety-preset must be strict, relaxed, permissive, or open");
 }
 
 void apply_gamepad_profile(Args& args, const std::string& raw_profile)
@@ -306,6 +327,7 @@ void apply_gamepad_profile(Args& args, const std::string& raw_profile)
         args.gamepad_axis_vy_negative_limit = 1.0f;
         args.gamepad_axis_wz_scale = 1.0f;
         args.gamepad_vx_slew = false;
+        args.yaw_gyro_compensation = false;
         args.gamepad_deadman_button = -1;
         args.gamepad_stop_button = 8;
         args.gamepad_loco_button = 0;
@@ -333,11 +355,14 @@ void apply_gamepad_profile(Args& args, const std::string& raw_profile)
         args.gamepad_axis_vx_direct_negative_limit = 0.6f;
         args.gamepad_axis_vy_positive_limit = 1.0f;
         args.gamepad_axis_vy_negative_limit = 1.0f;
-        args.gamepad_axis_wz_scale = 0.25f;
+        args.gamepad_axis_wz_scale = 0.5f;
         args.gamepad_vx_slew = true;
         args.gamepad_vx_accel_rate = 0.8f;
         args.gamepad_vx_brake_rate = 1.2f;
         args.gamepad_vx_coast_rate = 0.45f;
+        args.yaw_gyro_compensation = true;
+        args.yaw_gyro_compensation_gain = 0.35f;
+        args.yaw_gyro_compensation_limit = 0.25f;
         args.gamepad_deadman_button = -1;
         args.gamepad_stop_button = -1;
         args.gamepad_loco_button = 0;
@@ -494,6 +519,14 @@ Args parse_args(int argc, char** argv)
             args.gamepad_vx_brake_rate = std::stof(take_value(i, argc, argv));
         } else if (a == "--gamepad-vx-coast-rate") {
             args.gamepad_vx_coast_rate = std::stof(take_value(i, argc, argv));
+        } else if (a == "--yaw-gyro-compensation") {
+            args.yaw_gyro_compensation = true;
+        } else if (a == "--disable-yaw-gyro-compensation") {
+            args.yaw_gyro_compensation = false;
+        } else if (a == "--yaw-gyro-compensation-gain") {
+            args.yaw_gyro_compensation_gain = std::stof(take_value(i, argc, argv));
+        } else if (a == "--yaw-gyro-compensation-limit") {
+            args.yaw_gyro_compensation_limit = std::stof(take_value(i, argc, argv));
         } else if (a == "--gamepad-deadman-button") {
             args.gamepad_deadman_button = std::stoi(take_value(i, argc, argv));
         } else if (a == "--gamepad-stop-button") {
@@ -614,6 +647,8 @@ Args parse_args(int argc, char** argv)
     args.gamepad_vx_accel_rate = std::clamp(args.gamepad_vx_accel_rate, 0.01f, 10.0f);
     args.gamepad_vx_brake_rate = std::clamp(args.gamepad_vx_brake_rate, 0.01f, 10.0f);
     args.gamepad_vx_coast_rate = std::clamp(args.gamepad_vx_coast_rate, 0.01f, 10.0f);
+    args.yaw_gyro_compensation_gain = std::clamp(args.yaw_gyro_compensation_gain, 0.0f, 5.0f);
+    args.yaw_gyro_compensation_limit = std::clamp(args.yaw_gyro_compensation_limit, 0.0f, 1.0f);
     args.udp_port = std::clamp(args.udp_port, 1, 65535);
     args.udp_timeout_s = std::clamp(args.udp_timeout_s, 0.02, 10.0);
     args.tilt_stand_min_body_ground_angle_deg =
@@ -1351,6 +1386,9 @@ public:
                       << " vx_rates(accel,brake,coast)=[" << args.gamepad_vx_accel_rate
                       << " " << args.gamepad_vx_brake_rate
                       << " " << args.gamepad_vx_coast_rate << "]"
+                      << " yaw_gyro_comp=" << (args.yaw_gyro_compensation ? "yes" : "no")
+                      << " yaw_gyro(gain,limit)=[" << args.yaw_gyro_compensation_gain
+                      << " " << args.yaw_gyro_compensation_limit << "]"
                       << " stop_button=" << args.gamepad_stop_button
                       << " loco_button=" << args.gamepad_loco_button
                       << " passive_button=" << args.gamepad_passive_button
@@ -1540,6 +1578,30 @@ bool tilt_stand_protection_triggered(
     const float angle = body_ground_angle_deg(snapshot);
     if (angle_deg != nullptr) *angle_deg = angle;
     return angle < args.tilt_stand_min_body_ground_angle_deg;
+}
+
+std::array<float, 3> apply_yaw_gyro_compensation(
+    const Args& args,
+    const ml::LocoConfig& cfg,
+    ml::ControlMode mode,
+    const ml::RobotSnapshot& snapshot,
+    std::array<float, 3> command)
+{
+    if (!args.yaw_gyro_compensation || mode != ml::ControlMode::Loco) return command;
+    const float max_wz = std::max(std::fabs(cfg.cmd_range.wz[0]), std::fabs(cfg.cmd_range.wz[1]));
+    if (max_wz <= 1e-6f || args.yaw_gyro_compensation_gain <= 0.0f) return command;
+    const float yaw_rate = snapshot.ang_vel[2];
+    if (!std::isfinite(yaw_rate)) return command;
+
+    const float user_wz = std::clamp(command[2], -1.0f, 1.0f);
+    const float release_weight = std::clamp(1.0f - std::fabs(user_wz), 0.0f, 1.0f);
+    float correction = -yaw_rate / max_wz * args.yaw_gyro_compensation_gain * release_weight;
+    correction = std::clamp(
+        correction,
+        -args.yaw_gyro_compensation_limit,
+        args.yaw_gyro_compensation_limit);
+    command[2] = clamp_command(user_wz + correction);
+    return command;
 }
 
 ml::JointTarget make_position_joint_target(
@@ -2032,6 +2094,8 @@ int run_robot_with_finally(const Args& args, const ml::LocoConfig& cfg, ml::Cont
                     pending_mode_request = ml::mode_request_for_control_mode(ml::ControlMode::Stand);
                     next_control_t = std::chrono::steady_clock::now();
                     last_log = next_control_t - std::chrono::seconds(60);
+                } else {
+                    raw_cmd = apply_yaw_gyro_compensation(args, cfg, run_mode, protection_snapshot, raw_cmd);
                 }
 
                 ml::RuntimeTickInput tick_input;
